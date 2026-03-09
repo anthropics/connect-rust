@@ -1,0 +1,94 @@
+[workspace]
+members = ["connectrpc", "connectrpc-codegen", "connectrpc-build", "protoc-gen-connect-rust", "conformance", "examples/eliza", "examples/multiservice", "tests/streaming", "benches/rpc", "benches/rpc-tonic"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/anthropics/connect-rust"
+keywords = ["connectrpc", "grpc", "rpc", "protobuf", "tower"]
+categories = ["network-programming", "web-programming::http-server", "web-programming::http-client"]
+
+[workspace.dependencies]
+# Core HTTP types
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+bytes = { version = "1.5", features = ["serde"] }
+
+# Tower service abstraction
+tower = { version = "0.5", features = ["util", "buffer"] }
+tower-http = { version = "0.6", features = ["catch-panic"] }
+
+# Async runtime
+tokio = { version = "1", features = ["macros", "net", "time", "sync", "signal", "rt", "rt-multi-thread", "io-util"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+pin-project = "1"
+
+# Protobuf
+buffa = { version = "0.1", features = ["json"] }
+buffa-types = { version = "0.1", features = ["json"] }
+buffa-codegen = { version = "0.1" }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Compression
+flate2 = "1.0"
+zstd = "0.13"
+async-compression = { version = "0.4", features = ["tokio"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Utilities
+percent-encoding = "2.3"
+base64 = "0.22"
+tracing = "0.1"
+
+# HTTP server/client
+hyper = "1"
+hyper-util = "0"
+
+# TLS
+rustls = "0.23"
+rustls-pemfile = "2"
+rustls-pki-types = "1"
+tokio-rustls = "0.26"
+# No crypto provider feature here — tokio-rustls already pulls in aws-lc-rs.
+# Enabling a second provider (ring) would make rustls's builder() panic at
+# runtime because it can't auto-detect which one to use.
+hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "tls12"] }
+
+# Framework integration
+axum = { version = "0.8", features = ["http2"] }
+
+# OS types
+libc = "0.2"
+
+# Code generation utilities
+heck = "0.5"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+prettyplease = "0.2"
+
+# Dev dependencies
+tempfile = "3"
+
+[workspace.lints.rust]
+dead_code = "warn"
+explicit_outlives_requirements = "warn"
+unused_imports = "warn"
+unused_lifetimes = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+uninlined_format_args = "warn"
+# ConnectError carries HeaderMaps for response metadata which makes it large.
+# Error handling is not on the hot path; carrying metadata in errors is worth the size.
+result_large_err = "allow"

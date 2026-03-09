@@ -1,0 +1,14 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/go:v1.36.6
+    out: gen
+    opt:
+      - paths=source_relative
+      - Mbench.proto=github.com/anthropics/connect-rust/benches/rpc-go/gen
+      - Mfortune.proto=github.com/anthropics/connect-rust/benches/rpc-go/gen
+  - remote: buf.build/connectrpc/go:v1.19.1
+    out: gen
+    opt:
+      - paths=source_relative
+      - Mbench.proto=github.com/anthropics/connect-rust/benches/rpc-go/gen
+      - Mfortune.proto=github.com/anthropics/connect-rust/benches/rpc-go/gen

@@ -1,0 +1,36 @@
+---
+# Conformance test configuration for Connect protocol only
+#
+# This configuration limits tests to what connectrpc currently supports:
+# - Connect protocol (not gRPC or gRPC-Web)
+# - Unary and server streaming RPCs
+# - HTTP/1.1 and HTTP/2 over cleartext (no TLS)
+# - Proto and JSON codecs
+# - Identity and gzip compression
+
+features:
+    versions:
+        - HTTP_VERSION_1
+        - HTTP_VERSION_2
+    protocols:
+        - PROTOCOL_CONNECT
+    codecs:
+        - CODEC_PROTO
+        - CODEC_JSON
+    compressions:
+        - COMPRESSION_IDENTITY
+        - COMPRESSION_GZIP
+        - COMPRESSION_ZSTD
+    stream_types:
+        - STREAM_TYPE_UNARY
+        - STREAM_TYPE_SERVER_STREAM
+        - STREAM_TYPE_CLIENT_STREAM
+        - STREAM_TYPE_HALF_DUPLEX_BIDI_STREAM
+        - STREAM_TYPE_FULL_DUPLEX_BIDI_STREAM
+    supports_h2c: true
+    supports_tls: false
+    supports_tls_client_certs: false
+    supports_trailers: true
+    supports_connect_get: true
+    supports_message_receive_limit: true
+    supports_half_duplex_bidi_over_http1: true

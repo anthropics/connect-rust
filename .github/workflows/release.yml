@@ -1,0 +1,145 @@
+name: Release protoc-gen-connect-rust
+
+# Triggered by pushing a tag like v0.1.0.
+# Builds binaries for Linux (x86_64, aarch64) and macOS (x86_64, aarch64),
+# creates a GitHub release with the binaries, SHA-256 checksums, and
+# cosign signatures.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write      # create releases and upload assets
+  id-token: write      # Sigstore OIDC (cosign + GitHub attestations)
+  attestations: write  # GitHub native attestation API
+
+env:
+  BINARY: protoc-gen-connect-rust
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            name: linux-x86_64
+            ext: ""
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            name: linux-aarch64
+            ext: ""
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: darwin-x86_64
+            ext: ""
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: darwin-aarch64
+            ext: ""
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: windows-x86_64
+            ext: ".exe"
+
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # musl cross-compilation tools for Linux targets.
+      - name: Install musl tools (Linux)
+        if: contains(matrix.target, 'linux')
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          # For aarch64 cross-compilation
+          if [[ "$TARGET" == "aarch64"* ]]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu
+            echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --target "$TARGET" --bin "$BINARY"
+
+      - name: Package
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          TARGET: ${{ matrix.target }}
+          PLATFORM_NAME: ${{ matrix.name }}
+          EXT: ${{ matrix.ext }}
+        run: |
+          ASSET="${BINARY}-${REF_NAME}-${PLATFORM_NAME}${EXT}"
+          cp "target/${TARGET}/release/${BINARY}${EXT}" "$ASSET"
+          echo "ASSET=$ASSET" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ASSET }}
+          path: ${{ env.ASSET }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: |
+          sha256sum ${{ env.BINARY }}-* > checksums-sha256.txt
+          cat checksums-sha256.txt
+
+      # GitHub-native signed SLSA provenance. Stored in the GitHub
+      # attestation API, verifiable without downloading sig/pem:
+      #   gh attestation verify <binary> --repo <owner>/connect-rust
+      #
+      # Runs before cosign so the glob matches only the binaries.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: artifacts/${{ env.BINARY }}-*
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign artifacts with cosign (keyless)
+        working-directory: artifacts
+        env:
+          BINARY: ${{ env.BINARY }}
+        run: |
+          for file in "${BINARY}"-*; do
+            cosign sign-blob --yes \
+              --output-signature "${file}.sig" \
+              --output-certificate "${file}.pem" \
+              "$file"
+          done
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/${{ env.BINARY }}-*
+            artifacts/checksums-sha256.txt

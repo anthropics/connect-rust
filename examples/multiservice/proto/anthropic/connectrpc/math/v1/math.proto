@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package anthropic.connectrpc.math.v1;
+
+// MathService provides basic math operations.
+service MathService {
+  // Add returns the sum of two numbers.
+  rpc Add(AddRequest) returns (AddResponse);
+}
+
+// AddRequest is the request message for the Add RPC.
+message AddRequest {
+  // First number to add.
+  int32 a = 1;
+  // Second number to add.
+  int32 b = 2;
+}
+
+// AddResponse is the response message for the Add RPC.
+message AddResponse {
+  // The result of the addition.
+  int32 result = 1;
+}

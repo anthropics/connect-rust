@@ -1,0 +1,65 @@
+[package]
+name = "eliza-example"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "eliza-server"
+path = "src/main.rs"
+
+[[bin]]
+name = "eliza-client"
+path = "src/client.rs"
+
+[dependencies]
+connectrpc = { path = "../../connectrpc", features = ["axum", "client", "server"] }
+
+# Protobuf
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+
+# Serialization (for generated message types)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP types (for generated client bounds)
+http-body = { workspace = true }
+http = { workspace = true }
+
+# Async
+tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
+
+# Web framework
+axum = { workspace = true }
+
+# ELIZA bot dependencies
+rand = "0.9"
+regex = "1"
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# TLS (optional — for https:// client endpoints and TLS/mTLS server)
+webpki-roots = { version = "0.26", optional = true }
+rustls-pemfile = { workspace = true, optional = true }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive", "env"] }
+humantime = "2"
+
+[features]
+# Enable TLS for both server (Server::with_tls, optional mTLS via client-ca)
+# and client (HttpClient::with_tls, optional mTLS via client cert+key).
+# Pulls in connectrpc's tls meta-feature + webpki-roots for the default
+# client trust store + rustls-pemfile for loading PEM files from disk.
+#
+# Server: cargo run --bin eliza-server --features tls -- --cert server.pem --key server.key
+# Client: cargo run --bin eliza-client --features tls -- --url https://localhost:8443
+tls = ["connectrpc/tls", "dep:webpki-roots", "dep:rustls-pemfile"]
+
+[lints]
+workspace = true

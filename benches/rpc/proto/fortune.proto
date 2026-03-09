@@ -1,0 +1,17 @@
+syntax = "proto3";
+package fortune.v1;
+
+service FortuneService {
+  rpc GetFortunes(GetFortunesRequest) returns (GetFortunesResponse);
+}
+
+message GetFortunesRequest {}
+
+message GetFortunesResponse {
+  repeated Fortune fortunes = 1;
+}
+
+message Fortune {
+  int32 id = 1;
+  string message = 2;
+}

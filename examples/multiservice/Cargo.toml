@@ -1,0 +1,43 @@
+[package]
+name = "multiservice-example"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "multiservice-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "multiservice-client"
+path = "src/bin/client.rs"
+
+[dependencies]
+connectrpc = { path = "../../connectrpc", features = ["server", "axum", "client"] }
+
+# Protobuf
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+
+# Serialization (for generated message types)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP types
+http = { workspace = true }
+http-body = { workspace = true }
+
+# Async
+tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
+
+# Web framework
+axum = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

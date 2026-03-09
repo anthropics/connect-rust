@@ -1,0 +1,26 @@
+[package]
+name = "connectrpc-codegen"
+version = "0.2.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Library for generating ConnectRPC Rust service bindings from proto descriptors"
+keywords = ["connectrpc", "grpc", "protobuf", "codegen"]
+categories = ["development-tools::build-utils"]
+
+[dependencies]
+# Protobuf code generation
+buffa-codegen = { workspace = true }
+
+# Code generation
+heck = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true }
+prettyplease = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+[lints]
+workspace = true

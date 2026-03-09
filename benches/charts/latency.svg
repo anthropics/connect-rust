@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="750" height="367" viewBox="0 0 750 367">
+  <style>
+    text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .title { font-size: 16px; font-weight: 600; fill: #24292f; }
+    .label { font-size: 12px; fill: #24292f; }
+    .value { font-size: 11px; fill: #57606a; }
+    .axis-label { font-size: 11px; fill: #57606a; }
+    .legend-text { font-size: 12px; fill: #24292f; }
+    .grid { stroke: #d0d7de; stroke-width: 0.5; }
+  </style>
+  <rect width="100%" height="100%" fill="white"/>
+  <text x="375.0" y="25" text-anchor="middle" class="title">Single-request latency (criterion, concurrency=1)</text>
+  <rect x="140" y="35" width="14" height="14" rx="2" fill="#4C78A8"/>
+  <text x="158" y="46" class="legend-text">connectrpc-rs</text>
+  <rect x="269.5" y="35" width="14" height="14" rx="2" fill="#F58518"/>
+  <text x="287.5" y="46" class="legend-text">tonic</text>
+  <line x1="140.0" y1="80" x2="140.0" y2="332" class="grid"/>
+  <text x="140.0" y="347" text-anchor="middle" class="axis-label">0.0</text>
+  <line x1="244.0" y1="80" x2="244.0" y2="332" class="grid"/>
+  <text x="244.0" y="347" text-anchor="middle" class="axis-label">80</text>
+  <line x1="348.0" y1="80" x2="348.0" y2="332" class="grid"/>
+  <text x="348.0" y="347" text-anchor="middle" class="axis-label">160</text>
+  <line x1="452.0" y1="80" x2="452.0" y2="332" class="grid"/>
+  <text x="452.0" y="347" text-anchor="middle" class="axis-label">240</text>
+  <line x1="556.0" y1="80" x2="556.0" y2="332" class="grid"/>
+  <text x="556.0" y="347" text-anchor="middle" class="axis-label">320</text>
+  <line x1="660.0" y1="80" x2="660.0" y2="332" class="grid"/>
+  <text x="660.0" y="347" text-anchor="middle" class="axis-label">400</text>
+  <text x="400.0" y="362" text-anchor="middle" class="axis-label">microseconds (lower is better)</text>
+  <text x="130" y="108.0" text-anchor="end" class="label">unary_small</text>
+  <rect x="140" y="80.0" width="113.9" height="22" rx="2" fill="#4C78A8"/>
+  <text x="257.9" y="95.0" class="value">87.6</text>
+  <rect x="140" y="106.0" width="222.0" height="22" rx="2" fill="#F58518"/>
+  <text x="366.0" y="121.0" class="value">170.8</text>
+  <text x="130" y="176.0" text-anchor="end" class="label">unary_logs_50</text>
+  <rect x="140" y="148.0" width="253.5" height="22" rx="2" fill="#4C78A8"/>
+  <text x="397.5" y="163.0" class="value">195.0</text>
+  <rect x="140" y="174.0" width="440.1" height="22" rx="2" fill="#F58518"/>
+  <text x="584.0" y="189.0" class="value">338.5</text>
+  <text x="130" y="244.0" text-anchor="end" class="label">client_stream</text>
+  <rect x="140" y="216.0" width="215.9" height="22" rx="2" fill="#4C78A8"/>
+  <text x="359.9" y="231.0" class="value">166.1</text>
+  <rect x="140" y="242.0" width="290.9" height="22" rx="2" fill="#F58518"/>
+  <text x="434.9" y="257.0" class="value">223.8</text>
+  <text x="130" y="312.0" text-anchor="end" class="label">server_stream</text>
+  <rect x="140" y="284.0" width="142.7" height="22" rx="2" fill="#4C78A8"/>
+  <text x="286.7" y="299.0" class="value">109.8</text>
+  <rect x="140" y="310.0" width="143.1" height="22" rx="2" fill="#F58518"/>
+  <text x="287.1" y="325.0" class="value">110.1</text>
+</svg>

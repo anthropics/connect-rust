@@ -1,0 +1,37 @@
+[package]
+name = "rpc-bench-tonic"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+tonic = { version = "0.14", features = ["gzip", "zstd"] }
+tonic-prost = "0.14"
+prost = "0.14"
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+redis = { version = "1.0", default-features = false, features = ["tokio-comp"] }
+
+[[bin]]
+name = "rpc-bench-tonic"
+path = "src/main.rs"
+
+[[bin]]
+name = "fortune-server-tonic"
+path = "src/bin/fortune_server.rs"
+
+[[bin]]
+name = "echo-server-tonic"
+path = "src/bin/echo_server.rs"
+
+[[bin]]
+name = "log-server-tonic"
+path = "src/bin/log_server.rs"
+
+[build-dependencies]
+tonic-prost-build = "0.14"
+
+[lints]
+workspace = true

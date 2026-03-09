@@ -1,0 +1,19 @@
+/target
+Cargo.lock
+/conformance/bin/
+
+# User-local Claude Code settings (project-level agents/commands ARE committed)
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Local task tracking
+TASKS.md
+benches/rpc-go/bench-connect-go
+benches/rpc-go/rpc-go
+benches/rpc-go/fortune
+benches/rpc-go/fortune-connect-go
+
+# Protocol spec documents are fetched locally via `task specs:fetch` and
+# not committed (third-party content). docs/specs/README.md stays tracked.
+/docs/specs/*.md
+!/docs/specs/README.md

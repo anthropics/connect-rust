@@ -1,0 +1,15 @@
+version: v2
+plugins:
+  - local:
+      - cargo
+      - run
+      - --manifest-path
+      - ../../protoc-gen-connect-rust/Cargo.toml
+      - --bin
+      - protoc-gen-connect-rust
+      - --
+    out: src/generated
+    # strategy: all ensures all proto files are sent in a single plugin
+    # invocation, which is required for correct mod.rs generation when
+    # multiple packages share a common ancestor.
+    strategy: all

@@ -1,0 +1,56 @@
+[package]
+name = "connectrpc-conformance"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "ConnectRPC conformance test harness for the connectrpc crate"
+publish = false
+
+[dependencies]
+# Core protobuf and serde
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP and async
+tokio = { workspace = true, features = ["full"] }
+bytes = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["client", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["tokio"] }
+base64 = { workspace = true }
+futures = { workspace = true }
+
+# ConnectRPC library
+connectrpc = { path = "../connectrpc", features = ["server", "axum", "tls"] }
+axum = { workspace = true }
+
+# TLS (for conformance server + client)
+rustls-pemfile = { workspace = true }
+rustls-pki-types = { workspace = true }
+tokio-rustls = { workspace = true }
+
+# Compression (for conformance client)
+flate2 = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = { workspace = true }
+
+[[bin]]
+name = "conformance-server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "conformance-client"
+path = "src/bin/client.rs"
+
+[lints]
+workspace = true

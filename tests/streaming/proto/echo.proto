@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package test.echo.v1;
+
+// Simple echo service with all four RPC types for streaming integration tests.
+service EchoService {
+  // Unary: echo back the request.
+  rpc Echo(EchoRequest) returns (EchoResponse);
+
+  // Server streaming: echo back the request N times with delays.
+  rpc ServerStream(EchoRequest) returns (stream EchoResponse);
+
+  // Client streaming: collect all requests, return count and concatenated data.
+  rpc ClientStream(stream EchoRequest) returns (EchoResponse);
+
+  // Bidi streaming: echo each request back immediately.
+  rpc BidiStream(stream EchoRequest) returns (stream EchoResponse);
+}
+
+message EchoRequest {
+  // Sequence number for ordering verification.
+  int32 sequence = 1;
+  // Payload data.
+  string data = 2;
+}
+
+message EchoResponse {
+  // Sequence number echoed back.
+  int32 sequence = 1;
+  // Response data.
+  string data = 2;
+}

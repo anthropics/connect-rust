@@ -1,0 +1,153 @@
+syntax = "proto3";
+package bench.v1;
+
+service BenchService {
+  rpc Unary(BenchRequest) returns (BenchResponse);
+  rpc ServerStream(BenchRequest) returns (stream BenchResponse);
+  rpc ClientStream(stream BenchRequest) returns (BenchResponse);
+  rpc BidiStream(stream BenchRequest) returns (stream BenchResponse);
+  rpc LogUnary(LogRequest) returns (LogResponse);
+  rpc LogUnaryOwned(LogRequest) returns (LogResponse);
+}
+
+// Minimal echo service for measuring pure framework overhead.
+// No database, no spawn_blocking, no complex payloads — just
+// dispatch + proto encode/decode of a single string.
+service EchoService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+}
+
+message EchoRequest {
+  string message = 1;
+}
+
+message EchoResponse {
+  string message = 1;
+}
+
+// Request with a realistic mix of field types.
+message BenchRequest {
+  // Control fields
+  int32 response_count = 1;    // for server-stream: how many responses
+
+  // Payload: a realistic message with varied field types
+  Payload payload = 2;
+}
+
+message BenchResponse {
+  Payload payload = 1;
+}
+
+// Exercises all major protobuf encoding paths.
+message Payload {
+  // Scalars — varint, fixed-width, floating point
+  int32 id = 1;
+  int64 timestamp_nanos = 2;
+  double latitude = 3;
+  double longitude = 4;
+  bool active = 5;
+  fixed64 trace_id = 6;
+
+  // Strings — UTF-8 validation in proto, no special encoding in JSON
+  string name = 7;
+  string description = 8;
+  string region = 9;
+
+  // Bytes — base64 in JSON, raw in proto (key MessageView optimization target)
+  bytes data = 10;
+
+  // Enum — varint in proto, string name in JSON
+  Status status = 11;
+
+  // Nested message — recursive allocation in owned, recursive borrow in view
+  Metadata metadata = 12;
+
+  // Repeated scalars — packed encoding in proto
+  repeated int32 scores = 13;
+
+  // Repeated strings — N allocations in owned, N borrows in view
+  repeated string tags = 14;
+
+  // Map — complex encoding in both proto and JSON
+  map<string, string> attributes = 15;
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_ACTIVE = 1;
+  STATUS_INACTIVE = 2;
+  STATUS_PENDING = 3;
+}
+
+message Metadata {
+  string request_id = 1;
+  string user_agent = 2;
+  int64 created_at = 3;
+  map<string, string> headers = 4;
+}
+
+// String-heavy message modeled after structured log records.
+// Many small-to-medium string fields and a map of labels — each one
+// is an allocation in owned decode, zero-copy in view decode.
+// Target payload: ~1-3 KB (realistic for RPC payloads).
+message LogRequest {
+  repeated LogRecord records = 1;
+}
+
+message LogResponse {
+  int32 count = 1;
+}
+
+message LogRecord {
+  int64 timestamp_nanos = 1;
+  string service_name = 2;
+  string instance_id = 3;
+
+  enum Severity {
+    SEVERITY_UNSPECIFIED = 0;
+    SEVERITY_DEBUG = 1;
+    SEVERITY_INFO = 2;
+    SEVERITY_WARN = 3;
+    SEVERITY_ERROR = 4;
+  }
+  Severity severity = 4;
+  string message = 5;
+  map<string, string> labels = 6;
+  string trace_id = 7;
+  string span_id = 8;
+
+  LogSource source = 9;
+}
+
+message LogSource {
+  string file = 1;
+  int32 line = 2;
+  string function = 3;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// Log-ingest benchmark: decode-heavy workload to expose proto-library cost.
+//
+// The handler iterates all records via view accessors (connectrpc-rs/buffa)
+// or owned types (tonic/prost), touching every varint and string field.
+// This forces full field decoding without any I/O or large allocations
+// that would mask the proto-library delta. Response is a small aggregate
+// so encode is also exercised but not dominant.
+// ─────────────────────────────────────────────────────────────────────────
+
+service LogIngestService {
+  rpc Ingest(LogRequest) returns (LogIngestResponse);
+}
+
+message LogIngestResponse {
+  // Number of records processed.
+  int32 count = 1;
+  // Sum of all message string lengths — proves the handler touched every
+  // record's message field (forces varint-length decode + pointer resolve).
+  int64 total_message_bytes = 2;
+  // Sum of all label key+value lengths — proves map iteration happened.
+  int64 total_label_bytes = 3;
+  // Max severity seen — proves enum-varint decode for every record.
+  int32 max_severity = 4;
+}

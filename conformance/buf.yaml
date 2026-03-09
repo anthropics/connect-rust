@@ -1,0 +1,7 @@
+---
+# This file configures buf for code generation from the BSR.
+# The generated code is checked into src/generated/.
+# To regenerate: task generate (or run buf generate manually after building the plugin)
+version: v2
+deps:
+    - buf.build/connectrpc/conformance

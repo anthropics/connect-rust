@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package anthropic.connectrpc.wkt.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+
+// WellKnownTypesService provides operations using Timestamp, Duration, and Struct.
+service WellKnownTypesService {
+  // CreateEvent creates an event with a timestamp.
+  rpc CreateEvent(CreateEventRequest) returns (CreateEventResponse);
+
+  // CalculateDuration calculates the duration between two timestamps.
+  rpc CalculateDuration(CalculateDurationRequest) returns (CalculateDurationResponse);
+
+  // ProcessMetadata processes arbitrary metadata as a Struct.
+  rpc ProcessMetadata(ProcessMetadataRequest) returns (ProcessMetadataResponse);
+}
+
+// CreateEventRequest is the request for CreateEvent.
+message CreateEventRequest {
+  // Name of the event.
+  string name = 1;
+  // When the event occurred. If not provided, server uses current time.
+  google.protobuf.Timestamp occurred_at = 2;
+  // How long the event lasted.
+  google.protobuf.Duration duration = 3;
+}
+
+// CreateEventResponse is the response for CreateEvent.
+message CreateEventResponse {
+  // The created event.
+  Event event = 1;
+}
+
+// Event represents an event with timing information.
+message Event {
+  // Unique identifier for the event.
+  string id = 1;
+  // Name of the event.
+  string name = 2;
+  // When the event occurred.
+  google.protobuf.Timestamp occurred_at = 3;
+  // How long the event lasted.
+  google.protobuf.Duration duration = 4;
+  // When the event record was created.
+  google.protobuf.Timestamp created_at = 5;
+}
+
+// CalculateDurationRequest is the request for CalculateDuration.
+message CalculateDurationRequest {
+  // Start timestamp.
+  google.protobuf.Timestamp start = 1;
+  // End timestamp.
+  google.protobuf.Timestamp end = 2;
+}
+
+// CalculateDurationResponse is the response for CalculateDuration.
+message CalculateDurationResponse {
+  // Duration between start and end.
+  google.protobuf.Duration duration = 1;
+}
+
+// ProcessMetadataRequest is the request for ProcessMetadata.
+message ProcessMetadataRequest {
+  // Arbitrary metadata as a Struct.
+  google.protobuf.Struct metadata = 1;
+}
+
+// ProcessMetadataResponse is the response for ProcessMetadata.
+message ProcessMetadataResponse {
+  // Echoed metadata with additional server-added fields.
+  google.protobuf.Struct metadata = 1;
+  // Number of fields in the input metadata.
+  int32 field_count = 2;
+}

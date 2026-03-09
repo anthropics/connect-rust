@@ -1,0 +1,20 @@
+---
+# Code generation configuration for connectrpc-conformance.
+#
+# To regenerate the Rust code from upstream protos:
+#   task generate
+#
+# This fetches protos from buf.build/connectrpc/conformance and generates
+# Rust code using our protoc-gen-connect-rust plugin.
+version: v2
+managed:
+    enabled: true
+inputs:
+    - module: buf.build/connectrpc/conformance
+plugins:
+    - local: ../target/release/protoc-gen-connect-rust
+      out: src/generated
+      # strategy: all ensures all proto files are sent in a single plugin
+      # invocation, which is required for correct mod.rs generation when
+      # multiple packages share a common ancestor.
+      strategy: all

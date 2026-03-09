@@ -1,0 +1,17 @@
+version: v2
+plugins:
+  - local:
+      - cargo
+      - run
+      - --manifest-path
+      - ../../protoc-gen-connect-rust/Cargo.toml
+      - --bin
+      - protoc-gen-connect-rust
+      - --
+    out: src/generated
+    strategy: all
+    # strict_utf8_mapping: string fields with utf8_validation=NONE become
+    # Vec<u8>/&[u8]. No-op for proto3 (bench.proto, default Verify);
+    # enables the editions-based noutf8 benchmark variant.
+    opt:
+      - strict_utf8_mapping

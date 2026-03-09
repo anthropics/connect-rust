@@ -1,0 +1,427 @@
+---
+version: "3"
+
+vars:
+  CONFORMANCE_VERSION: v1.0.5
+  CONFORMANCE_BIN: "{{.ROOT_DIR}}/conformance/bin/connectconformance"
+  SERVER_BIN: "{{.ROOT_DIR}}/target/release/conformance-server"
+  CLIENT_BIN: "{{.ROOT_DIR}}/target/release/conformance-client"
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  # ===========================================================================
+  # Core development tasks
+  # ===========================================================================
+
+  build:
+    desc: Build the entire workspace
+    cmds:
+      - cargo build --workspace --all-features
+
+  build:release:
+    desc: Build the entire workspace in release mode
+    cmds:
+      - cargo build --workspace --all-features --release
+
+  check:
+    desc: Run cargo check on the workspace
+    cmds:
+      - cargo check --workspace --all-features
+
+  test:
+    desc: Run all tests
+    cmds:
+      - cargo test --workspace --all-features
+
+  clippy:
+    desc: Run clippy lints
+    cmds:
+      - cargo clippy --workspace --all-features -- -D warnings
+
+  fmt:
+    desc: Check code formatting
+    cmds:
+      - cargo fmt --all -- --check
+
+  fmt:fix:
+    desc: Fix code formatting
+    cmds:
+      - cargo fmt --all
+
+  doc:
+    desc: Build documentation
+    env:
+      RUSTDOCFLAGS: -Dwarnings
+    cmds:
+      - cargo doc --workspace --all-features --no-deps
+
+  lint:
+    desc: Run all lints (clippy + format check)
+    cmds:
+      - task: clippy
+      - task: fmt
+
+  ci:
+    desc: Run all CI checks locally
+    cmds:
+      - task: check
+      - task: clippy
+      - task: fmt
+      - task: test
+      - task: doc
+      - task: check:minimal
+      - task: example:multiservice:test
+
+  check:minimal:
+    desc: Check with no default features (minimal build)
+    cmds:
+      - cargo check -p connectrpc --no-default-features
+      - cargo test -p connectrpc --no-default-features
+
+  # ===========================================================================
+  # Code generator
+  # ===========================================================================
+
+  install:
+    desc: Install protoc-gen-connect-rust to ~/.cargo/bin
+    cmds:
+      - cargo install --path protoc-gen-connect-rust
+
+  # ===========================================================================
+  # Examples
+  # ===========================================================================
+
+  example:eliza:
+    desc: Run the ELIZA example server
+    cmds:
+      - cargo run -p eliza-example
+
+  example:eliza:generate:
+    desc: Regenerate ELIZA example Rust code from protos
+    dir: "{{.ROOT_DIR}}/examples/eliza"
+    cmds:
+      - cargo build --release -p protoc-gen-connect-rust
+      - buf generate
+
+  example:multiservice:server:
+    desc: Run the multi-service server (greet, math, well-known types)
+    cmds:
+      - cargo run -p multiservice-example --bin multiservice-server
+
+  example:multiservice:client:
+    desc: Run the multi-service client (requires multiservice-server running)
+    cmds:
+      - cargo run -p multiservice-example --bin multiservice-client
+
+  example:multiservice:test:
+    desc: Build, start the server, run the client, and verify all RPCs pass
+    cmds:
+      - ./examples/multiservice/test.sh
+
+  example:multiservice:generate:
+    desc: Regenerate multi-service example Rust code from protos
+    dir: "{{.ROOT_DIR}}/examples/multiservice"
+    cmds:
+      - cargo build --release -p protoc-gen-connect-rust
+      - buf generate
+
+  # ===========================================================================
+  # Protocol specifications (fetched locally, gitignored)
+  # ===========================================================================
+
+  specs:fetch:
+    desc: Fetch protocol spec documents into docs/specs/ (gitignored; for local reference)
+    vars:
+      RAW: '-H "Accept: application/vnd.github.raw"'
+    cmds:
+      - mkdir -p docs/specs
+      - gh api {{.RAW}} repos/connectrpc/connectrpc.com/contents/docs/protocol.md > docs/specs/connect-protocol.md
+      - gh api {{.RAW}} repos/grpc/grpc/contents/doc/PROTOCOL-HTTP2.md > docs/specs/grpc-http2-protocol.md
+      - gh api {{.RAW}} repos/grpc/grpc/contents/doc/PROTOCOL-WEB.md > docs/specs/grpc-web-protocol.md
+
+  # ===========================================================================
+  # Conformance tests
+  # ===========================================================================
+
+  conformance:download:
+    desc: Download the conformance test runner
+    cmds:
+      - ./conformance/scripts/download-conformance.sh {{.CONFORMANCE_VERSION}}
+
+  conformance:build:
+    desc: Build the conformance server and client binaries
+    cmds:
+      - cargo build --release -p connectrpc-conformance
+
+  conformance:generate:
+    desc: Regenerate conformance Rust code from BSR protos
+    dir: "{{.ROOT_DIR}}/conformance"
+    cmds:
+      - cargo build --release -p protoc-gen-connect-rust
+      - BUF_TOKEN="" buf generate
+
+  conformance:test:
+    desc: Run full server conformance tests
+    deps: [conformance:download, conformance:build]
+    cmds:
+      - |
+        echo "Running server conformance tests..."
+        echo ""
+        RUST_LOG=warn "{{.CONFORMANCE_BIN}}" --mode server -- "{{.SERVER_BIN}}"
+
+  conformance:test-connect-only:
+    desc: Run server conformance tests for Connect protocol only
+    deps: [conformance:download, conformance:build]
+    cmds:
+      - |
+        echo "Running Connect-only server conformance tests..."
+        echo ""
+        RUST_LOG=warn "{{.CONFORMANCE_BIN}}" --mode server \
+          --conf "{{.ROOT_DIR}}/conformance/config/connect-only.yaml" \
+          -- "{{.SERVER_BIN}}"
+
+  conformance:test-connect-tls:
+    desc: Run server conformance tests for Connect protocol with TLS
+    deps: [conformance:download, conformance:build]
+    cmds:
+      - |
+        echo "Running Connect+TLS server conformance tests..."
+        echo ""
+        RUST_LOG=warn "{{.CONFORMANCE_BIN}}" --mode server \
+          --conf "{{.ROOT_DIR}}/conformance/config/connect-tls.yaml" \
+          -- "{{.SERVER_BIN}}"
+
+  conformance:test-client-connect-only:
+    desc: Run client conformance tests for Connect protocol (unary)
+    deps: [conformance:download, conformance:build]
+    cmds:
+      - |
+        echo "Running Connect-only client conformance tests..."
+        echo ""
+        RUST_LOG=warn "{{.CONFORMANCE_BIN}}" --mode client \
+          --conf "{{.ROOT_DIR}}/conformance/config/client-connect-only.yaml" \
+          -- "{{.CLIENT_BIN}}"
+
+  conformance:test-client-grpc-only:
+    desc: Run client conformance tests for gRPC protocol
+    deps: [conformance:download, conformance:build]
+    cmds:
+      - |
+        echo "Running gRPC-only client conformance tests..."
+        echo ""
+        RUST_LOG=warn "{{.CONFORMANCE_BIN}}" --mode client \
+          --conf "{{.ROOT_DIR}}/conformance/config/client-grpc-only.yaml" \
+          -- "{{.CLIENT_BIN}}"
+
+  conformance:test-client-grpc-web-only:
+    desc: Run client conformance tests for gRPC-Web protocol
+    deps: [conformance:download, conformance:build]
+    cmds:
+      - |
+        echo "Running gRPC-Web-only client conformance tests..."
+        echo ""
+        RUST_LOG=warn "{{.CONFORMANCE_BIN}}" --mode client \
+          --conf "{{.ROOT_DIR}}/conformance/config/client-grpc-web-only.yaml" \
+          -- "{{.CLIENT_BIN}}"
+
+  conformance:test-grpc-only:
+    desc: Run server conformance tests for gRPC protocol only
+    deps: [conformance:download, conformance:build]
+    cmds:
+      - |
+        echo "Running gRPC-only server conformance tests..."
+        echo ""
+        RUST_LOG=warn "{{.CONFORMANCE_BIN}}" --mode server \
+          --conf "{{.ROOT_DIR}}/conformance/config/grpc-only.yaml" \
+          -- "{{.SERVER_BIN}}"
+
+  conformance:test-grpc-web-only:
+    desc: Run server conformance tests for gRPC-Web protocol only
+    deps: [conformance:download, conformance:build]
+    cmds:
+      - |
+        echo "Running gRPC-Web-only server conformance tests..."
+        echo ""
+        RUST_LOG=warn "{{.CONFORMANCE_BIN}}" --mode server \
+          --conf "{{.ROOT_DIR}}/conformance/config/grpc-web-only.yaml" \
+          -- "{{.SERVER_BIN}}"
+
+  conformance:test-verbose:
+    desc: Run server conformance tests with verbose output
+    deps: [conformance:download, conformance:build]
+    cmds:
+      - |
+        echo "Running server conformance tests (verbose)..."
+        echo ""
+        RUST_LOG=debug "{{.CONFORMANCE_BIN}}" --mode server -v -- "{{.SERVER_BIN}}"
+
+  conformance:clean:
+    desc: Remove downloaded conformance runner
+    cmds:
+      - rm -rf conformance/bin
+
+  # ===========================================================================
+  # Benchmarks
+  # ===========================================================================
+
+  bench:
+    desc: Run RPC benchmarks (all protocols, codecs, and payload sizes)
+    cmds:
+      - cargo bench -p rpc-bench --bench rpc_bench
+
+  bench:quick:
+    desc: Run RPC benchmarks with reduced sample size for quick iteration
+    cmds:
+      - cargo bench -p rpc-bench --bench rpc_bench -- --quick --warm-up-time 1 --measurement-time 3
+
+  bench:cross:
+    desc: Run cross-implementation benchmarks (connectrpc vs tonic vs connect-go)
+    cmds:
+      - cargo bench -p rpc-bench --bench cross_impl_bench
+
+  bench:fmt:
+    desc: Run RPC benchmarks and format results as a markdown table
+    cmds:
+      - cargo criterion -p rpc-bench --bench rpc_bench --message-format=json 2>/dev/null | python3 benches/rpc/format-results.py
+
+  bench:save:
+    desc: Run RPC benchmarks, save JSON results, and print formatted table
+    cmds:
+      - |
+        cargo criterion -p rpc-bench --bench rpc_bench --message-format=json 2>/dev/null | tee /tmp/bench-results.json | python3 benches/rpc/format-results.py
+        echo ""
+        echo "Raw JSON saved to /tmp/bench-results.json"
+
+  bench:cross:quick:
+    desc: Run cross-implementation benchmarks with reduced sample size
+    cmds:
+      - cargo bench -p rpc-bench --bench cross_impl_bench -- --quick --warm-up-time 1 --measurement-time 3
+
+  bench:fortunes:
+    desc: Run fortunes benchmark (connectrpc vs tonic vs connect-go)
+    cmds:
+      - cargo run --release -p rpc-bench --bin fortune_bench
+
+  bench:fortunes:quick:
+    desc: Run fortunes benchmark with shorter duration
+    cmds:
+      - cargo run --release -p rpc-bench --bin fortune_bench -- --quick
+
+  bench:fortunes:protocols:
+    desc: Fortunes benchmark across Connect/gRPC/gRPC-Web on connectrpc
+    cmds:
+      - cargo run --release -p rpc-bench --bin fortune_bench -- --protocols
+
+  bench:fortunes:protocols:h2:
+    desc: Protocol comparison with all three on 8 h2 connections (fair framing-only comparison)
+    cmds:
+      - cargo run --release -p rpc-bench --bin fortune_bench -- --protocols --multi-conn=8
+
+  bench:echo:
+    desc: Run echo benchmark (connectrpc vs tonic, framework overhead only)
+    cmds:
+      - cargo run --release -p rpc-bench --bin echo_bench
+
+  bench:echo:quick:
+    desc: Run echo benchmark with shorter duration
+    cmds:
+      - cargo run --release -p rpc-bench --bin echo_bench -- --quick
+
+  bench:log:
+    desc: Run log-ingest benchmark (decode-heavy, buffa-view vs prost-owned)
+    cmds:
+      - cargo run --release -p rpc-bench --bin log_bench
+
+  bench:log:quick:
+    desc: Run log-ingest benchmark with shorter duration
+    cmds:
+      - cargo run --release -p rpc-bench --bin log_bench -- --quick
+
+  bench:generate:
+    desc: Regenerate benchmark Rust code from protos
+    dir: "{{.ROOT_DIR}}/benches/rpc"
+    cmds:
+      - cargo build --release -p protoc-gen-connect-rust
+      - buf generate
+
+  bench:charts:
+    desc: Regenerate README performance charts (edit BENCHMARKS dict first)
+    cmds:
+      - python3 benches/charts/generate.py
+
+  generate:all:
+    desc: Regenerate all checked-in Rust code from protos
+    cmds:
+      - cargo build --release -p protoc-gen-connect-rust
+      - task: example:eliza:generate
+      - task: example:multiservice:generate
+      - task: conformance:generate
+      - task: bench:generate
+
+
+  # ===========================================================================
+  # Profiling
+  # ===========================================================================
+
+  profile:connectrpc:
+    desc: Profile connectrpc fortune server (CPU + heap)
+    vars:
+      DURATION: '{{.DURATION | default "300"}}'
+      CONCURRENCY: '{{.CONCURRENCY | default "64"}}'
+    cmds:
+      - ./benches/profile_server.sh connectrpc {{.DURATION}} {{.CONCURRENCY}}
+
+  profile:tonic:
+    desc: Profile tonic fortune server (CPU + heap)
+    vars:
+      DURATION: '{{.DURATION | default "300"}}'
+      CONCURRENCY: '{{.CONCURRENCY | default "64"}}'
+    cmds:
+      - ./benches/profile_server.sh tonic {{.DURATION}} {{.CONCURRENCY}}
+
+  profile:compare:
+    desc: Profile both servers and print comparative summary
+    vars:
+      DURATION: '{{.DURATION | default "300"}}'
+      CONCURRENCY: '{{.CONCURRENCY | default "64"}}'
+    cmds:
+      - ./benches/profile_server.sh connectrpc {{.DURATION}} {{.CONCURRENCY}}
+      - ./benches/profile_server.sh tonic {{.DURATION}} {{.CONCURRENCY}}
+      - echo "Results in /tmp/connectrpc-profile/"
+
+  profile:echo:
+    desc: Profile echo server (framework overhead, multi-conn to reduce h2 noise)
+    vars:
+      DURATION: '{{.DURATION | default "30"}}'
+      CONCURRENCY: '{{.CONCURRENCY | default "64"}}'
+      N_CONNS: '{{.N_CONNS | default "8"}}'
+    cmds:
+      - ./benches/profile_server.sh echo-connectrpc {{.DURATION}} {{.CONCURRENCY}} {{.N_CONNS}}
+      - ./benches/profile_server.sh echo-tonic {{.DURATION}} {{.CONCURRENCY}} {{.N_CONNS}}
+      - echo "Results in /tmp/connectrpc-profile/echo-{{'{'}}connectrpc,tonic{{'}'}}/"
+
+  profile:log:
+    desc: Profile log-ingest server (decode-heavy, buffa-view vs prost-owned)
+    vars:
+      DURATION: '{{.DURATION | default "30"}}'
+      CONCURRENCY: '{{.CONCURRENCY | default "64"}}'
+      N_CONNS: '{{.N_CONNS | default "8"}}'
+      RECORDS: '{{.RECORDS | default "50"}}'
+    cmds:
+      - ./benches/profile_server.sh log-connectrpc {{.DURATION}} {{.CONCURRENCY}} {{.N_CONNS}} {{.RECORDS}}
+      - ./benches/profile_server.sh log-tonic {{.DURATION}} {{.CONCURRENCY}} {{.N_CONNS}} {{.RECORDS}}
+      - echo "Results in /tmp/connectrpc-profile/log-{{'{'}}connectrpc,tonic{{'}'}}/"
+
+  # ===========================================================================
+  # Cleanup
+  # ===========================================================================
+
+  clean:
+    desc: Remove all build artifacts
+    cmds:
+      - cargo clean
+      - task: conformance:clean

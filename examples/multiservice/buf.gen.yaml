@@ -1,0 +1,15 @@
+version: v2
+plugins:
+  - local:
+      - cargo
+      - run
+      - --manifest-path
+      - ../../protoc-gen-connect-rust/Cargo.toml
+      - --bin
+      - protoc-gen-connect-rust
+      - --
+    out: src/generated
+    # strategy: all is required so that all proto files are sent in a single
+    # plugin invocation. Without it, buf invokes the plugin per-directory and
+    # sibling packages produce conflicting mod.rs files.
+    strategy: all

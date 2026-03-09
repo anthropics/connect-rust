@@ -1,0 +1,59 @@
+// Log-ingest benchmark variant with UTF-8 validation disabled.
+//
+// Uses edition 2023 with file-level `features.utf8_validation = NONE`.
+// Combined with the `strict_utf8_mapping` codegen option, all string
+// fields become `&[u8]` / `Vec<u8>` — decode skips `str::from_utf8`.
+//
+// The baseline profile showed UTF-8 validation at 11.23% of server CPU.
+// This variant measures how much of that is recoverable for trusted inputs.
+
+edition = "2023";
+package bench.noutf8.v1;
+
+// All string fields in this file skip UTF-8 validation on decode.
+// With `strict_utf8_mapping` codegen, they become byte-slice types.
+option features.utf8_validation = NONE;
+
+service LogIngestService {
+  rpc Ingest(LogRequest) returns (LogIngestResponse);
+}
+
+message LogRequest {
+  repeated LogRecord records = 1;
+}
+
+message LogRecord {
+  int64 timestamp_nanos = 1;
+  string service_name = 2;
+  string instance_id = 3;
+
+  enum Severity {
+    // Edition 2023 requires explicit enum default (no implicit zero).
+    option features.enum_type = OPEN;
+    SEVERITY_UNSPECIFIED = 0;
+    SEVERITY_DEBUG = 1;
+    SEVERITY_INFO = 2;
+    SEVERITY_WARN = 3;
+    SEVERITY_ERROR = 4;
+  }
+  Severity severity = 4;
+  string message = 5;
+  map<string, string> labels = 6;
+  string trace_id = 7;
+  string span_id = 8;
+
+  LogSource source = 9;
+}
+
+message LogSource {
+  string file = 1;
+  int32 line = 2;
+  string function = 3;
+}
+
+message LogIngestResponse {
+  int32 count = 1;
+  int64 total_message_bytes = 2;
+  int64 total_label_bytes = 3;
+  int32 max_severity = 4;
+}
