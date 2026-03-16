@@ -23,9 +23,9 @@ use buffa_types::google::protobuf::value;
 use connectrpc::ConnectError;
 use connectrpc::Context;
 use connectrpc::Router as ConnectRouter;
-use multiservice_example::generated::anthropic::connectrpc::greet::v1::GreetRequestView;
-use multiservice_example::generated::anthropic::connectrpc::math::v1::AddRequestView;
-use multiservice_example::generated::anthropic::connectrpc::wkt::v1::{
+use multiservice_example::proto::anthropic::connectrpc::greet::v1::GreetRequestView;
+use multiservice_example::proto::anthropic::connectrpc::math::v1::AddRequestView;
+use multiservice_example::proto::anthropic::connectrpc::wkt::v1::{
     CalculateDurationRequestView, CreateEventRequestView, ProcessMetadataRequestView,
 };
 use multiservice_example::*;

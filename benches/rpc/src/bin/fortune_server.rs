@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use connectrpc::{ConnectError, ConnectRpcService, Context};
 
+use rpc_bench::connect::fortune::v1::*;
 use rpc_bench::fortune;
-use rpc_bench::generated::fortune::v1::*;
+use rpc_bench::proto::fortune::v1::*;
 
 use buffa::view::OwnedView;
 

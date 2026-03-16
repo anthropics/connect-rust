@@ -120,7 +120,6 @@ tasks:
     desc: Regenerate ELIZA example Rust code from protos
     dir: "{{.ROOT_DIR}}/examples/eliza"
     cmds:
-      - cargo build --release -p protoc-gen-connect-rust
       - buf generate
 
   example:multiservice:server:
@@ -142,7 +141,6 @@ tasks:
     desc: Regenerate multi-service example Rust code from protos
     dir: "{{.ROOT_DIR}}/examples/multiservice"
     cmds:
-      - cargo build --release -p protoc-gen-connect-rust
       - buf generate
 
   # ===========================================================================
@@ -177,7 +175,6 @@ tasks:
     desc: Regenerate conformance Rust code from BSR protos
     dir: "{{.ROOT_DIR}}/conformance"
     cmds:
-      - cargo build --release -p protoc-gen-connect-rust
       - BUF_TOKEN="" buf generate
 
   conformance:test:
@@ -361,7 +358,6 @@ tasks:
     desc: Regenerate benchmark Rust code from protos
     dir: "{{.ROOT_DIR}}/benches/rpc"
     cmds:
-      - cargo build --release -p protoc-gen-connect-rust
       - buf generate
 
   bench:charts:
@@ -373,6 +369,7 @@ tasks:
     desc: Regenerate all checked-in Rust code from protos
     cmds:
       - cargo build --release -p protoc-gen-connect-rust
+      - cargo build --release --manifest-path ../buffa/Cargo.toml -p protoc-gen-buffa -p protoc-gen-buffa-packaging
       - task: example:eliza:generate
       - task: example:multiservice:generate
       - task: conformance:generate

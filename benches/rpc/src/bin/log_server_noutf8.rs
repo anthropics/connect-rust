@@ -10,7 +10,8 @@
 
 use buffa::view::OwnedView;
 use connectrpc::{ConnectError, ConnectRpcService, Context};
-use rpc_bench::generated::bench::noutf8::v1::*;
+use rpc_bench::connect::bench::noutf8::v1::*;
+use rpc_bench::proto::bench::noutf8::v1::*;
 
 struct LogIngestImpl;
 

@@ -8,7 +8,8 @@
 
 use connectrpc::Protocol;
 use connectrpc::client::{ClientConfig, Http2Connection, SharedHttp2Connection};
-use rpc_bench::generated::bench::v1::*;
+use rpc_bench::connect::bench::v1::*;
+use rpc_bench::proto::bench::v1::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 

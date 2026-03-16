@@ -32,11 +32,11 @@ use connectrpc_conformance::HTTPVersion;
 use connectrpc_conformance::Header;
 use connectrpc_conformance::Protocol;
 use connectrpc_conformance::StreamType;
-use connectrpc_conformance::generated::connectrpc::conformance::v1::{
+use connectrpc_conformance::init_any_registry;
+use connectrpc_conformance::proto::connectrpc::conformance::v1::{
     BidiStreamResponseView, ClientStreamResponseView, IdempotentUnaryResponseView,
     ServerStreamResponseView, UnaryResponseView,
 };
-use connectrpc_conformance::init_any_registry;
 use connectrpc_conformance::read_message;
 use connectrpc_conformance::write_message;
 use hyper::Request;

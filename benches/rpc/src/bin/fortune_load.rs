@@ -5,7 +5,8 @@
 
 use connectrpc::Protocol;
 use connectrpc::client::{ClientConfig, HttpClient};
-use rpc_bench::generated::fortune::v1::*;
+use rpc_bench::connect::fortune::v1::*;
+use rpc_bench::proto::fortune::v1::*;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 

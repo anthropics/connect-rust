@@ -9,7 +9,8 @@
 
 use connectrpc::Protocol;
 use connectrpc::client::{ClientConfig, Http2Connection, SharedHttp2Connection};
-use rpc_bench::generated::bench::noutf8::v1::*;
+use rpc_bench::connect::bench::noutf8::v1::*;
+use rpc_bench::proto::bench::noutf8::v1::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

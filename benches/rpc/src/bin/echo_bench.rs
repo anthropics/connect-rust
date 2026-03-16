@@ -22,7 +22,8 @@ use std::time::{Duration, Instant};
 
 use connectrpc::Protocol;
 use connectrpc::client::{ClientConfig, Http2Connection, HttpClient, SharedHttp2Connection};
-use rpc_bench::generated::bench::v1::*;
+use rpc_bench::connect::bench::v1::*;
+use rpc_bench::proto::bench::v1::*;
 
 // ── Configuration ────────────────────────────────────────────────────
 

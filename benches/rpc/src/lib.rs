@@ -1,6 +1,12 @@
 pub mod fortune;
-pub mod generated;
-pub use generated::bench::v1::*;
+
+#[path = "generated/connect/mod.rs"]
+pub mod connect;
+#[path = "generated/buffa/mod.rs"]
+pub mod proto;
+
+pub use connect::bench::v1::*;
+pub use proto::bench::v1::*;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;

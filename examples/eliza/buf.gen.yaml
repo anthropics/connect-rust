@@ -1,15 +1,15 @@
 version: v2
 plugins:
-  - local:
-      - cargo
-      - run
-      - --manifest-path
-      - ../../protoc-gen-connect-rust/Cargo.toml
-      - --bin
-      - protoc-gen-connect-rust
-      - --
-    out: src/generated
-    # strategy: all ensures all proto files are sent in a single plugin
-    # invocation, which is required for correct mod.rs generation when
-    # multiple packages share a common ancestor.
+  - local: ../../../buffa/target/release/protoc-gen-buffa
+    out: src/generated/buffa
+    opt: [views=true, json=true]
+  - local: ../../../buffa/target/release/protoc-gen-buffa-packaging
+    out: src/generated/buffa
     strategy: all
+  - local: ../../target/release/protoc-gen-connect-rust
+    out: src/generated/connect
+    opt: [buffa_module=crate::proto]
+  - local: ../../../buffa/target/release/protoc-gen-buffa-packaging
+    out: src/generated/connect
+    strategy: all
+    opt: [filter=services]

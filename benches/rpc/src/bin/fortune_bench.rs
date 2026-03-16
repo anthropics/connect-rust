@@ -14,8 +14,9 @@ use std::time::{Duration, Instant};
 
 use connectrpc::Protocol;
 use connectrpc::client::{ClientConfig, Http2Connection, HttpClient, SharedHttp2Connection};
+use rpc_bench::connect::fortune::v1::*;
 use rpc_bench::fortune;
-use rpc_bench::generated::fortune::v1::*;
+use rpc_bench::proto::fortune::v1::*;
 
 // ── Configuration ────────────────────────────────────────────────────
 

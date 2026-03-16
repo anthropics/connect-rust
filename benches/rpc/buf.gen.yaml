@@ -1,17 +1,18 @@
 version: v2
 plugins:
-  - local:
-      - cargo
-      - run
-      - --manifest-path
-      - ../../protoc-gen-connect-rust/Cargo.toml
-      - --bin
-      - protoc-gen-connect-rust
-      - --
-    out: src/generated
-    strategy: all
-    # strict_utf8_mapping: string fields with utf8_validation=NONE become
+  - local: ../../../buffa/target/release/protoc-gen-buffa
+    out: src/generated/buffa
+    # strict_utf8: string fields with utf8_validation=NONE become
     # Vec<u8>/&[u8]. No-op for proto3 (bench.proto, default Verify);
     # enables the editions-based noutf8 benchmark variant.
-    opt:
-      - strict_utf8_mapping
+    opt: [views=true, json=true, strict_utf8=true]
+  - local: ../../../buffa/target/release/protoc-gen-buffa-packaging
+    out: src/generated/buffa
+    strategy: all
+  - local: ../../target/release/protoc-gen-connect-rust
+    out: src/generated/connect
+    opt: [buffa_module=crate::proto]
+  - local: ../../../buffa/target/release/protoc-gen-buffa-packaging
+    out: src/generated/connect
+    strategy: all
+    opt: [filter=services]

@@ -40,11 +40,11 @@ use connectrpc_conformance::StreamResponseDefinition;
 use connectrpc_conformance::UnaryResponse;
 use connectrpc_conformance::UnaryResponseDefinition;
 use connectrpc_conformance::UnimplementedResponse;
-use connectrpc_conformance::generated::connectrpc::conformance::v1::{
+use connectrpc_conformance::init_any_registry;
+use connectrpc_conformance::proto::connectrpc::conformance::v1::{
     BidiStreamRequestView, ClientStreamRequestView, IdempotentUnaryRequestView,
     ServerStreamRequestView, UnaryRequestView, UnimplementedRequestView,
 };
-use connectrpc_conformance::init_any_registry;
 use connectrpc_conformance::read_message;
 use connectrpc_conformance::write_message;
 use futures::Stream;

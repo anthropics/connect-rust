@@ -9,7 +9,8 @@
 
 use buffa::view::OwnedView;
 use connectrpc::{ConnectError, ConnectRpcService, Context};
-use rpc_bench::generated::bench::v1::*;
+use rpc_bench::connect::bench::v1::*;
+use rpc_bench::proto::bench::v1::*;
 
 struct LogIngestImpl;
 

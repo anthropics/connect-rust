@@ -25,10 +25,14 @@
 //! 2. Runner sends `ClientCompatRequest` messages to stdin
 //! 3. Client makes RPC calls and writes `ClientCompatResponse` to stdout
 
-pub mod generated;
+#[path = "generated/connect/mod.rs"]
+pub mod connect;
+#[path = "generated/buffa/mod.rs"]
+pub mod proto;
 
 // Re-export commonly used types
-pub use generated::connectrpc::conformance::v1::*;
+pub use connect::connectrpc::conformance::v1::*;
+pub use proto::connectrpc::conformance::v1::*;
 
 use buffa::Message;
 use std::io;

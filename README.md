@@ -36,22 +36,60 @@ message GreetResponse {
 
 ### Generate Rust code
 
-**Option A — `buf generate` (pre-build):** add `protoc-gen-connect-rust` to your `buf.gen.yaml`. The generated code may be checked in or `.gitignore`'d and produced by your external build pipeline — either way, it exists before `cargo build` runs.
+Two workflows are supported. Both produce the same runtime API; pick the one
+that fits your build pipeline.
+
+#### Option A - `buf generate` (recommended for checked-in code)
+
+Runs two codegen plugins (`protoc-gen-buffa` for message types,
+`protoc-gen-connect-rust` for service stubs) and `protoc-gen-buffa-packaging`
+twice to assemble the `mod.rs` module tree for each output directory. The
+codegen plugins are invoked per-file; only the packaging plugin needs
+`strategy: all`.
 
 ```yaml
+# buf.gen.yaml
 version: v2
 plugins:
-  - local: path/to/protoc-gen-connect-rust
-    out: src/generated
+  - local: protoc-gen-buffa
+    out: src/generated/buffa
+    opt: [views=true, json=true]
+  - local: protoc-gen-buffa-packaging
+    out: src/generated/buffa
     strategy: all
+  - local: protoc-gen-connect-rust
+    out: src/generated/connect
+    opt: [buffa_module=crate::proto]
+  - local: protoc-gen-buffa-packaging
+    out: src/generated/connect
+    strategy: all
+    opt: [filter=services]
 ```
 
-> **Important:** `strategy: all` is required. Without it, buf invokes the plugin
-> once per directory, and sibling proto packages produce conflicting `mod.rs`
-> files. With `strategy: all`, all proto files are sent in a single invocation so
-> the plugin can generate a complete module hierarchy.
+```rust
+// src/lib.rs
+#[path = "generated/buffa/mod.rs"]
+pub mod proto;
+#[path = "generated/connect/mod.rs"]
+pub mod connect;
+```
 
-**Option B — `build.rs` (generated at build time):** add `connectrpc-build` as a build dependency:
+`buffa_module=crate::proto` tells the service-stub generator where you
+mounted the buffa output. For a method input type `greet.v1.GreetRequest`
+it emits `crate::proto::greet::v1::GreetRequest` - the `crate::proto` root
+you named, then the proto package as nested modules, then the type. The
+second packaging invocation uses `filter=services` so the connect tree's
+`mod.rs` only `include!`s files that actually have service stubs in them.
+Changing the mount point requires regenerating.
+
+> The underlying option is `extern_path=.=crate::proto` - same format the
+> Buf Schema Registry uses when generating Cargo SDKs. `buffa_module=X`
+> is shorthand for the `.` catch-all case.
+
+#### Option B - `build.rs` (generated at build time)
+
+Unified output: message types and service stubs in one file per proto,
+assembled via a single `include!`. No plugin binaries required at build time.
 
 ```toml
 [build-dependencies]

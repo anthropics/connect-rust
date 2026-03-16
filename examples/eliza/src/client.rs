@@ -35,8 +35,13 @@
 //! will gracefully end the conversation (the server terminates the bidi stream
 //! after sending her farewell).
 
-mod generated;
-use generated::connectrpc::eliza::v1::*;
+#[path = "generated/connect/mod.rs"]
+mod connect;
+#[path = "generated/buffa/mod.rs"]
+mod proto;
+
+use connect::connectrpc::eliza::v1::*;
+use proto::connectrpc::eliza::v1::*;
 
 use clap::Parser;
 use connectrpc::client::{BidiStream, ClientConfig, ClientTransport, HttpClient};

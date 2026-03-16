@@ -182,23 +182,32 @@ pub fn generate_services(
 ///
 /// # Recognized options
 ///
-/// - `extern_path=<proto>=<rust>` — map a proto package prefix to a Rust
-///   module path. Repeatable. At least a `.` catch-all is required for
-///   every input/output type to resolve.
-/// - `mod_file=<name>` — emit a module-tree file with the given name
-///   (e.g. `mod.rs`). Requires `strategy: all` in buf.gen.yaml. If omitted,
-///   no module-tree file is emitted.
+/// - `buffa_module=<rust_path>` — where you mounted the buffa-generated
+///   module tree (e.g. `buffa_module=crate::proto`). Shorthand for
+///   `extern_path=.=<rust_path>`. This is the option most local users want.
+/// - `extern_path=<proto>=<rust>` — map a specific proto package prefix
+///   to a Rust module path. Repeatable; longest-prefix-match wins.
+///   `extern_path=.=<path>` is the catch-all (equivalent to `buffa_module`).
+///   At least one catch-all mapping is required so every type resolves.
 /// - `strict_utf8_mapping` — see [`Options::strict_utf8_mapping`].
 /// - `no_json` — disable `serde` derives on generated message types.
 ///   Ignored in this plugin (no message types emitted); accepted for
 ///   compatibility with the unified path.
 pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse> {
     let mut options = Options::default();
-    let mut mod_file: Option<String> = None;
 
     if let Some(ref param) = request.parameter {
         for opt in param.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            if let Some(value) = opt.strip_prefix("extern_path=") {
+            if let Some(value) = opt.strip_prefix("buffa_module=") {
+                let rust = value.trim();
+                if rust.is_empty() {
+                    anyhow::bail!(
+                        "buffa_module requires a non-empty path, \
+                         e.g. buffa_module=crate::proto"
+                    );
+                }
+                options.extern_paths.push((".".into(), rust.to_string()));
+            } else if let Some(value) = opt.strip_prefix("extern_path=") {
                 // value is "<proto_path>=<rust_path>"
                 let (proto, rust) = value.split_once('=').ok_or_else(|| {
                     anyhow::anyhow!(
@@ -219,8 +228,6 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                     proto.insert(0, '.');
                 }
                 options.extern_paths.push((proto, rust.to_string()));
-            } else if let Some(value) = opt.strip_prefix("mod_file=") {
-                mod_file = Some(value.trim().to_string());
             } else {
                 match opt {
                     "strict_utf8_mapping" => options.strict_utf8_mapping = true,
@@ -228,7 +235,7 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                     _ => {
                         return Err(anyhow::anyhow!(
                             "unknown plugin option: {opt:?}. Supported: \
-                             extern_path=<proto>=<rust>, mod_file=<name>, \
+                             buffa_module=<rust_path>, extern_path=<proto>=<rust>, \
                              strict_utf8_mapping, no_json"
                         ));
                     }
@@ -239,41 +246,14 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
 
     let generated = generate_services(&request.proto_file, &request.file_to_generate, &options)?;
 
-    let mut files: Vec<CodeGeneratorResponseFile> = generated
-        .iter()
+    let files: Vec<CodeGeneratorResponseFile> = generated
+        .into_iter()
         .map(|g| CodeGeneratorResponseFile {
-            name: Some(g.name.clone()),
-            content: Some(g.content.clone()),
+            name: Some(g.name),
+            content: Some(g.content),
             ..Default::default()
         })
         .collect();
-
-    if let Some(mod_file_name) = mod_file {
-        // Build (file_name, package) entries for the service files only.
-        let entries: Vec<(&str, &str)> = generated
-            .iter()
-            .map(|g| {
-                let package = request
-                    .proto_file
-                    .iter()
-                    .find(|fd| {
-                        fd.name
-                            .as_deref()
-                            .is_some_and(|n| buffa_codegen::proto_path_to_rust_module(n) == g.name)
-                    })
-                    .and_then(|fd| fd.package.as_deref())
-                    .unwrap_or("");
-                (g.name.as_str(), package)
-            })
-            .collect();
-
-        let mod_content = buffa_codegen::generate_module_tree(&entries, "", true);
-        files.push(CodeGeneratorResponseFile {
-            name: Some(mod_file_name),
-            content: Some(mod_content),
-            ..Default::default()
-        });
-    }
 
     Ok(CodeGeneratorResponse {
         supported_features: Some(feature_flags()),

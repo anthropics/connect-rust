@@ -33,10 +33,14 @@
 //!   -d '{"sentence": "I feel happy"}'
 //! ```
 
+#[path = "generated/connect/mod.rs"]
+mod connect;
 mod eliza;
-mod generated;
+#[path = "generated/buffa/mod.rs"]
+mod proto;
 
-use generated::connectrpc::eliza::v1::*;
+use connect::connectrpc::eliza::v1::*;
+use proto::connectrpc::eliza::v1::*;
 
 use buffa::view::OwnedView;
 use connectrpc::{ConnectError, Context, Router as ConnectRouter};

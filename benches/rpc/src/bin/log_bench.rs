@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use connectrpc::Protocol;
 use connectrpc::client::{ClientConfig, Http2Connection, SharedHttp2Connection};
-use rpc_bench::generated::bench::v1::*;
+use rpc_bench::connect::bench::v1::*;
 use rpc_bench::log_request;
 
 const CONCURRENCY_LEVELS: &[usize] = &[16, 64, 256];
@@ -241,7 +241,8 @@ async fn bench_server_noutf8(
     warmup: Duration,
     measurement: Duration,
 ) -> BenchResult {
-    use rpc_bench::generated::bench::noutf8;
+    use rpc_bench::connect::bench::noutf8::v1::LogIngestServiceClient;
+    use rpc_bench::proto::bench::noutf8;
 
     let uri: http::Uri = format!("http://{addr}").parse().expect("valid server URL");
     let config = ClientConfig::new(uri.clone()).protocol(Protocol::Grpc);
@@ -313,7 +314,7 @@ async fn bench_server_noutf8(
     let mut handles = Vec::new();
     for i in 0..concurrency {
         let conn = conns[i % n_conns].clone();
-        let client = noutf8::v1::LogIngestServiceClient::new(conn, config.clone());
+        let client = LogIngestServiceClient::new(conn, config.clone());
         let running = Arc::clone(&running);
         let count = Arc::clone(&count);
         let latencies = Arc::clone(&latencies);
