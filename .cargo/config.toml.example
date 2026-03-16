@@ -1,0 +1,17 @@
+# Local buffa path override.
+#
+# Copy this file to `.cargo/config.toml` (gitignored) to build against a
+# sibling buffa checkout at ../buffa instead of the crates.io release.
+# Useful for testing combined speculative changes across both repos.
+#
+#   task buffa:link     — copy this file into place and refresh Cargo.lock
+#   task buffa:unlink   — remove the override and refresh Cargo.lock
+#
+# `cargo publish` ignores .cargo/config.toml, so this never leaks into
+# published crates. CI doesn't have this file, so it always builds
+# against crates.io.
+
+[patch.crates-io]
+buffa = { path = "../buffa/buffa" }
+buffa-types = { path = "../buffa/buffa-types" }
+buffa-codegen = { path = "../buffa/buffa-codegen" }

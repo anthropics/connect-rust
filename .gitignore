@@ -17,3 +17,7 @@ benches/rpc-go/fortune-connect-go
 # not committed (third-party content). docs/specs/README.md stays tracked.
 /docs/specs/*.md
 !/docs/specs/README.md
+
+# Local buffa path override (opt-in via `task buffa:link`).
+# The .example file is tracked; the live config.toml is not.
+/.cargo/config.toml

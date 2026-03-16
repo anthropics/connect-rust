@@ -92,6 +92,22 @@ tasks:
       - cargo install --path protoc-gen-connect-rust
 
   # ===========================================================================
+  # Local buffa override (for testing combined speculative changes)
+  # ===========================================================================
+
+  buffa:link:
+    desc: Override crates.io buffa with a sibling ../buffa checkout (local only, gitignored)
+    cmds:
+      - cp .cargo/config.toml.example .cargo/config.toml
+      - cargo update -p buffa -p buffa-types -p buffa-codegen
+
+  buffa:unlink:
+    desc: Remove the local buffa path override and revert to crates.io
+    cmds:
+      - rm -f .cargo/config.toml
+      - cargo update -p buffa -p buffa-types -p buffa-codegen
+
+  # ===========================================================================
   # Examples
   # ===========================================================================
 
