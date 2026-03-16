@@ -46,6 +46,17 @@ pub struct Options {
     /// Connect protocol's JSON codec; disable only if you're targeting
     /// binary-only clients.
     pub generate_json: bool,
+    /// Map protobuf package prefixes to Rust module paths for message types.
+    ///
+    /// Each entry is `(proto_prefix, rust_path)`, e.g.
+    /// `(".", "crate::proto")` routes every type through `crate::proto::...`.
+    /// More-specific prefixes win via longest-prefix-match, and the WKT
+    /// mapping (`.google.protobuf` -> `::buffa_types::...`) is auto-injected.
+    ///
+    /// Used by [`generate_services`] to bake absolute paths into service
+    /// stubs so they compile independently of co-generated message types.
+    /// Unused by [`generate_files`] (the unified `super::`-relative path).
+    pub extern_paths: Vec<(String, String)>,
 }
 
 impl Default for Options {
@@ -53,6 +64,7 @@ impl Default for Options {
         Self {
             strict_utf8_mapping: false,
             generate_json: true,
+            extern_paths: Vec::new(),
         }
     }
 }
@@ -63,17 +75,48 @@ impl Options {
         config.generate_views = true;
         config.generate_json = self.generate_json;
         config.strict_utf8_mapping = self.strict_utf8_mapping;
+        config.extern_paths.clone_from(&self.extern_paths);
         config
     }
 }
 
+/// Emit one [`GeneratedFile`] per proto file in `file_to_generate` that
+/// declares at least one `service`. Files with no services produce no output.
+fn emit_service_files(
+    proto_file: &[FileDescriptorProto],
+    file_to_generate: &[String],
+    resolver: &TypeResolver<'_>,
+) -> Result<Vec<GeneratedFile>> {
+    let mut out = Vec::new();
+    for file_name in file_to_generate {
+        let file_desc = proto_file
+            .iter()
+            .find(|f| f.name.as_deref() == Some(file_name.as_str()));
+
+        if let Some(file) = file_desc
+            && !file.service.is_empty()
+        {
+            let service_tokens = generate_connect_services(file, resolver)?;
+            let service_code = format_token_stream(&service_tokens)?;
+            out.push(GeneratedFile {
+                name: buffa_codegen::proto_path_to_rust_module(file_name),
+                content: service_code,
+            });
+        }
+    }
+    Ok(out)
+}
+
 /// Generate ConnectRPC service bindings + buffa message types from proto
-/// descriptors.
+/// descriptors, appended into a single per-file output.
 ///
 /// Returns one `GeneratedFile` per proto file in `file_to_generate`. Does
 /// **not** emit a `mod.rs` — callers assemble the module tree themselves
-/// (the protoc plugin via [`buffa_codegen::generate_module_tree`], build.rs
-/// integrations via an `include!`-based file).
+/// (typically `connectrpc-build` via an `include!`-based file).
+///
+/// This is the **unified** path: service stubs reference message types via
+/// `super::`-relative paths, so both must live in the same module tree.
+/// [`Options::extern_paths`] is ignored.
 ///
 /// # Errors
 ///
@@ -87,102 +130,150 @@ pub fn generate_files(
 ) -> Result<Vec<GeneratedFile>> {
     let config = options.to_buffa_config();
 
-    // 1. Generate message types via buffa-codegen
     let mut files = buffa_codegen::generate(proto_file, file_to_generate, &config)
         .map_err(|e| anyhow::anyhow!("buffa-codegen failed: {e}"))?;
 
-    // Build the type resolver once for all services. It mirrors the
-    // CodeGenContext that buffa_codegen::generate() built internally,
-    // so cross-package / WKT / nested type paths resolve identically.
-    let resolver = TypeResolver::new(proto_file, file_to_generate, &config);
+    let resolver = TypeResolver::new(proto_file, file_to_generate, &config, false);
+    let service_files = emit_service_files(proto_file, file_to_generate, &resolver)?;
 
-    // 2. Generate ConnectRPC service bindings and append to matching files
-    for file_name in file_to_generate {
-        let file_desc = proto_file
-            .iter()
-            .find(|f| f.name.as_deref() == Some(file_name.as_str()));
-
-        if let Some(file) = file_desc
-            && !file.service.is_empty()
-        {
-            let service_tokens = generate_connect_services(file, &resolver)?;
-            let service_code = format_token_stream(&service_tokens)?;
-
-            let rust_filename = buffa_codegen::proto_path_to_rust_module(file_name);
-            if let Some(out) = files.iter_mut().find(|g| g.name == rust_filename) {
-                out.content.push('\n');
-                out.content.push_str(&service_code);
-            }
+    // Append each service file's content to the matching message file.
+    for svc in service_files {
+        if let Some(out) = files.iter_mut().find(|g| g.name == svc.name) {
+            out.content.push('\n');
+            out.content.push_str(&svc.content);
         }
     }
 
     Ok(files)
 }
 
+/// Generate **only** ConnectRPC service bindings from proto descriptors.
+///
+/// Returns one `GeneratedFile` per proto file in `file_to_generate` that
+/// declares at least one `service`. No message types, no `mod.rs`.
+///
+/// This is the **split** path: service stubs reference message types via
+/// absolute Rust paths derived from [`Options::extern_paths`]. Callers must
+/// set at least a `.` catch-all entry (e.g. `(".", "crate::proto")`) so
+/// every type resolves; the auto-injected WKT mapping still takes priority
+/// via longest-prefix-match. The generated code compiles standalone as long
+/// as the extern paths point at a buffa-generated module tree.
+///
+/// # Errors
+///
+/// Errors if any method input/output type is not covered by an extern_path
+/// mapping, or is absent from `proto_file` (missing import).
+pub fn generate_services(
+    proto_file: &[FileDescriptorProto],
+    file_to_generate: &[String],
+    options: &Options,
+) -> Result<Vec<GeneratedFile>> {
+    let config = options.to_buffa_config();
+    let resolver = TypeResolver::new(proto_file, file_to_generate, &config, true);
+    emit_service_files(proto_file, file_to_generate, &resolver)
+}
+
 /// Generate a `CodeGeneratorResponse` from a protoc `CodeGeneratorRequest`.
 ///
 /// This is the entry point for the protoc plugin (`protoc-gen-connect-rust`).
-/// It parses the comma-separated `request.parameter` into [`Options`],
-/// delegates to [`generate_files`], and adds a `mod.rs` that assembles the
-/// generated files into a module tree.
+/// It parses the comma-separated `request.parameter` into [`Options`] and
+/// delegates to [`generate_services`] — service stubs only. Callers must
+/// run `protoc-gen-buffa` (or equivalent) separately for message types.
+///
+/// # Recognized options
+///
+/// - `extern_path=<proto>=<rust>` — map a proto package prefix to a Rust
+///   module path. Repeatable. At least a `.` catch-all is required for
+///   every input/output type to resolve.
+/// - `mod_file=<name>` — emit a module-tree file with the given name
+///   (e.g. `mod.rs`). Requires `strategy: all` in buf.gen.yaml. If omitted,
+///   no module-tree file is emitted.
+/// - `strict_utf8_mapping` — see [`Options::strict_utf8_mapping`].
+/// - `no_json` — disable `serde` derives on generated message types.
+///   Ignored in this plugin (no message types emitted); accepted for
+///   compatibility with the unified path.
 pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse> {
     let mut options = Options::default();
+    let mut mod_file: Option<String> = None;
 
-    // Parse plugin options from the comma-separated `parameter` string.
-    // Example: buf.gen.yaml `opt: ["strict_utf8_mapping"]`
-    // → protoc `--plugin_opt=strict_utf8_mapping` → request.parameter.
     if let Some(ref param) = request.parameter {
         for opt in param.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            match opt {
-                "strict_utf8_mapping" => options.strict_utf8_mapping = true,
-                "no_json" => options.generate_json = false,
-                _ => {
-                    return Err(anyhow::anyhow!(
-                        "unknown plugin option: {opt:?}. Supported: strict_utf8_mapping, no_json"
-                    ));
+            if let Some(value) = opt.strip_prefix("extern_path=") {
+                // value is "<proto_path>=<rust_path>"
+                let (proto, rust) = value.split_once('=').ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "invalid extern_path format {value:?}, expected \
+                         extern_path=.proto.pkg=::rust::path"
+                    )
+                })?;
+                let proto = proto.trim();
+                let rust = rust.trim();
+                if proto.is_empty() || rust.is_empty() {
+                    anyhow::bail!(
+                        "invalid extern_path format {value:?}, expected \
+                         extern_path=.proto.pkg=::rust::path (both sides non-empty)"
+                    );
+                }
+                let mut proto = proto.to_string();
+                if !proto.starts_with('.') {
+                    proto.insert(0, '.');
+                }
+                options.extern_paths.push((proto, rust.to_string()));
+            } else if let Some(value) = opt.strip_prefix("mod_file=") {
+                mod_file = Some(value.trim().to_string());
+            } else {
+                match opt {
+                    "strict_utf8_mapping" => options.strict_utf8_mapping = true,
+                    "no_json" => options.generate_json = false,
+                    _ => {
+                        return Err(anyhow::anyhow!(
+                            "unknown plugin option: {opt:?}. Supported: \
+                             extern_path=<proto>=<rust>, mod_file=<name>, \
+                             strict_utf8_mapping, no_json"
+                        ));
+                    }
                 }
             }
         }
     }
 
-    let generated = generate_files(&request.proto_file, &request.file_to_generate, &options)?;
+    let generated = generate_services(&request.proto_file, &request.file_to_generate, &options)?;
 
-    // Build the mod.rs module tree from (file-name, package) pairs.
-    let entries: Vec<(&str, &str)> = generated
-        .iter()
-        .map(|g| {
-            let package = request
-                .proto_file
-                .iter()
-                .find(|fd| {
-                    fd.name
-                        .as_deref()
-                        .is_some_and(|n| buffa_codegen::proto_path_to_rust_module(n) == g.name)
-                })
-                .and_then(|fd| fd.package.as_deref())
-                .unwrap_or("");
-            (g.name.as_str(), package)
-        })
-        .collect();
-
-    let mod_content = buffa_codegen::generate_module_tree(&entries, "", true);
-
-    // Build CodeGeneratorResponse
     let mut files: Vec<CodeGeneratorResponseFile> = generated
-        .into_iter()
+        .iter()
         .map(|g| CodeGeneratorResponseFile {
-            name: Some(g.name),
-            content: Some(g.content),
+            name: Some(g.name.clone()),
+            content: Some(g.content.clone()),
             ..Default::default()
         })
         .collect();
 
-    // Add mod.rs
-    files.push(CodeGeneratorResponseFile {
-        name: Some("mod.rs".to_string()),
-        content: Some(mod_content),
-        ..Default::default()
-    });
+    if let Some(mod_file_name) = mod_file {
+        // Build (file_name, package) entries for the service files only.
+        let entries: Vec<(&str, &str)> = generated
+            .iter()
+            .map(|g| {
+                let package = request
+                    .proto_file
+                    .iter()
+                    .find(|fd| {
+                        fd.name
+                            .as_deref()
+                            .is_some_and(|n| buffa_codegen::proto_path_to_rust_module(n) == g.name)
+                    })
+                    .and_then(|fd| fd.package.as_deref())
+                    .unwrap_or("");
+                (g.name.as_str(), package)
+            })
+            .collect();
+
+        let mod_content = buffa_codegen::generate_module_tree(&entries, "", true);
+        files.push(CodeGeneratorResponseFile {
+            name: Some(mod_file_name),
+            content: Some(mod_content),
+            ..Default::default()
+        });
+    }
 
     Ok(CodeGeneratorResponse {
         supported_features: Some(feature_flags()),
@@ -248,6 +339,12 @@ fn doc_attrs(text: &str) -> TokenStream {
 /// types (`outer::Inner`). Zero drift with buffa's own generation.
 struct TypeResolver<'a> {
     ctx: buffa_codegen::context::CodeGenContext<'a>,
+    /// When true, every resolved path must be absolute (`::foo` or
+    /// `crate::foo`). Paths that would resolve to `super::`-relative or
+    /// bare-ident forms produce an error instead. Used by
+    /// [`generate_services`] to enforce that service stubs reference
+    /// message types via `extern_path` only.
+    require_extern: bool,
 }
 
 impl<'a> TypeResolver<'a> {
@@ -255,6 +352,7 @@ impl<'a> TypeResolver<'a> {
         proto_file: &'a [FileDescriptorProto],
         file_to_generate: &[String],
         config: &'a buffa_codegen::CodeGenConfig,
+        require_extern: bool,
     ) -> Self {
         Self {
             ctx: buffa_codegen::context::CodeGenContext::for_generate(
@@ -262,32 +360,48 @@ impl<'a> TypeResolver<'a> {
                 file_to_generate,
                 config,
             ),
+            require_extern,
         }
     }
 
-    /// Resolve a proto FQN (e.g. `.google.protobuf.Empty`) to Rust type-path
-    /// tokens relative to `current_package`. Falls back to the bare type name
-    /// if the type is not in the context (malformed proto or missing import).
-    fn rust_type(&self, proto_fqn: &str, current_package: &str) -> TokenStream {
-        if let Some(path) = self.ctx.rust_type_relative(proto_fqn, current_package, 0) {
-            return buffa_codegen::idents::rust_path_to_tokens(&path);
+    /// Resolve a proto FQN (e.g. `.google.protobuf.Empty`) to a Rust type-path
+    /// string relative to `current_package`.
+    ///
+    /// In `require_extern` mode, errors if the path is not absolute or the
+    /// type is absent from the descriptor set. Otherwise falls back to the
+    /// bare type name for unknown types (rustc will point at the use site).
+    fn resolve_path(&self, proto_fqn: &str, current_package: &str) -> Result<String> {
+        match self.ctx.rust_type_relative(proto_fqn, current_package, 0) {
+            Some(path) => {
+                if self.require_extern && !path.starts_with("::") && !path.starts_with("crate::") {
+                    anyhow::bail!(
+                        "type {proto_fqn} is not covered by any extern_path mapping. \
+                         Add extern_path=.=<your_buffa_module> (e.g. \
+                         extern_path=.=crate::proto) to the plugin opts."
+                    );
+                }
+                Ok(path)
+            }
+            None if self.require_extern => anyhow::bail!(
+                "type {proto_fqn} not found in descriptor set (missing proto import?)"
+            ),
+            None => Ok(bare_type_name(proto_fqn).to_string()),
         }
-        // Fallback: unknown type. Emit the bare identifier and let rustc
-        // produce a meaningful compile error pointing at the generated code.
-        let bare = bare_type_name(proto_fqn);
-        let ident = format_ident!("{bare}");
-        quote! { #ident }
     }
 
-    /// Like `rust_type` but appends `View` to the last path segment, e.g.
-    /// `super::foo::Bar` → `super::foo::BarView`.
-    fn rust_view_type(&self, proto_fqn: &str, current_package: &str) -> TokenStream {
-        if let Some(path) = self.ctx.rust_type_relative(proto_fqn, current_package, 0) {
-            return buffa_codegen::idents::rust_path_to_tokens(&format!("{path}View"));
-        }
-        let bare = bare_type_name(proto_fqn);
-        let ident = format_ident!("{bare}View");
-        quote! { #ident }
+    /// Resolve a proto FQN to Rust type-path tokens.
+    fn rust_type(&self, proto_fqn: &str, current_package: &str) -> Result<TokenStream> {
+        let path = self.resolve_path(proto_fqn, current_package)?;
+        Ok(buffa_codegen::idents::rust_path_to_tokens(&path))
+    }
+
+    /// Like [`rust_type`] but appends `View` to the last path segment, e.g.
+    /// `super::foo::Bar` -> `super::foo::BarView`.
+    fn rust_view_type(&self, proto_fqn: &str, current_package: &str) -> Result<TokenStream> {
+        let path = self.resolve_path(proto_fqn, current_package)?;
+        Ok(buffa_codegen::idents::rust_path_to_tokens(&format!(
+            "{path}View"
+        )))
     }
 }
 
@@ -681,7 +795,7 @@ fn generate_service_server(
     for m in &service.method {
         let method_name = m.name.as_deref().unwrap_or("");
         let method_snake = format_ident!("{}", method_name.to_snake_case());
-        let input_view = resolver.rust_view_type(m.input_type.as_deref().unwrap_or(""), package);
+        let input_view = resolver.rust_view_type(m.input_type.as_deref().unwrap_or(""), package)?;
         let cs = m.client_streaming.unwrap_or(false);
         let ss = m.server_streaming.unwrap_or(false);
 
@@ -876,8 +990,8 @@ fn generate_trait_method(
     let method_name = method.name.as_deref().unwrap_or("");
     let method_snake = format_ident!("{}", method_name.to_snake_case());
     let input_view_type =
-        resolver.rust_view_type(method.input_type.as_deref().unwrap_or(""), package);
-    let output_type = resolver.rust_type(method.output_type.as_deref().unwrap_or(""), package);
+        resolver.rust_view_type(method.input_type.as_deref().unwrap_or(""), package)?;
+    let output_type = resolver.rust_type(method.output_type.as_deref().unwrap_or(""), package)?;
 
     // Get method documentation
     let method_doc = get_method_comment(file, service, method).unwrap_or_default();
@@ -950,9 +1064,9 @@ fn generate_client_method(
     let method_name = method.name.as_deref().unwrap_or("");
     let method_snake = format_ident!("{}", method_name.to_snake_case());
     let method_with_opts = format_ident!("{}_with_options", method_name.to_snake_case());
-    let input_type = resolver.rust_type(method.input_type.as_deref().unwrap_or(""), package);
+    let input_type = resolver.rust_type(method.input_type.as_deref().unwrap_or(""), package)?;
     let output_view_type =
-        resolver.rust_view_type(method.output_type.as_deref().unwrap_or(""), package);
+        resolver.rust_view_type(method.output_type.as_deref().unwrap_or(""), package)?;
 
     let client_streaming = method.client_streaming.unwrap_or(false);
     let server_streaming = method.server_streaming.unwrap_or(false);
@@ -1200,19 +1314,28 @@ mod tests {
     /// Generate service code for `files[target_idx]`. All files are visible
     /// to the resolver (as transitive deps via `--include_imports`), but
     /// only the target is in `file_to_generate` — mirroring real protoc use.
-    fn gen_service(files: &[FileDescriptorProto], target_idx: usize) -> String {
-        let config = buffa_codegen::CodeGenConfig::default();
+    ///
+    /// `extern_paths` is wired into `CodeGenConfig.extern_paths` (which
+    /// feeds the resolver's type_map via `effective_extern_paths`).
+    /// `require_extern` selects unified (`false`, super::-relative) vs
+    /// split (`true`, absolute-only) mode.
+    fn gen_service(
+        files: &[FileDescriptorProto],
+        target_idx: usize,
+        extern_paths: &[(String, String)],
+        require_extern: bool,
+    ) -> Result<String> {
+        let mut config = buffa_codegen::CodeGenConfig::default();
+        config.extern_paths = extern_paths.to_vec();
         let target_name = files[target_idx]
             .name
             .clone()
             .into_iter()
             .collect::<Vec<_>>();
-        let resolver = TypeResolver::new(files, &target_name, &config);
+        let resolver = TypeResolver::new(files, &target_name, &config, require_extern);
         let file = &files[target_idx];
         let service = &file.service[0];
-        generate_service(file, service, &resolver)
-            .unwrap()
-            .to_string()
+        Ok(generate_service(file, service, &resolver)?.to_string())
     }
 
     #[test]
@@ -1223,7 +1346,7 @@ mod tests {
             ".example.v1.PingResp",
             &["PingReq", "PingResp"],
         );
-        let code = gen_service(std::slice::from_ref(&file), 0);
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
         assert!(code.contains("\"example.v1.PingService\""), "got: {code}");
     }
 
@@ -1231,7 +1354,7 @@ mod tests {
     fn service_name_without_package() {
         // Empty package must produce "PingService", not ".PingService".
         let file = minimal_file(None, ".PingReq", ".PingResp", &["PingReq", "PingResp"]);
-        let code = gen_service(std::slice::from_ref(&file), 0);
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
         assert!(code.contains("\"PingService\""), "got: {code}");
         assert!(
             !code.contains("\".PingService\""),
@@ -1247,7 +1370,7 @@ mod tests {
             ".example.v1.PingResp",
             &["PingReq", "PingResp"],
         );
-        let code = gen_service(std::slice::from_ref(&file), 0);
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
         // Same-package types resolve to bare identifiers.
         assert!(code.contains("PingReq"), "input type missing: {code}");
         assert!(code.contains("PingResp"), "output type missing: {code}");
@@ -1278,7 +1401,7 @@ mod tests {
             ".example.v1.Out",
             &["Out"],
         );
-        let code = gen_service(&[common, svc], 1);
+        let code = gen_service(&[common, svc], 1, &[], false).unwrap();
 
         // example.v1 -> super::super -> common::v1::Shared
         // (token stream stringifies `::` with spaces, so match loosely)
@@ -1312,11 +1435,95 @@ mod tests {
             ".example.v1.Out",
             &["Out"],
         );
-        let code = gen_service(&[wkt, svc], 1);
+        let code = gen_service(&[wkt, svc], 1, &[], false).unwrap();
 
         assert!(
             code.contains(":: buffa_types :: google :: protobuf :: Empty"),
             "WKT extern path not emitted: {code}"
+        );
+    }
+
+    #[test]
+    fn extern_catchall_uses_absolute_paths() {
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let extern_paths = [(".".into(), "crate::proto".into())];
+        let code = gen_service(std::slice::from_ref(&file), 0, &extern_paths, true).unwrap();
+        assert!(
+            code.contains("crate :: proto :: example :: v1 :: PingReq"),
+            "owned type path missing: {code}"
+        );
+        assert!(
+            code.contains("crate :: proto :: example :: v1 :: PingReqView"),
+            "view type path missing: {code}"
+        );
+    }
+
+    #[test]
+    fn extern_catchall_with_wkt_longest_wins() {
+        // Auto-injected `.google.protobuf` mapping is more specific than
+        // the `.` catch-all, so WKTs still route to ::buffa_types.
+        let wkt = FileDescriptorProto {
+            name: Some("google/protobuf/empty.proto".into()),
+            package: Some("google.protobuf".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Empty".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let svc = minimal_file(
+            Some("example.v1"),
+            ".google.protobuf.Empty",
+            ".example.v1.Out",
+            &["Out"],
+        );
+        let extern_paths = [(".".into(), "crate::proto".into())];
+        let code = gen_service(&[wkt, svc], 1, &extern_paths, true).unwrap();
+        assert!(
+            code.contains(":: buffa_types :: google :: protobuf :: Empty"),
+            "WKT mapping lost to catch-all: {code}"
+        );
+        assert!(
+            code.contains("crate :: proto :: example :: v1 :: Out"),
+            "local type not routed through catch-all: {code}"
+        );
+    }
+
+    #[test]
+    fn missing_extern_path_errors() {
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let err = gen_service(std::slice::from_ref(&file), 0, &[], true).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("extern_path"),
+            "error message lacks hint: {msg}"
+        );
+    }
+
+    #[test]
+    fn keyword_package_escaped() {
+        // `google.type` -> `google::r#type` via idents::rust_path_to_tokens.
+        let file = minimal_file(
+            Some("google.type"),
+            ".google.type.LatLng",
+            ".google.type.LatLng",
+            &["LatLng"],
+        );
+        let extern_paths = [(".".into(), "crate::proto".into())];
+        let code = gen_service(std::slice::from_ref(&file), 0, &extern_paths, true).unwrap();
+        assert!(
+            code.contains("crate :: proto :: google :: r#type :: LatLng"),
+            "keyword segment not escaped: {code}"
         );
     }
 }
