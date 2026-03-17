@@ -83,7 +83,14 @@ fn server_name_from_uri(uri: &Uri) -> Result<rustls_pki_types::ServerName<'stati
     let host = uri.host().ok_or_else(|| {
         ConnectError::invalid_argument("URI must have a host for TLS server name resolution")
     })?;
-    rustls_pki_types::ServerName::try_from(host.to_owned()).map_err(|e| {
+    // `Uri::host()` includes brackets for IPv6 literals (e.g. `[::1]`). Strip
+    // them so `ServerName::try_from` parses the address as `IpAddress`
+    // instead of rejecting it as an invalid DNS name.
+    let stripped = host
+        .strip_prefix('[')
+        .and_then(|s| s.strip_suffix(']'))
+        .unwrap_or(host);
+    rustls_pki_types::ServerName::try_from(stripped.to_owned()).map_err(|e| {
         ConnectError::invalid_argument(format!("invalid TLS server name '{host}': {e}"))
     })
 }
@@ -814,6 +821,20 @@ mod tests {
     fn server_name_from_uri_extracts_host() {
         let name = server_name_from_uri(&"https://example.com:8080/path".parse().unwrap()).unwrap();
         assert_eq!(format!("{name:?}"), "DnsName(\"example.com\")");
+    }
+
+    #[cfg(feature = "client-tls")]
+    #[test]
+    fn server_name_from_uri_ipv4() {
+        let name = server_name_from_uri(&"https://10.0.0.1:8443".parse().unwrap()).unwrap();
+        assert!(matches!(name, rustls_pki_types::ServerName::IpAddress(_)));
+    }
+
+    #[cfg(feature = "client-tls")]
+    #[test]
+    fn server_name_from_uri_ipv6_strips_brackets() {
+        let name = server_name_from_uri(&"https://[::1]:8443".parse().unwrap()).unwrap();
+        assert!(matches!(name, rustls_pki_types::ServerName::IpAddress(_)));
     }
 
     #[cfg(feature = "client-tls")]
