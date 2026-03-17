@@ -554,6 +554,61 @@ mod tests {
         }
     }
 
+    /// Regression test for the half-duplex deadlock on `SharedHttp2Connection`.
+    ///
+    /// Before the fix, `call_bidi_stream` stored the transport's `send()`
+    /// future unpolled in `RecvState::Pending`, so the HTTP request never
+    /// initiated until the first `message()` call. `BidiStream::send()`
+    /// would buffer into the 32-deep mpsc with nobody draining it, and the
+    /// 33rd send would hang forever. After the fix, the send future is
+    /// spawned so the request streams immediately.
+    ///
+    /// Timeout-wrapped so a regression fails fast instead of hanging the
+    /// suite.
+    #[tokio::test]
+    async fn bidi_half_duplex_many_sends_before_first_read() {
+        use connectrpc::Protocol;
+        use connectrpc::client::Http2Connection;
+
+        let (addr, _server) = start_server_mono().await;
+        let uri: http::Uri = format!("http://{addr}").parse().unwrap();
+
+        let conn = Http2Connection::connect_plaintext(uri.clone())
+            .await
+            .unwrap()
+            .shared(64);
+        let config = ClientConfig::new(uri).protocol(Protocol::Grpc);
+        let client = EchoServiceClient::new(conn, config);
+
+        let test = async {
+            let mut stream = client.bidi_stream().await.unwrap();
+            // More than the 32-deep ChannelBody mpsc. Pre-fix, send #33 hangs
+            // here; post-fix, the spawned task drains as we go.
+            for i in 0..40 {
+                stream
+                    .send(EchoRequest {
+                        sequence: i,
+                        data: format!("half-duplex-{i}"),
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+            }
+            stream.close_send();
+
+            let mut received = 0;
+            while let Some(resp) = stream.message().await.unwrap() {
+                assert_eq!(resp.data, format!("half-duplex-{}", resp.sequence));
+                received += 1;
+            }
+            assert_eq!(received, 40);
+        };
+
+        tokio::time::timeout(std::time::Duration::from_secs(10), test)
+            .await
+            .expect("half-duplex bidi deadlocked (send #33 never completed?)");
+    }
+
     // ========================================================================
     // TLS integration tests — dogfood HttpClient::with_tls and
     // Http2Connection::connect_tls against our own Server::with_tls.

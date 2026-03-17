@@ -2183,13 +2183,24 @@ impl Body for ChannelBody {
 
 /// State machine for the receive side of a [`BidiStream`].
 ///
-/// The response future is stored and awaited lazily on the first
-/// [`BidiStream::message`] call, so servers that wait for the first request
-/// message before sending response headers don't deadlock.
+/// The transport send is spawned so the HTTP request makes progress
+/// immediately (connect, handshake, start streaming the request body from
+/// [`ChannelBody`]) regardless of when the caller first calls
+/// [`BidiStream::message`]. Without the spawn, a transport whose `send()`
+/// future contains the actual connect/stream work (e.g.,
+/// [`SharedHttp2Connection`]) would not initiate the request until
+/// `message()` is called — so the half-duplex pattern (send all, then
+/// read) would buffer into the 32-deep mpsc with nobody draining it, and
+/// deadlock on the 33rd send.
+///
+/// The response HEADERS future (what the spawned task resolves to) is still
+/// awaited lazily on the first `message()` call, so servers that wait for
+/// the first request message before sending HEADERS don't deadlock either.
 enum RecvState<B, RespView> {
-    /// Response HEADERS not yet received. The boxed future resolves when
-    /// hyper reads the HEADERS frame.
-    Pending(BoxFuture<'static, Result<Response<B>, ConnectError>>),
+    /// Request initiated in a spawned task; response HEADERS not yet
+    /// received. Awaiting the handle yields the [`Response`] once hyper
+    /// reads the HEADERS frame.
+    Pending(tokio::task::JoinHandle<Result<Response<B>, ConnectError>>),
     /// HEADERS received; response-side decoding delegates to [`ServerStream`].
     Ready(Box<ServerStream<B, RespView>>),
     /// Transport error or make_server_stream error stored on self.construct_err.
@@ -2241,9 +2252,9 @@ pub struct BidiStream<B, Req, RespView> {
     _req: PhantomData<Req>,
 }
 
-// Manual impl: `RecvState` holds a `BoxFuture` (never `Debug`), and the body
-// type inside `ServerStream` typically isn't either. Print send-channel state,
-// recv-state discriminant, and any construction error for test diagnostics.
+// Manual impl: the body type inside `ServerStream` typically isn't `Debug`,
+// and the JoinHandle's inner type wouldn't format usefully anyway. Print
+// send-channel state, recv-state discriminant, and any construction error.
 impl<B, Req, RespView> std::fmt::Debug for BidiStream<B, Req, RespView> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let recv_state = match &self.recv {
@@ -2349,15 +2360,24 @@ where
 
         // Transition Pending -> Ready on first call.
         if matches!(self.recv, RecvState::Pending(_)) {
-            // Take the future out so we can await it (borrow check).
-            let RecvState::Pending(fut) = std::mem::replace(&mut self.recv, RecvState::Failed)
+            // Take the handle out so we can await it (borrow check).
+            let RecvState::Pending(handle) = std::mem::replace(&mut self.recv, RecvState::Failed)
             else {
                 unreachable!()
             };
 
             // Bound the response-HEADERS wait by the whole-call deadline.
             // A server that never sends headers shouldn't block forever.
-            match with_deadline(self.stream_config.deadline, fut).await {
+            // The spawned task either resolves or is cancelled: if we hit the
+            // deadline here and drop the handle, the task detaches — but the
+            // dropped tx (on BidiStream drop) will end the body stream, which
+            // ends the request, which completes the detached task naturally.
+            let awaited = async move {
+                handle.await.map_err(|e| {
+                    ConnectError::internal(format!("transport send task panicked: {e}"))
+                })?
+            };
+            match with_deadline(self.stream_config.deadline, awaited).await {
                 Ok(response) => {
                     let cfg = &self.stream_config;
                     match make_server_stream(
@@ -2505,22 +2525,22 @@ where
         .body(body)
         .map_err(|e| ConnectError::internal(format!("failed to build request: {e}")))?;
 
-    // Start the request but DON'T await it — the response future resolves
-    // when HEADERS arrive, which may not happen until after the first send().
-    // The future is awaited lazily in BidiStream::message().
+    // Spawn the transport send so the request initiates immediately and
+    // ChannelBody gets polled as sends happen, independent of when the
+    // caller first calls message(). See RecvState doc for the deadlock
+    // this avoids.
     let response_fut = transport.send(http_request);
-    let response_fut: BoxFuture<'static, Result<Response<T::ResponseBody>, ConnectError>> =
-        Box::pin(async move {
-            response_fut
-                .await
-                .map_err(|e| ConnectError::unavailable(format!("request failed: {e}")))
-        });
+    let response_task = tokio::spawn(async move {
+        response_fut
+            .await
+            .map_err(|e| ConnectError::unavailable(format!("request failed: {e}")))
+    });
 
     Ok(BidiStream {
         tx: Some(tx),
         encoder,
         codec_format: config.codec_format,
-        recv: RecvState::Pending(response_fut),
+        recv: RecvState::Pending(response_task),
         stream_config: StreamConfig {
             protocol: config.protocol,
             codec_format: config.codec_format,
