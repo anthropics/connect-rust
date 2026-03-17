@@ -76,29 +76,36 @@ jobs:
       - run: sudo apt-get install -y protobuf-compiler
       - run: ./examples/multiservice/test.sh
 
-  # Conformance tests: validate protocol compliance
+  # Conformance tests: validate protocol compliance.
+  # Matrix runs server and client suites in parallel — the server suite
+  # (~20s) finishes in the shadow of the client suite (~90s), so the
+  # duplicated build is net-faster than running both serially.
   conformance:
-    name: Conformance
+    name: Conformance (${{ matrix.mode }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: server
+            config: conformance/config/connect-only.yaml
+            bin: conformance-server
+          - mode: client
+            config: conformance/config/client-connect-only.yaml
+            bin: conformance-client
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get install -y protobuf-compiler
       - name: Download conformance runner
         run: ./conformance/scripts/download-conformance.sh
-      - name: Build conformance binaries
-        run: cargo build --release -p connectrpc-conformance
-      - name: Server conformance (Connect)
+      - name: Build conformance binary
+        run: cargo build --release -p connectrpc-conformance --bin ${{ matrix.bin }}
+      - name: Run conformance suite
         run: |
-          ./conformance/bin/connectconformance --mode server \
-            --conf conformance/config/connect-only.yaml \
-            -- ./target/release/conformance-server
-      - name: Client conformance (Connect)
-        run: |
-          ./conformance/bin/connectconformance --mode client \
-            --conf conformance/config/client-connect-only.yaml \
-            -- ./target/release/conformance-client
+          ./conformance/bin/connectconformance --mode ${{ matrix.mode }} \
+            --conf ${{ matrix.config }} \
+            -- ./target/release/${{ matrix.bin }}
 
   # Test with minimal feature set
   minimal:
