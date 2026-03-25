@@ -59,12 +59,60 @@ use std::sync::Arc;
 ///
 /// A combining supertrait is needed because `dyn TraitA + TraitB` only works
 /// when at most one trait is non-auto (Read and Write are both non-auto).
-#[cfg(feature = "client-tls")]
 trait H2Io: hyper::rt::Read + hyper::rt::Write + Send + Unpin {}
-#[cfg(feature = "client-tls")]
 impl<T: hyper::rt::Read + hyper::rt::Write + Send + Unpin> H2Io for T {}
-#[cfg(feature = "client-tls")]
 type BoxedIo = Pin<Box<dyn H2Io>>;
+
+/// Type-erased connector stored in `MakeSendRequest.custom`. Callers of
+/// [`Http2Connection::lazy_with_connector`] provide an unboxed `C`; it's
+/// normalized to this shape via `ServiceExt::map_response` + `map_err` +
+/// `tower::util::BoxService::new`.
+type BoxedConnector = tower::util::BoxService<Uri, BoxedIo, BoxError>;
+
+/// Normalize a caller's connector to `BoxedConnector`: box the IO, coerce
+/// the error, box the future. Callers just return their concrete stream
+/// type (e.g. `TokioIo<UnixStream>`) and any `Into<BoxError>` error.
+fn box_connector<C>(connector: C) -> BoxedConnector
+where
+    C: tower::Service<Uri> + Send + 'static,
+    C::Response: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
+    C::Error: Into<BoxError>,
+    C::Future: Send + 'static,
+{
+    use tower::ServiceExt;
+    tower::util::BoxService::new(
+        connector
+            .map_response(|io| Box::pin(io) as BoxedIo)
+            .map_err(Into::into),
+    )
+}
+
+/// Build a connector that dials a Unix domain socket. The URI argument
+/// is ignored — `:authority` is supplied separately to
+/// [`Http2Connection::lazy_unix`].
+#[cfg(unix)]
+fn unix_connector(
+    path: std::path::PathBuf,
+) -> impl tower::Service<
+    Uri,
+    Response = hyper_util::rt::TokioIo<tokio::net::UnixStream>,
+    Error = ConnectError,
+    Future: Send + 'static,
+> + Send
++ 'static {
+    tower::service_fn(move |_uri: Uri| {
+        let path = path.clone();
+        async move {
+            let stream = tokio::net::UnixStream::connect(&path).await.map_err(|e| {
+                ConnectError::unavailable(format!(
+                    "unix socket connect to {} failed: {e}",
+                    path.display()
+                ))
+            })?;
+            Ok(hyper_util::rt::TokioIo::new(stream))
+        }
+    })
+}
 
 /// Prepare a TLS config for HTTP/2: clone the caller's config and set ALPN.
 ///
@@ -245,6 +293,103 @@ impl Http2Connection {
         Self {
             inner: Reconnect::new(MakeSendRequest::with_builder(builder), uri, true),
         }
+    }
+
+    /// Create an h2c connection using a **caller-supplied connector** that
+    /// establishes lazily on first `poll_ready`.
+    ///
+    /// The connector may return any stream implementing `hyper::rt::Read +
+    /// Write + Send + Unpin` — boxing happens internally. The h2 handshake
+    /// runs over that stream after the connector resolves. This is the
+    /// escape hatch for transports the built-in constructors don't cover
+    /// (Unix sockets, in-memory pipes, pre-wrapped mTLS, etc.) — same
+    /// pattern as tonic's `Endpoint::connect_with_connector`.
+    ///
+    /// `authority` becomes the HTTP/2 `:authority` pseudo-header and the
+    /// base for request path construction (`{authority}/{service}/{method}`).
+    /// For local IPC, `http://localhost` is typical.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use connectrpc::client::Http2Connection;
+    /// # use http::Uri;
+    /// let conn = Http2Connection::lazy_with_connector(
+    ///     tower::service_fn(|_uri: Uri| async {
+    ///         let stream = tokio::net::UnixStream::connect("/tmp/app.sock").await?;
+    ///         Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(stream))
+    ///     }),
+    ///     "http://localhost".parse().unwrap(),
+    /// );
+    /// ```
+    pub fn lazy_with_connector<C>(connector: C, authority: Uri) -> Self
+    where
+        C: tower::Service<Uri> + Send + 'static,
+        C::Response: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
+        C::Error: Into<BoxError>,
+        C::Future: Send + 'static,
+    {
+        Self {
+            inner: Reconnect::new(
+                MakeSendRequest::new_custom(box_connector(connector)),
+                authority,
+                true,
+            ),
+        }
+    }
+
+    /// Eagerly establish an h2c connection using a **caller-supplied connector**.
+    ///
+    /// Returns an error if the connector or h2 handshake fails. See
+    /// [`lazy_with_connector`](Self::lazy_with_connector) for details.
+    pub async fn connect_with_connector<C>(
+        connector: C,
+        authority: Uri,
+    ) -> Result<Self, ConnectError>
+    where
+        C: tower::Service<Uri> + Send + 'static,
+        C::Response: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
+        C::Error: Into<BoxError>,
+        C::Future: Send + 'static,
+    {
+        let mut conn = Self {
+            inner: Reconnect::new(
+                MakeSendRequest::new_custom(box_connector(connector)),
+                authority,
+                false,
+            ),
+        };
+        std::future::poll_fn(|cx| conn.inner.poll_ready(cx))
+            .await
+            .map_err(|e| ConnectError::unavailable(format!("connect failed: {e}")))?;
+        Ok(conn)
+    }
+
+    /// Create an h2c connection over a **Unix domain socket** that
+    /// establishes lazily on first `poll_ready`. Convenience wrapper over
+    /// [`lazy_with_connector`](Self::lazy_with_connector).
+    ///
+    /// The server must speak h2c (cleartext HTTP/2) on the socket —
+    /// `connect-go` servers do by default via `h2c.NewHandler`.
+    ///
+    /// `authority` sets the HTTP/2 `:authority` pseudo-header. For
+    /// local IPC sockets, `http://localhost` is typical; the server
+    /// generally doesn't validate it.
+    #[cfg(unix)]
+    pub fn lazy_unix(path: impl Into<std::path::PathBuf>, authority: Uri) -> Self {
+        Self::lazy_with_connector(unix_connector(path.into()), authority)
+    }
+
+    /// Eagerly establish an h2c connection over a **Unix domain socket**.
+    ///
+    /// Returns an error if the socket path doesn't exist or the h2
+    /// handshake fails. See [`lazy_unix`](Self::lazy_unix) for details.
+    #[cfg(unix)]
+    pub async fn connect_unix(
+        path: impl Into<std::path::PathBuf>,
+        authority: Uri,
+    ) -> Result<Self, ConnectError> {
+        Self::connect_with_connector(unix_connector(path.into()), authority).await
     }
 
     /// Create a **TLS** h2 connection that establishes lazily on first
@@ -454,6 +599,10 @@ struct MakeSendRequest {
     /// When `None`, plaintext h2c — URI scheme must be http://.
     #[cfg(feature = "client-tls")]
     tls: Option<Arc<rustls::ClientConfig>>,
+    /// Caller-supplied connector. When `Some`, `call()` uses this to dial
+    /// instead of the built-in `HttpConnector`; the URI is used only for the
+    /// h2 `:authority` pseudo-header. See [`Http2Connection::lazy_with_connector`].
+    custom: Option<BoxedConnector>,
 }
 
 impl MakeSendRequest {
@@ -467,6 +616,7 @@ impl MakeSendRequest {
             builder,
             #[cfg(feature = "client-tls")]
             tls: None,
+            custom: None,
         }
     }
 
@@ -480,6 +630,23 @@ impl MakeSendRequest {
             builder,
             #[cfg(feature = "client-tls")]
             tls: None,
+            custom: None,
+        }
+    }
+
+    fn new_custom(conn: BoxedConnector) -> Self {
+        // `connector` is unused when `custom` is Some — `call()` branches
+        // to the custom connector before touching it. Kept to avoid
+        // restructuring the shared struct; HttpConnector::new() is cheap.
+        let connector = hyper_util::client::legacy::connect::HttpConnector::new();
+        let builder =
+            hyper::client::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new());
+        Self {
+            connector,
+            builder,
+            #[cfg(feature = "client-tls")]
+            tls: None,
+            custom: Some(conn),
         }
     }
 
@@ -495,6 +662,7 @@ impl MakeSendRequest {
             connector,
             builder,
             tls: Some(prepare_tls_for_h2(&tls)),
+            custom: None,
         }
     }
 
@@ -510,6 +678,7 @@ impl MakeSendRequest {
             connector,
             builder,
             tls: Some(prepare_tls_for_h2(&tls)),
+            custom: None,
         }
     }
 }
@@ -520,10 +689,30 @@ impl tower::Service<Uri> for MakeSendRequest {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        if let Some(c) = &mut self.custom {
+            return c.poll_ready(cx);
+        }
         <_ as tower::Service<Uri>>::poll_ready(&mut self.connector, cx).map_err(Into::into)
     }
 
     fn call(&mut self, uri: Uri) -> Self::Future {
+        if let Some(c) = &mut self.custom {
+            let io_fut = c.call(uri);
+            let builder = self.builder.clone();
+            return Box::pin(async move {
+                let io = io_fut.await?;
+                let (send_request, conn) = builder.handshake(io).await?;
+                tokio::spawn(async move {
+                    if let Err(e) = conn.await {
+                        tracing::debug!("h2 connection task exited with error: {e}");
+                    }
+                });
+                Ok(SendRequest {
+                    inner: send_request,
+                })
+            });
+        }
+
         // Scheme check based on TLS configuration. Catches mismatched
         // schemes for lazy_* constructors (which defer the check to here
         // via Reconnect's deferred_error mechanism).
