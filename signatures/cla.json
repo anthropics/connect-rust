@@ -1,3 +1,12 @@
 {
-   "signedContributors": []
+  "signedContributors": [
+    {
+      "name": "iantay-ant",
+      "id": 232680153,
+      "comment_id": 4130405832,
+      "created_at": "2026-03-25T23:08:41Z",
+      "repoId": 1172812784,
+      "pullRequestNo": 15
+    }
+  ]
 }
