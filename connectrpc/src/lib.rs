@@ -149,6 +149,7 @@
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 // Core modules (always available)
 pub mod codec;

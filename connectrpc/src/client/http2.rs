@@ -311,7 +311,7 @@ impl Http2Connection {
     ///
     /// # Example
     ///
-    /// ```no_run
+    /// ```ignore
     /// # use connectrpc::client::Http2Connection;
     /// # use http::Uri;
     /// let conn = Http2Connection::lazy_with_connector(
@@ -376,6 +376,7 @@ impl Http2Connection {
     /// local IPC sockets, `http://localhost` is typical; the server
     /// generally doesn't validate it.
     #[cfg(unix)]
+    #[cfg_attr(docsrs, doc(cfg(unix)))]
     pub fn lazy_unix(path: impl Into<std::path::PathBuf>, authority: Uri) -> Self {
         Self::lazy_with_connector(unix_connector(path.into()), authority)
     }
@@ -385,6 +386,7 @@ impl Http2Connection {
     /// Returns an error if the socket path doesn't exist or the h2
     /// handshake fails. See [`lazy_unix`](Self::lazy_unix) for details.
     #[cfg(unix)]
+    #[cfg_attr(docsrs, doc(cfg(unix)))]
     pub async fn connect_unix(
         path: impl Into<std::path::PathBuf>,
         authority: Uri,
@@ -1041,5 +1043,61 @@ mod tests {
             Ok(_) => panic!("expected http:// to be rejected"),
         };
         assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
+    }
+
+    #[test]
+    fn lazy_with_connector_starts_idle() {
+        let conn = Http2Connection::lazy_with_connector(
+            tower::service_fn(|_uri: Uri| async {
+                Err::<hyper_util::rt::TokioIo<tokio::net::TcpStream>, _>(std::io::Error::other(
+                    "unreachable",
+                ))
+            }),
+            "http://localhost".parse().unwrap(),
+        );
+        let _ = conn;
+    }
+
+    #[tokio::test]
+    async fn connect_with_connector_propagates_error() {
+        let err = Http2Connection::connect_with_connector(
+            tower::service_fn(|_uri: Uri| async {
+                Err::<hyper_util::rt::TokioIo<tokio::net::TcpStream>, _>(std::io::Error::other(
+                    "dial refused",
+                ))
+            }),
+            "http://localhost".parse().unwrap(),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::Unavailable);
+        assert!(
+            err.message.as_deref().unwrap().contains("dial refused"),
+            "error should propagate connector message, got: {err:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lazy_unix_starts_idle() {
+        let conn = Http2Connection::lazy_unix(
+            "/nonexistent/test.sock",
+            "http://localhost".parse().unwrap(),
+        );
+        let _ = conn;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn connect_unix_nonexistent_fails() {
+        let path = "/nonexistent/buffa-test.sock";
+        let err = Http2Connection::connect_unix(path, "http://localhost".parse().unwrap())
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::Unavailable);
+        assert!(
+            err.message.as_deref().unwrap().contains(path),
+            "error should include socket path, got: {err:?}"
+        );
     }
 }
