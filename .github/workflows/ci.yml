@@ -107,6 +107,22 @@ jobs:
             --conf ${{ matrix.config }} \
             -- ./target/release/${{ matrix.bin }}
 
+  # Verify wasm32 compilation and run browser integration tests
+  wasm:
+    name: Wasm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - run: sudo apt-get install -y protobuf-compiler
+      - run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - run: cargo check -p connectrpc --no-default-features --target wasm32-unknown-unknown
+      - run: cargo check -p connectrpc --no-default-features --features gzip --target wasm32-unknown-unknown
+      - run: ./examples/wasm-client/test.sh
+
   # Test with minimal feature set
   minimal:
     name: Minimal features

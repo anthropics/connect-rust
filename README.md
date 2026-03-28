@@ -235,6 +235,15 @@ Per-call `CallOptions` override config defaults (options win).
 | `tls`        | No      | Convenience: enables both `server-tls` + `client-tls` |
 | `axum`       | No      | Axum framework integration                       |
 
+### wasm32
+
+The core crate compiles for `wasm32-unknown-unknown`. Generated clients are generic over `ClientTransport`, so they work on wasm with a custom transport (e.g. `web-sys::fetch`). The `client`/`server`/`tls` features require platform networking and `zstd` requires native C compilation. See [`examples/wasm-client`](examples/wasm-client) for a complete Fetch-based transport.
+
+```toml
+[dependencies]
+connectrpc = { version = "0.2", default-features = false, features = ["gzip"] }
+```
+
 ### Minimal build (no compression)
 
 ```toml
