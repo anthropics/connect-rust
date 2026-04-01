@@ -1,5 +1,11 @@
 # connectrpc
 
+[![crates.io](https://img.shields.io/crates/v/connectrpc.svg)](https://crates.io/crates/connectrpc)
+[![docs.rs](https://img.shields.io/docsrs/connectrpc)](https://docs.rs/connectrpc)
+[![CI](https://github.com/anthropics/connect-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthropics/connect-rust/actions/workflows/ci.yml)
+[![deps.rs](https://deps.rs/repo/github/anthropics/connect-rust/status.svg)](https://deps.rs/repo/github/anthropics/connect-rust)
+[![License](https://img.shields.io/crates/l/connectrpc)](LICENSE)
+
 A [Tower](https://docs.rs/tower/latest/tower/)-based Rust implementation of the [ConnectRPC](https://connectrpc.com/) protocol, providing HTTP-based RPC with protobuf messages in either binary or JSON form.
 
 ## Overview
