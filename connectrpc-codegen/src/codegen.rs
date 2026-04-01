@@ -448,9 +448,18 @@ fn generate_service(
     } else {
         format!("{package}.{service_name}")
     };
-    let trait_name = format_ident!("{}", service_name.to_upper_camel_case());
-    let ext_trait_name = format_ident!("{}Ext", service_name.to_upper_camel_case());
-    let client_name = format_ident!("{}Client", service_name.to_upper_camel_case());
+    let service_upper = service_name.to_upper_camel_case();
+    // `Self` is the only PascalCase Rust keyword, and cannot be a raw ident;
+    // suffix it so `service Self {}` (accepted by protoc) generates a valid
+    // trait. The suffixed derivatives below are already keyword-safe.
+    let trait_name = if service_upper == "Self" {
+        format_ident!("Self_")
+    } else {
+        format_ident!("{}", service_upper)
+    };
+    let ext_trait_name = format_ident!("{}Ext", service_upper);
+    let client_name = format_ident!("{}Client", service_upper);
+    let server_name = format_ident!("{}Server", service_upper);
     let service_name_const = format_ident!(
         "{}_SERVICE_NAME",
         service_name.to_snake_case().to_uppercase()
@@ -578,8 +587,14 @@ fn generate_service(
         .collect::<Result<Vec<_>>>()?;
 
     // Generate monomorphic FooServiceServer<T> dispatcher.
-    let service_server =
-        generate_service_server(&full_service_name, &trait_name, service, resolver, package)?;
+    let service_server = generate_service_server(
+        &full_service_name,
+        &trait_name,
+        &server_name,
+        service,
+        resolver,
+        package,
+    )?;
 
     // Example method name for client doc
     let example_method = service
@@ -728,11 +743,11 @@ let owned = client.{example_method}(request).await?.into_owned();
 fn generate_service_server(
     full_service_name: &str,
     trait_name: &proc_macro2::Ident,
+    server_name: &proc_macro2::Ident,
     service: &ServiceDescriptorProto,
     resolver: &TypeResolver<'_>,
     package: &str,
 ) -> Result<TokenStream> {
-    let server_name = format_ident!("{}Server", trait_name);
     // Path prefix matched by `dispatch` / `call_*`: "pkg.Service/"
     let path_prefix = format!("{full_service_name}/");
 
@@ -1564,6 +1579,26 @@ mod tests {
         // suffix already de-keywords it, so we get `self_with_options`
         // (not `self__with_options`).
         assert!(code.contains("self_with_options"));
+        syn::parse_str::<syn::File>(&code).expect("generated code parses");
+    }
+
+    #[test]
+    fn service_name_keyword_suffixed() {
+        // `service Self {}` is accepted by protoc but `Self` is a Rust keyword
+        // that cannot be a raw ident; the bare trait name is suffixed `Self_`
+        // while the derived `SelfExt`/`SelfClient`/`SelfServer` are already safe.
+        let mut file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.Empty",
+            ".example.v1.Empty",
+            &["Empty"],
+        );
+        file.service[0].name = Some("Self".into());
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(code.contains("trait Self_ "), "trait not suffixed: {code}");
+        assert!(code.contains("trait SelfExt"));
+        assert!(code.contains("struct SelfClient"));
+        assert!(code.contains("struct SelfServer"));
         syn::parse_str::<syn::File>(&code).expect("generated code parses");
     }
 }
