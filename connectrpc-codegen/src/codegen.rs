@@ -1540,6 +1540,8 @@ mod tests {
             code.contains("move_with_options"),
             "suffixed variant should not need escaping: {code}"
         );
+        // Doc example should also use the escaped form so the snippet is valid.
+        assert!(code.contains("client.r#move(request)"));
         syn::parse_str::<syn::File>(&code).expect("generated code parses");
     }
 
