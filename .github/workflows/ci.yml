@@ -19,7 +19,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get install -y protobuf-compiler
-      - run: cargo check --workspace --all-features
+      - run: cargo check --workspace --all-features --all-targets
 
   test:
     name: Test
@@ -41,7 +41,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get install -y protobuf-compiler
-      - run: cargo clippy --workspace --all-features -- -D warnings
+      - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   fmt:
     name: Format
