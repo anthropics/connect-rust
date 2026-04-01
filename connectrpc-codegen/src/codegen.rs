@@ -587,7 +587,7 @@ fn generate_service(
         .method
         .first()
         .and_then(|m| m.name.as_deref())
-        .map(|n| n.to_snake_case())
+        .map(|n| buffa_codegen::idents::make_field_ident(&n.to_snake_case()).to_string())
         .unwrap_or_else(|| "method".to_string());
 
     // Build client doc comment with interpolated example method
@@ -1559,6 +1559,10 @@ mod tests {
             code.contains("fn self_"),
             "path-keyword method not suffixed: {code}"
         );
+        // The `_with_options` variant uses the unsuffixed snake name; the
+        // suffix already de-keywords it, so we get `self_with_options`
+        // (not `self__with_options`).
+        assert!(code.contains("self_with_options"));
         syn::parse_str::<syn::File>(&code).expect("generated code parses");
     }
 }
