@@ -258,6 +258,11 @@ pub use server::BoundServer;
 #[cfg(feature = "server")]
 pub use server::Server;
 
+#[cfg(feature = "server")]
+pub use server::PeerAddr;
+#[cfg(feature = "server-tls")]
+pub use server::PeerCerts;
+
 /// Re-export of `rustls` for TLS configuration.
 ///
 /// Use this to construct a [`rustls::ServerConfig`] for [`Server::with_tls`]

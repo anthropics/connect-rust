@@ -73,6 +73,7 @@ rustls-pki-types = { workspace = true, optional = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
 tempfile = { workspace = true }
+rcgen = { workspace = true }
 buffa-types = { workspace = true }
 
 [features]

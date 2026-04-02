@@ -1462,7 +1462,8 @@ where
     let metadata = RequestMetadata::from_headers(req.headers(), Protocol::Connect);
 
     // Split request to consume the body
-    let (_parts, body) = req.into_parts();
+    let (parts, body) = req.into_parts();
+    let extensions = parts.extensions;
 
     // IMPORTANT: Read the full request body BEFORE returning any errors.
     // For HTTP/1.1, returning an error without reading the body causes
@@ -1564,7 +1565,9 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers).with_deadline(deadline);
+    let ctx = Context::new(metadata.headers)
+        .with_deadline(deadline)
+        .with_extensions(extensions);
 
     // Call the handler with the appropriate codec format, applying timeout if specified
     let (response_body, ctx) = if let Some(timeout) = metadata.timeout {
@@ -1716,7 +1719,8 @@ where
 
     // Read the full body. collect_body_limited bounds allocation during the
     // read, so an oversized body is rejected before it is fully buffered.
-    let (_parts, body) = req.into_parts();
+    let (parts, body) = req.into_parts();
+    let extensions = parts.extensions;
     let post_body = match collect_body_limited(body, limits.max_request_body_size).await {
         Ok(bytes) => bytes,
         Err(err) => return grpc_unary_error(&err),
@@ -1773,7 +1777,9 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers).with_deadline(deadline);
+    let ctx = Context::new(metadata.headers)
+        .with_deadline(deadline)
+        .with_extensions(extensions);
 
     // Call the handler with timeout if configured
     let handler_result = if let Some(timeout) = metadata.timeout {
@@ -1927,7 +1933,8 @@ where
     let method_desc = dispatcher.lookup(&path);
 
     // Split request to consume the body
-    let (_parts, body) = req.into_parts();
+    let (parts, body) = req.into_parts();
+    let extensions = parts.extensions;
 
     // For bidi streaming, pass the raw body stream directly (no buffering)
     if matches!(method_desc, Some(d) if d.kind == MethodKind::BidiStreaming) {
@@ -1936,6 +1943,7 @@ where
             &path,
             metadata,
             body,
+            extensions,
             protocol,
             codec_format,
             limits,
@@ -1952,6 +1960,7 @@ where
             &path,
             metadata,
             body,
+            extensions,
             protocol,
             codec_format,
             limits,
@@ -2052,7 +2061,9 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers).with_deadline(deadline);
+    let ctx = Context::new(metadata.headers)
+        .with_deadline(deadline)
+        .with_extensions(extensions);
 
     // Call the handler with the appropriate codec format.
     // For gRPC unary handlers, we wrap the single response in a one-item stream.
@@ -2167,6 +2178,7 @@ async fn handle_client_streaming_request<D, B>(
     path: &str,
     metadata: RequestMetadata,
     body: B,
+    extensions: http::Extensions,
     protocol: Protocol,
     codec_format: CodecFormat,
     limits: Limits,
@@ -2188,7 +2200,9 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers).with_deadline(deadline);
+    let ctx = Context::new(metadata.headers)
+        .with_deadline(deadline)
+        .with_extensions(extensions);
 
     // Call the handler. On error paths, the reader task is left running
     // (detached) so it can finish draining the request body — aborting it
@@ -2406,6 +2420,7 @@ async fn handle_bidi_streaming_request<D, B>(
     path: &str,
     metadata: RequestMetadata,
     body: B,
+    extensions: http::Extensions,
     protocol: Protocol,
     codec_format: CodecFormat,
     limits: Limits,
@@ -2428,7 +2443,9 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers).with_deadline(deadline);
+    let ctx = Context::new(metadata.headers)
+        .with_deadline(deadline)
+        .with_extensions(extensions);
 
     // Call the handler with timeout if configured
     let handler_result = if let Some(timeout) = metadata.timeout {
@@ -3354,6 +3371,59 @@ mod tests {
         assert!(
             json.contains("turn it off and on again"),
             "debug content missing: {json}"
+        );
+    }
+
+    // ========================================================================
+    // Context.extensions passthrough
+    // ========================================================================
+
+    /// Prove that `http::Request` extensions survive the unary dispatch
+    /// path and reach the handler via `Context.extensions`. A tower layer
+    /// in front of `ConnectRpcService` inserts peer info this way.
+    #[tokio::test]
+    async fn extensions_flow_to_handler_context() {
+        use std::sync::Mutex;
+
+        #[derive(Clone, Debug, PartialEq)]
+        struct PeerTag(&'static str);
+
+        let captured = Arc::new(Mutex::new(None::<PeerTag>));
+        let handler_captured = Arc::clone(&captured);
+        let router = Router::new().route(
+            "svc",
+            "Method",
+            crate::handler_fn(move |ctx: Context, _req: buffa_types::Empty| {
+                let cap = Arc::clone(&handler_captured);
+                async move {
+                    *cap.lock().unwrap() = ctx.extensions.get::<PeerTag>().cloned();
+                    Ok((buffa_types::Empty::default(), ctx))
+                }
+            }),
+        );
+
+        let mut req = Request::builder()
+            .method(Method::POST)
+            .uri("/svc/Method")
+            .header(header::CONTENT_TYPE, "application/proto")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        req.extensions_mut().insert(PeerTag("10.0.0.1:54321"));
+
+        handle_unary_request(
+            &router,
+            req,
+            Limits::default(),
+            Arc::new(CompressionRegistry::new()),
+            &CompressionPolicy::default(),
+        )
+        .await
+        .expect("dispatch should succeed");
+
+        assert_eq!(
+            captured.lock().unwrap().take(),
+            Some(PeerTag("10.0.0.1:54321")),
+            "extension inserted on the http::Request must reach Context.extensions"
         );
     }
 }
