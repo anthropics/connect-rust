@@ -7,7 +7,7 @@
 //! Ported from connectrpc/examples-go's `internal/eliza` package, which is
 //! itself adapted from <https://github.com/mattshiel/eliza-go>.
 
-use rand::Rng;
+use rand::RngExt;
 use regex::Regex;
 use std::sync::LazyLock;
 

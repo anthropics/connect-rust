@@ -40,7 +40,7 @@ use connectrpc_conformance::StreamResponseDefinition;
 use connectrpc_conformance::UnaryResponse;
 use connectrpc_conformance::UnaryResponseDefinition;
 use connectrpc_conformance::UnimplementedResponse;
-use connectrpc_conformance::init_any_registry;
+use connectrpc_conformance::init_type_registry;
 use connectrpc_conformance::proto::connectrpc::conformance::v1::{
     BidiStreamRequestView, ClientStreamRequestView, IdempotentUnaryRequestView,
     ServerStreamRequestView, UnaryRequestView, UnimplementedRequestView,
@@ -1179,7 +1179,7 @@ async fn main() -> Result<()> {
     // Initialize the Any type registry so that google.protobuf.Any fields
     // in conformance responses are serialized with inlined message fields
     // (proto3 canonical JSON) rather than a raw "value" base64 fallback.
-    init_any_registry();
+    init_type_registry();
 
     // Read the server configuration from stdin
     let request: ServerCompatRequest =

@@ -28,9 +28,9 @@ futures = "0.3"
 pin-project = "1"
 
 # Protobuf
-buffa = { version = "0.2", features = ["json"] }
-buffa-types = { version = "0.2", features = ["json"] }
-buffa-codegen = { version = "0.2" }
+buffa = { version = "0.3", features = ["json"] }
+buffa-types = { version = "0.3", features = ["json"] }
+buffa-codegen = { version = "0.3" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -49,6 +49,7 @@ anyhow = "1"
 percent-encoding = "2.3"
 base64 = "0.22"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 # HTTP server/client
 hyper = "1"
@@ -79,6 +80,7 @@ prettyplease = "0.2"
 
 # Dev dependencies
 tempfile = "3"
+rcgen = "0.14"
 
 [workspace.lints.rust]
 dead_code = "warn"

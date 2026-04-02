@@ -1,0 +1,4 @@
+# rules_buf needs source_code_info in the FileDescriptorSet that
+# proto_library produces. Without this flag, buf_lint_test fails with
+# "source_code_info must be present".
+common --experimental_proto_descriptor_sets_include_source_info

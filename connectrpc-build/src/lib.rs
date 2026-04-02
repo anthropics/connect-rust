@@ -31,7 +31,6 @@
 //! call [`Config::use_buf`]. To avoid both, precompile a `FileDescriptorSet`
 //! once and ship it alongside your source via [`Config::descriptor_set`].
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -118,6 +117,18 @@ impl Config {
     #[must_use]
     pub fn generate_json(mut self, enabled: bool) -> Self {
         self.options.generate_json = enabled;
+        self
+    }
+
+    /// Emit the per-file `register_types(&mut TypeRegistry)` aggregator
+    /// (default: true).
+    ///
+    /// Set to `false` when the generated files are `include!`d into the
+    /// same module — the identically-named functions would otherwise
+    /// collide. See [`Options::emit_register_fn`].
+    #[must_use]
+    pub fn emit_register_fn(mut self, enabled: bool) -> Self {
+        self.options.emit_register_fn = enabled;
         self
     }
 
@@ -251,7 +262,7 @@ impl Config {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
-            std::fs::File::create(&path)?.write_all(file.content.as_bytes())?;
+            write_if_changed(&path, file.content.as_bytes())?;
             let pkg = name_to_package.get(&file.name).cloned().unwrap_or_default();
             entries.push((file.name.clone(), pkg));
         }
@@ -260,7 +271,7 @@ impl Config {
         if let Some(ref include_name) = self.include_file {
             let include_src = generate_include_file(&entries, relative_includes);
             let include_path = out_dir.join(include_name);
-            std::fs::File::create(&include_path)?.write_all(include_src.as_bytes())?;
+            write_if_changed(&include_path, include_src.as_bytes())?;
         }
 
         // 6. Cargo re-run triggers.
@@ -279,6 +290,19 @@ impl Default for Config {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Write `content` to `path` only if the file doesn't already exist with
+/// identical content. Cargo's rebuild decision for `include!`-ed files is
+/// mtime-based, so an unconditional write here would cascade into
+/// recompiling every downstream crate whenever any `.proto` is touched.
+fn write_if_changed(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    if let Ok(existing) = std::fs::read(path)
+        && existing == content
+    {
+        return Ok(());
+    }
+    std::fs::write(path, content)
 }
 
 /// Run `protoc` and return the serialized `FileDescriptorSet`.
@@ -516,11 +540,13 @@ mod tests {
             .includes(&["proto/"])
             .strict_utf8_mapping(true)
             .generate_json(false)
+            .emit_register_fn(false)
             .include_file("_inc.rs");
         assert_eq!(cfg.files.len(), 2);
         assert_eq!(cfg.includes.len(), 1);
         assert!(cfg.options.strict_utf8_mapping);
         assert!(!cfg.options.generate_json);
+        assert!(!cfg.options.emit_register_fn);
         assert_eq!(cfg.include_file.as_deref(), Some("_inc.rs"));
     }
 
@@ -529,6 +555,7 @@ mod tests {
         let cfg = Config::new();
         assert!(!cfg.options.strict_utf8_mapping);
         assert!(cfg.options.generate_json);
+        assert!(cfg.options.emit_register_fn);
         assert!(matches!(cfg.descriptor_source, DescriptorSource::Protoc));
     }
 
@@ -677,5 +704,38 @@ mod tests {
             proto_relative_names(&files),
             vec!["my/pkg/svc.proto".to_string(), "top.proto".to_string()]
         );
+    }
+
+    #[test]
+    fn write_if_changed_creates_new_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new.rs");
+        write_if_changed(&path, b"hello").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn write_if_changed_skips_identical_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("same.rs");
+        std::fs::write(&path, b"content").unwrap();
+        let mtime_before = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+        // Sleep briefly so a write would produce a distinguishable mtime.
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        write_if_changed(&path, b"content").unwrap();
+        let mtime_after = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert_eq!(mtime_before, mtime_after);
+    }
+
+    #[test]
+    fn write_if_changed_overwrites_different_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("changed.rs");
+        std::fs::write(&path, b"old").unwrap();
+
+        write_if_changed(&path, b"new").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
     }
 }
