@@ -20,7 +20,7 @@ pub struct FetchTransport;
 #[derive(Debug)]
 pub enum FetchError {
     Js(String),
-    Connect(connectrpc::ConnectError),
+    Connect(Box<connectrpc::ConnectError>),
     Http(http::Error),
     HeaderToStr(http::header::ToStrError),
     InvalidStatusCode(http::status::InvalidStatusCode),
@@ -58,7 +58,7 @@ impl From<wasm_bindgen::JsValue> for FetchError {
 
 impl From<connectrpc::ConnectError> for FetchError {
     fn from(e: connectrpc::ConnectError) -> Self {
-        Self::Connect(e)
+        Self::Connect(Box::new(e))
     }
 }
 

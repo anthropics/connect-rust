@@ -7,7 +7,10 @@ async fn say_via_fetch_transport() {
     let response = wasm_client_example::say("http://127.0.0.1:8080", "Hello!".into())
         .await
         .unwrap();
-    assert!(response.starts_with("Hello"), "unexpected reply: {response}");
+    assert!(
+        response.starts_with("Hello"),
+        "unexpected reply: {response}"
+    );
 }
 
 #[wasm_bindgen_test]
