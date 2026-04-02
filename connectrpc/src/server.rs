@@ -64,7 +64,7 @@ use crate::service::ConnectRpcService;
 /// loop. Handlers read it via `ctx.extensions.get::<PeerAddr>()`.
 ///
 /// Callers using a different HTTP stack (axum, raw hyper) in front of
-/// [`ConnectRpcService`](crate::ConnectRpcService) can insert this same type
+/// [`ConnectRpcService`] can insert this same type
 /// from a tower layer so handlers stay agnostic to the transport.
 #[derive(Clone, Debug)]
 pub struct PeerAddr(pub SocketAddr);
