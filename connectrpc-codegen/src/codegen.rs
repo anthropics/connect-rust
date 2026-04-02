@@ -8,6 +8,8 @@
 //! TokenStreams, which provides better syntax highlighting, type safety,
 //! and maintainability compared to string-based generation.
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use heck::ToSnakeCase;
 use heck::ToUpperCamelCase;
@@ -442,7 +444,7 @@ fn generate_connect_services(
 /// `_with_options` form, would emit duplicate definitions and fail to
 /// compile with an error pointing at generated code rather than the proto.
 fn check_method_collisions(service_name: &str, service: &ServiceDescriptorProto) -> Result<()> {
-    let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut seen: HashMap<String, String> = HashMap::new();
     for m in &service.method {
         let proto_name = m.name.as_deref().unwrap_or("");
         let snake = proto_name.to_snake_case();
