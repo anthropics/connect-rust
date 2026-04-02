@@ -6,4 +6,5 @@ exports_files([
     "protoc-gen-buffa",
     "protoc-gen-buffa-packaging",
     "protoc-gen-connect-rust",
+    "diff_outputs.sh",
 ])
