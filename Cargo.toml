@@ -79,7 +79,7 @@ prettyplease = "0.2"
 
 # Dev dependencies
 tempfile = "3"
-rcgen = "0.13"
+rcgen = "0.14"
 
 [workspace.lints.rust]
 dead_code = "warn"

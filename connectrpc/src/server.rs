@@ -911,15 +911,15 @@ mod tests {
             let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
             let ca_key = KeyPair::generate().unwrap();
-            let mut ca = CertificateParams::default();
-            ca.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-            let ca = ca.self_signed(&ca_key).unwrap();
+            let mut ca_params = CertificateParams::default();
+            ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+            let ca = rcgen::CertifiedIssuer::self_signed(ca_params, ca_key).unwrap();
 
             let issue = |sans: &[SanType]| {
                 let k = KeyPair::generate().unwrap();
                 let mut p = CertificateParams::default();
                 p.subject_alt_names = sans.to_vec();
-                let c = p.signed_by(&k, &ca, &ca_key).unwrap();
+                let c = p.signed_by(&k, &ca).unwrap();
                 (
                     CertificateDer::from(c.der().to_vec()),
                     PrivatePkcs8KeyDer::from(k.serialized_der().to_vec()).into(),

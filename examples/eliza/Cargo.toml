@@ -36,15 +36,15 @@ futures = { workspace = true }
 axum = { workspace = true }
 
 # ELIZA bot dependencies
-rand = "0.9"
-regex = "1"
+rand = "0.10"
+regex = "1.5.5"
 
 # Logging
 tracing = { workspace = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 # TLS (optional — for https:// client endpoints and TLS/mTLS server)
-webpki-roots = { version = "0.26", optional = true }
+webpki-roots = { version = "1", optional = true }
 rustls-pemfile = { workspace = true, optional = true }
 
 # CLI argument parsing
