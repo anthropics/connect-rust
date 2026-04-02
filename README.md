@@ -53,6 +53,59 @@ twice to assemble the `mod.rs` module tree for each output directory. The
 codegen plugins are invoked per-file; only the packaging plugin needs
 `strategy: all`.
 
+##### Installing the plugins
+
+`protoc-gen-buffa` and `protoc-gen-buffa-packaging` ship from the
+[`buffa`](https://github.com/anthropics/buffa) repo - see its release
+page for binaries or `cargo install`.
+
+For `protoc-gen-connect-rust`, three options:
+
+**1. Download a pre-built binary from the GitHub release.** Releases
+ship Linux (x86_64, aarch64), macOS (x86_64, aarch64), and Windows
+(x86_64) binaries, each with a SHA-256 checksum, a Sigstore signature
+(`.sig` + `.pem`), and a GitHub-native build provenance attestation.
+
+```sh
+VERSION=v0.3.1
+PLATFORM=linux-x86_64        # or darwin-aarch64, etc.
+BASE=https://github.com/anthropics/connect-rust/releases/download/${VERSION}
+BIN=protoc-gen-connect-rust-${VERSION}-${PLATFORM}
+
+curl -fSL -o "${BIN}"        "${BASE}/${BIN}"
+curl -fSL -o "${BIN}.sig"    "${BASE}/${BIN}.sig"
+curl -fSL -o "${BIN}.pem"    "${BASE}/${BIN}.pem"
+curl -fSL -o checksums-sha256.txt "${BASE}/checksums-sha256.txt"
+
+# Verify the checksum.
+grep " ${BIN}\$" checksums-sha256.txt | sha256sum -c -
+
+# Verify the GitHub-native attestation (no .sig/.pem download needed).
+gh attestation verify "${BIN}" --repo anthropics/connect-rust
+
+# Or verify the cosign signature directly.
+cosign verify-blob \
+  --certificate "${BIN}.pem" \
+  --signature "${BIN}.sig" \
+  --certificate-identity "https://github.com/anthropics/connect-rust/.github/workflows/release.yml@refs/tags/${VERSION}" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  "${BIN}"
+
+install -m 0755 "${BIN}" /usr/local/bin/protoc-gen-connect-rust
+```
+
+**2. Build from source via cargo.** Pulls the latest published
+`connectrpc-codegen` crate from crates.io and installs the binary into
+`$CARGO_HOME/bin`:
+
+```sh
+cargo install --locked connectrpc-codegen
+```
+
+**3. Buf Schema Registry remote plugin (planned).** Once accepted upstream
+the plugin will be runnable as `remote: buf.build/anthropics/connect-rust`
+in `buf.gen.yaml`, with no local install step.
+
 ```yaml
 # buf.gen.yaml
 version: v2
