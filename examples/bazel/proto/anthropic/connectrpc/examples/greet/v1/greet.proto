@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package anthropic.connectrpc.examples.greet.v1;
+
+// GreetService provides greeting functionality.
+service GreetService {
+  // Greet returns a greeting message for the given name.
+  rpc Greet(GreetRequest) returns (GreetResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+// GreetRequest is the request message for the Greet RPC.
+message GreetRequest {
+  // The name to greet.
+  string name = 1;
+}
+
+// GreetResponse is the response message for the Greet RPC.
+message GreetResponse {
+  // The greeting message.
+  string message = 1;
+}
