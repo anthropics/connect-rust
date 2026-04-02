@@ -239,6 +239,24 @@ impl Server {
     ///   via IPv4-mapped addresses by default)
     /// - `"localhost:8080"` — resolves via DNS/hosts (may yield v4, v6, or both)
     ///
+    /// Wrap a pre-bound [`TcpListener`].
+    ///
+    /// Use this instead of [`Server::bind`] when you need to configure
+    /// socket options before binding — e.g. `IPV6_V6ONLY=false` for
+    /// dual-stack listening, `SO_REUSEPORT` for multi-process accept,
+    /// or binding to a listener inherited from a parent process.
+    #[must_use]
+    pub fn from_listener(listener: TcpListener) -> BoundServer {
+        BoundServer {
+            listener,
+            http1_keep_alive: true,
+            #[cfg(feature = "server-tls")]
+            tls_config: None,
+            #[cfg(feature = "server-tls")]
+            tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
+        }
+    }
+
     /// When multiple addresses are returned (e.g. `localhost` resolving to
     /// both `::1` and `127.0.0.1`), the first that successfully binds is used.
     pub async fn bind(
