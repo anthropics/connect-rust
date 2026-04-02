@@ -10,7 +10,7 @@ increment the patch version.
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-04-01
+## [0.3.0] - 2026-04-02
 
 ### Changed
 
@@ -26,6 +26,18 @@ increment the patch version.
 
 ### Added
 
+- **mTLS peer credentials and remote address are now available to handlers**
+  ([#31]) via `Context::extensions`. The built-in server inserts `PeerAddr`
+  (always) and `PeerCerts` (when `server-tls` is enabled and the client
+  presented a certificate chain) into every request's extensions; handlers
+  read them with `ctx.extensions.get::<PeerAddr>()` /
+  `ctx.extensions.get::<PeerCerts>()`. Custom HTTP stacks (axum, raw hyper)
+  can insert the same types from a tower layer so handler code stays
+  transport-agnostic.
+- **`Server::from_listener(TcpListener)`** ([#31]) wraps a pre-bound
+  listener, allowing socket options (`IPV6_V6ONLY=false` for dual-stack,
+  `SO_REUSEPORT`, inherited file descriptors) to be configured before
+  handing the listener to connectrpc.
 - **`Http2Connection::lazy_with_connector` / `connect_with_connector`** ([#15])
   as the generic transport escape hatch — supply any `tower::Service<Uri>`
   yielding a `hyper::rt::Read + Write` stream and the library runs the h2
@@ -56,6 +68,7 @@ increment the patch version.
 [#26]: https://github.com/anthropics/connect-rust/pull/26
 [#27]: https://github.com/anthropics/connect-rust/pull/27
 [#28]: https://github.com/anthropics/connect-rust/pull/28
+[#31]: https://github.com/anthropics/connect-rust/pull/31
 
 ## [0.2.1] - 2026-03-18
 
