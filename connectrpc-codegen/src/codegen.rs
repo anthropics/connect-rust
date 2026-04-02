@@ -8,6 +8,8 @@
 //! TokenStreams, which provides better syntax highlighting, type safety,
 //! and maintainability compared to string-based generation.
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use heck::ToSnakeCase;
 use heck::ToUpperCamelCase;
@@ -20,6 +22,8 @@ use buffa_codegen::generated::descriptor::MethodDescriptorProto;
 use buffa_codegen::generated::descriptor::ServiceDescriptorProto;
 use buffa_codegen::generated::descriptor::SourceCodeInfo;
 use buffa_codegen::generated::descriptor::method_options::IdempotencyLevel;
+use buffa_codegen::idents::make_field_ident;
+use buffa_codegen::idents::rust_path_to_tokens;
 
 pub use buffa_codegen::GeneratedFile;
 pub use buffa_codegen::generated::descriptor;
@@ -57,6 +61,15 @@ pub struct Options {
     /// stubs so they compile independently of co-generated message types.
     /// Unused by [`generate_files`] (the unified `super::`-relative path).
     pub extern_paths: Vec<(String, String)>,
+    /// Emit the per-file `register_types(&mut TypeRegistry)` function that
+    /// aggregates every message in the file. Default `true`. See
+    /// `buffa_codegen::CodeGenConfig::emit_register_fn`.
+    ///
+    /// Set to `false` when multiple generated files are `include!`d into
+    /// the same module — the identically-named `register_types` fns would
+    /// otherwise collide. The per-message `__*_JSON_ANY` consts are still
+    /// emitted; only the aggregating function is suppressed.
+    pub emit_register_fn: bool,
 }
 
 impl Default for Options {
@@ -65,6 +78,7 @@ impl Default for Options {
             strict_utf8_mapping: false,
             generate_json: true,
             extern_paths: Vec::new(),
+            emit_register_fn: true,
         }
     }
 }
@@ -76,6 +90,7 @@ impl Options {
         config.generate_json = self.generate_json;
         config.strict_utf8_mapping = self.strict_utf8_mapping;
         config.extern_paths.clone_from(&self.extern_paths);
+        config.emit_register_fn = self.emit_register_fn;
         config
     }
 }
@@ -193,6 +208,10 @@ pub fn generate_services(
 /// - `no_json` — disable `serde` derives on generated message types.
 ///   Ignored in this plugin (no message types emitted); accepted for
 ///   compatibility with the unified path.
+/// - `no_register_fn` — suppress the per-file
+///   `register_types(&mut TypeRegistry)` aggregator. See
+///   [`Options::emit_register_fn`]. Ignored in this plugin (no message
+///   types emitted); accepted for compatibility with the unified path.
 pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse> {
     let mut options = Options::default();
 
@@ -232,11 +251,12 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                 match opt {
                     "strict_utf8_mapping" => options.strict_utf8_mapping = true,
                     "no_json" => options.generate_json = false,
+                    "no_register_fn" => options.emit_register_fn = false,
                     _ => {
                         return Err(anyhow::anyhow!(
                             "unknown plugin option: {opt:?}. Supported: \
                              buffa_module=<rust_path>, extern_path=<proto>=<rust>, \
-                             strict_utf8_mapping, no_json"
+                             strict_utf8_mapping, no_json, no_register_fn"
                         ));
                     }
                 }
@@ -372,16 +392,14 @@ impl<'a> TypeResolver<'a> {
     /// Resolve a proto FQN to Rust type-path tokens.
     fn rust_type(&self, proto_fqn: &str, current_package: &str) -> Result<TokenStream> {
         let path = self.resolve_path(proto_fqn, current_package)?;
-        Ok(buffa_codegen::idents::rust_path_to_tokens(&path))
+        Ok(rust_path_to_tokens(&path))
     }
 
     /// Like [`rust_type`] but appends `View` to the last path segment, e.g.
     /// `super::foo::Bar` -> `super::foo::BarView`.
     fn rust_view_type(&self, proto_fqn: &str, current_package: &str) -> Result<TokenStream> {
         let path = self.resolve_path(proto_fqn, current_package)?;
-        Ok(buffa_codegen::idents::rust_path_to_tokens(&format!(
-            "{path}View"
-        )))
+        Ok(rust_path_to_tokens(&format!("{path}View")))
     }
 }
 
@@ -434,6 +452,33 @@ fn generate_connect_services(
 }
 
 /// Generate code for a single service.
+/// Reject RPC method sets whose generated Rust identifiers collide.
+///
+/// Each proto method `Foo` produces both `foo` and `foo_with_options` on the
+/// client. Two methods that normalize to the same snake_case name (e.g.
+/// `GetFoo` and `get_foo`), or one whose snake form equals another's
+/// `_with_options` form, would emit duplicate definitions and fail to
+/// compile with an error pointing at generated code rather than the proto.
+fn check_method_collisions(service_name: &str, service: &ServiceDescriptorProto) -> Result<()> {
+    let mut seen: HashMap<String, String> = HashMap::new();
+    for m in &service.method {
+        let proto_name = m.name.as_deref().unwrap_or("");
+        let snake = proto_name.to_snake_case();
+        let with_opts = format!("{snake}_with_options");
+        for ident in [snake.as_str(), with_opts.as_str()] {
+            if let Some(prev) = seen.get(ident) {
+                anyhow::bail!(
+                    "service {service_name}: RPC methods {prev:?} and {proto_name:?} \
+                     both generate Rust identifier `{ident}`; rename one in the proto"
+                );
+            }
+        }
+        seen.insert(snake, proto_name.to_string());
+        seen.insert(with_opts, proto_name.to_string());
+    }
+    Ok(())
+}
+
 fn generate_service(
     file: &FileDescriptorProto,
     service: &ServiceDescriptorProto,
@@ -441,6 +486,7 @@ fn generate_service(
 ) -> Result<TokenStream> {
     let package = file.package.as_deref().unwrap_or("");
     let service_name = service.name.as_deref().unwrap_or("");
+    check_method_collisions(service_name, service)?;
     // Empty package is valid proto; the fully-qualified service name is just
     // `ServiceName`, not `.ServiceName` (which would break interop).
     let full_service_name = if package.is_empty() {
@@ -448,9 +494,18 @@ fn generate_service(
     } else {
         format!("{package}.{service_name}")
     };
-    let trait_name = format_ident!("{}", service_name.to_upper_camel_case());
-    let ext_trait_name = format_ident!("{}Ext", service_name.to_upper_camel_case());
-    let client_name = format_ident!("{}Client", service_name.to_upper_camel_case());
+    let service_upper = service_name.to_upper_camel_case();
+    // `Self` is the only PascalCase Rust keyword, and cannot be a raw ident;
+    // suffix it so `service Self {}` (accepted by protoc) generates a valid
+    // trait. The suffixed derivatives below are already keyword-safe.
+    let trait_name = if service_upper == "Self" {
+        format_ident!("Self_")
+    } else {
+        format_ident!("{}", service_upper)
+    };
+    let ext_trait_name = format_ident!("{}Ext", service_upper);
+    let client_name = format_ident!("{}Client", service_upper);
+    let server_name = format_ident!("{}Server", service_upper);
     let service_name_const = format_ident!(
         "{}_SERVICE_NAME",
         service_name.to_snake_case().to_uppercase()
@@ -489,7 +544,7 @@ fn generate_service(
         .iter()
         .map(|m| {
             let method_name = m.name.as_deref().unwrap_or("");
-            let method_snake = format_ident!("{}", method_name.to_snake_case());
+            let method_snake = make_field_ident(&method_name.to_snake_case());
 
             let client_streaming = m.client_streaming.unwrap_or(false);
             let server_streaming = m.server_streaming.unwrap_or(false);
@@ -586,15 +641,21 @@ fn generate_service(
         .collect::<Result<Vec<_>>>()?;
 
     // Generate monomorphic FooServiceServer<T> dispatcher.
-    let service_server =
-        generate_service_server(&full_service_name, &trait_name, service, resolver, package)?;
+    let service_server = generate_service_server(
+        &full_service_name,
+        &trait_name,
+        &server_name,
+        service,
+        resolver,
+        package,
+    )?;
 
     // Example method name for client doc
     let example_method = service
         .method
         .first()
         .and_then(|m| m.name.as_deref())
-        .map(|n| n.to_snake_case())
+        .map(|n| make_field_ident(&n.to_snake_case()).to_string())
         .unwrap_or_else(|| "method".to_string());
 
     // Build client doc comment with interpolated example method
@@ -736,11 +797,11 @@ let owned = client.{example_method}(request).await?.into_owned();
 fn generate_service_server(
     full_service_name: &str,
     trait_name: &proc_macro2::Ident,
+    server_name: &proc_macro2::Ident,
     service: &ServiceDescriptorProto,
     resolver: &TypeResolver<'_>,
     package: &str,
 ) -> Result<TokenStream> {
-    let server_name = format_ident!("{}Server", trait_name);
     // Path prefix matched by `dispatch` / `call_*`: "pkg.Service/"
     let path_prefix = format!("{full_service_name}/");
 
@@ -782,7 +843,7 @@ fn generate_service_server(
 
     for m in &service.method {
         let method_name = m.name.as_deref().unwrap_or("");
-        let method_snake = format_ident!("{}", method_name.to_snake_case());
+        let method_snake = make_field_ident(&method_name.to_snake_case());
         let input_view = resolver.rust_view_type(m.input_type.as_deref().unwrap_or(""), package)?;
         let cs = m.client_streaming.unwrap_or(false);
         let ss = m.server_streaming.unwrap_or(false);
@@ -976,7 +1037,7 @@ fn generate_trait_method(
     package: &str,
 ) -> Result<TokenStream> {
     let method_name = method.name.as_deref().unwrap_or("");
-    let method_snake = format_ident!("{}", method_name.to_snake_case());
+    let method_snake = make_field_ident(&method_name.to_snake_case());
     let input_view_type =
         resolver.rust_view_type(method.input_type.as_deref().unwrap_or(""), package)?;
     let output_type = resolver.rust_type(method.output_type.as_deref().unwrap_or(""), package)?;
@@ -1051,7 +1112,7 @@ fn generate_client_method(
     package: &str,
 ) -> Result<TokenStream> {
     let method_name = method.name.as_deref().unwrap_or("");
-    let method_snake = format_ident!("{}", method_name.to_snake_case());
+    let method_snake = make_field_ident(&method_name.to_snake_case());
     let method_with_opts = format_ident!("{}_with_options", method_name.to_snake_case());
     let input_type = resolver.rust_type(method.input_type.as_deref().unwrap_or(""), package)?;
     let output_view_type =
@@ -1274,8 +1335,20 @@ mod tests {
         output_type: &str,
         local_messages: &[&str],
     ) -> FileDescriptorProto {
+        minimal_file_with_method(package, "Ping", input_type, output_type, local_messages)
+    }
+
+    /// Like [`minimal_file`] but with a custom RPC method name, for testing
+    /// keyword collisions and other name-derived behaviour.
+    fn minimal_file_with_method(
+        package: Option<&str>,
+        method_name: &str,
+        input_type: &str,
+        output_type: &str,
+        local_messages: &[&str],
+    ) -> FileDescriptorProto {
         let method = MethodDescriptorProto {
-            name: Some("Ping".into()),
+            name: Some(method_name.into()),
             input_type: Some(input_type.into()),
             output_type: Some(output_type.into()),
             ..Default::default()
@@ -1296,6 +1369,36 @@ mod tests {
                     ..Default::default()
                 })
                 .collect(),
+            ..Default::default()
+        }
+    }
+
+    /// Build a minimal proto file with one service holding the given method
+    /// names, all typed `Empty` -> `Empty`. Used for collision tests where
+    /// the method *names* are what's under test.
+    fn minimal_file_with_methods(package: &str, method_names: &[&str]) -> FileDescriptorProto {
+        let methods = method_names
+            .iter()
+            .map(|n| MethodDescriptorProto {
+                name: Some((*n).into()),
+                input_type: Some(format!(".{package}.Empty")),
+                output_type: Some(format!(".{package}.Empty")),
+                ..Default::default()
+            })
+            .collect();
+        let service = ServiceDescriptorProto {
+            name: Some("PingService".into()),
+            method: methods,
+            ..Default::default()
+        };
+        FileDescriptorProto {
+            name: Some("ping.proto".into()),
+            package: Some(package.into()),
+            service: vec![service],
+            message_type: vec![DescriptorProto {
+                name: Some("Empty".into()),
+                ..Default::default()
+            }],
             ..Default::default()
         }
     }
@@ -1514,5 +1617,186 @@ mod tests {
             code.contains("crate :: proto :: google :: r#type :: LatLng"),
             "keyword segment not escaped: {code}"
         );
+    }
+
+    #[test]
+    fn keyword_method_escaped() {
+        // `rpc Move(...)` -> snake_case `move` is a Rust keyword; emit `r#move`
+        // via idents::make_field_ident. Regression for issue #23.
+        let file = minimal_file_with_method(
+            Some("example.v1"),
+            "Move",
+            ".example.v1.Empty",
+            ".example.v1.Empty",
+            &["Empty"],
+        );
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(
+            code.contains("fn r#move"),
+            "keyword method not escaped: {code}"
+        );
+        assert!(
+            code.contains("move_with_options"),
+            "suffixed variant should not need escaping: {code}"
+        );
+        // Doc example should also use the escaped form so the snippet is valid.
+        assert!(code.contains("client.r#move(request)"));
+        syn::parse_str::<syn::File>(&code).expect("generated code parses");
+    }
+
+    #[test]
+    fn path_keyword_method_suffixed() {
+        // `self`/`super`/`Self`/`crate` cannot be raw identifiers; they are
+        // suffixed with `_` instead (matching prost convention).
+        let file = minimal_file_with_method(
+            Some("example.v1"),
+            "Self",
+            ".example.v1.Empty",
+            ".example.v1.Empty",
+            &["Empty"],
+        );
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(
+            code.contains("fn self_"),
+            "path-keyword method not suffixed: {code}"
+        );
+        // The `_with_options` variant uses the unsuffixed snake name; the
+        // suffix already de-keywords it, so we get `self_with_options`
+        // (not `self__with_options`).
+        assert!(code.contains("self_with_options"));
+        syn::parse_str::<syn::File>(&code).expect("generated code parses");
+    }
+
+    #[test]
+    fn service_name_keyword_suffixed() {
+        // `service Self {}` is accepted by protoc but `Self` is a Rust keyword
+        // that cannot be a raw ident; the bare trait name is suffixed `Self_`
+        // while the derived `SelfExt`/`SelfClient`/`SelfServer` are already safe.
+        let mut file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.Empty",
+            ".example.v1.Empty",
+            &["Empty"],
+        );
+        file.service[0].name = Some("Self".into());
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(code.contains("trait Self_ "), "trait not suffixed: {code}");
+        assert!(code.contains("trait SelfExt"));
+        assert!(code.contains("struct SelfClient"));
+        assert!(code.contains("struct SelfServer"));
+        syn::parse_str::<syn::File>(&code).expect("generated code parses");
+    }
+
+    #[test]
+    fn method_snake_collision_errors() {
+        // protoc accepts `GetFoo` and `get_foo` in the same service; both
+        // snake-case to `get_foo`, which would emit duplicate Rust methods.
+        let file = minimal_file_with_methods("example.v1", &["GetFoo", "get_foo"]);
+        let err = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("PingService"), "missing service name: {msg}");
+        assert!(msg.contains("\"GetFoo\""), "missing first method: {msg}");
+        assert!(msg.contains("\"get_foo\""), "missing second method: {msg}");
+        assert!(msg.contains("`get_foo`"), "missing rust ident: {msg}");
+    }
+
+    #[test]
+    fn method_with_options_collision_errors() {
+        // `Ping` generates client method `ping_with_options`; a proto method
+        // `PingWithOptions` would generate the same base name.
+        let file = minimal_file_with_methods("example.v1", &["Ping", "PingWithOptions"]);
+        let err = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("\"Ping\""), "missing first method: {msg}");
+        assert!(
+            msg.contains("\"PingWithOptions\""),
+            "missing second method: {msg}"
+        );
+        assert!(
+            msg.contains("`ping_with_options`"),
+            "missing rust ident: {msg}"
+        );
+    }
+
+    #[test]
+    fn distinct_methods_do_not_collide() {
+        let file = minimal_file_with_methods("example.v1", &["GetFoo", "GetBar"]);
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        syn::parse_str::<syn::File>(&code).expect("generated code parses");
+    }
+
+    #[test]
+    fn options_default_emits_register_fn() {
+        let opts = Options::default();
+        assert!(opts.emit_register_fn);
+        let cfg = opts.to_buffa_config();
+        assert!(cfg.emit_register_fn);
+    }
+
+    #[test]
+    fn options_emit_register_fn_false_disables_buffa_register_fn() {
+        let opts = Options {
+            emit_register_fn: false,
+            ..Options::default()
+        };
+        let cfg = opts.to_buffa_config();
+        assert!(!cfg.emit_register_fn);
+    }
+
+    #[test]
+    fn generate_files_emit_register_fn_false_suppresses_register_types() {
+        // Build a file with a single message so buffa would normally emit
+        // `pub fn register_types(&mut TypeRegistry)` aggregating it.
+        let file = FileDescriptorProto {
+            name: Some("ping.proto".into()),
+            package: Some("example.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("PingReq".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let with_fn = generate_files(
+            std::slice::from_ref(&file),
+            &["ping.proto".into()],
+            &Options::default(),
+        )
+        .unwrap();
+        assert_eq!(with_fn.len(), 1);
+        assert!(
+            with_fn[0].content.contains("fn register_types"),
+            "expected register_types in default output: {}",
+            with_fn[0].content
+        );
+
+        let without_fn = generate_files(
+            std::slice::from_ref(&file),
+            &["ping.proto".into()],
+            &Options {
+                emit_register_fn: false,
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(without_fn.len(), 1);
+        assert!(
+            !without_fn[0].content.contains("fn register_types"),
+            "register_types should be suppressed: {}",
+            without_fn[0].content
+        );
+    }
+
+    #[test]
+    fn plugin_no_register_fn_parses() {
+        let request = CodeGeneratorRequest {
+            parameter: Some("buffa_module=crate::proto,no_register_fn".into()),
+            file_to_generate: vec![],
+            proto_file: vec![],
+            ..Default::default()
+        };
+        // Plugin path emits services only, so we can't observe the buffa
+        // config directly — just make sure the option parses without error.
+        generate(&request).expect("no_register_fn should be a recognized plugin option");
     }
 }

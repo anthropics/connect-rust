@@ -14,16 +14,18 @@ jobs:
   check:
     name: Check
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get install -y protobuf-compiler
-      - run: cargo check --workspace --all-features
+      - run: cargo check --workspace --all-features --all-targets
 
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -34,6 +36,7 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -41,11 +44,12 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get install -y protobuf-compiler
-      - run: cargo clippy --workspace --all-features -- -D warnings
+      - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   fmt:
     name: Format
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
@@ -56,6 +60,7 @@ jobs:
   doc:
     name: Documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       RUSTDOCFLAGS: -Dwarnings
     steps:
@@ -69,6 +74,7 @@ jobs:
   examples:
     name: Examples
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -83,6 +89,7 @@ jobs:
   conformance:
     name: Conformance (${{ matrix.mode }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -111,6 +118,7 @@ jobs:
   minimal:
     name: Minimal features
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

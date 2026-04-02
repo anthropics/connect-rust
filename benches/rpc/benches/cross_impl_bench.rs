@@ -6,7 +6,7 @@ use std::time::Duration;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 use connectrpc::Protocol;
-use connectrpc::client::{CallOptions, ClientConfig, HttpClient};
+use connectrpc::client::{ClientConfig, HttpClient};
 use rpc_bench::*;
 
 const STREAM_MSG_COUNT: i32 = 10;
@@ -292,7 +292,7 @@ fn bench_client_stream_grpc(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(impl_name), |b| {
             b.to_async(&rt).iter(|| async {
                 client
-                    .client_stream(messages.clone(), CallOptions::default())
+                    .client_stream(messages.clone())
                     .await
                     .expect("client_stream failed")
             });

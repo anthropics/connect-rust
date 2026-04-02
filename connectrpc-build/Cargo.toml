@@ -1,6 +1,6 @@
 [package]
 name = "connectrpc-build"
-version = "0.2.0"
+version = "0.3.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -9,7 +9,7 @@ keywords = ["connectrpc", "grpc", "protobuf", "build", "codegen"]
 categories = ["development-tools::build-utils"]
 
 [dependencies]
-connectrpc-codegen = { path = "../connectrpc-codegen", version = "0.2" }
+connectrpc-codegen = { path = "../connectrpc-codegen", version = "0.3" }
 buffa = { workspace = true }
 buffa-codegen = { workspace = true }
 tempfile = { workspace = true }

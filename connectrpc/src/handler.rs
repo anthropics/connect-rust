@@ -65,6 +65,14 @@ pub struct Context {
     /// policy. Set to `Some(false)` to disable compression for this response,
     /// or `Some(true)` to force it.
     pub compress_response: Option<bool>,
+    /// Request extensions carried from the underlying `http::Request`.
+    ///
+    /// This is the passthrough for connection-scoped metadata that a
+    /// tower layer in front of the service can attach — TLS peer
+    /// certificates, remote socket address, auth context, etc. The
+    /// dispatch path moves `parts.extensions` here verbatim; handlers
+    /// read it with `ctx.extensions.get::<T>()`.
+    pub extensions: http::Extensions,
 }
 
 impl Context {
@@ -76,6 +84,7 @@ impl Context {
             trailers: http::HeaderMap::new(),
             deadline: None,
             compress_response: None,
+            extensions: http::Extensions::new(),
         }
     }
 
@@ -86,6 +95,15 @@ impl Context {
     #[must_use]
     pub fn with_deadline(mut self, deadline: Option<std::time::Instant>) -> Self {
         self.deadline = deadline;
+        self
+    }
+
+    /// Attach request extensions captured from the underlying `http::Request`.
+    ///
+    /// Used by the server dispatch paths; see [`Context::extensions`].
+    #[must_use]
+    pub fn with_extensions(mut self, extensions: http::Extensions) -> Self {
+        self.extensions = extensions;
         self
     }
 
@@ -1401,5 +1419,20 @@ mod tests {
 
         let ctx = Context::new(http::HeaderMap::new()).with_deadline(None);
         assert_eq!(ctx.deadline, None);
+    }
+
+    #[test]
+    fn test_context_with_extensions() {
+        #[derive(Clone, Debug, PartialEq)]
+        struct Peer(u32);
+
+        let mut ext = http::Extensions::new();
+        ext.insert(Peer(42));
+        let ctx = Context::new(http::HeaderMap::new()).with_extensions(ext);
+        assert_eq!(ctx.extensions.get::<Peer>(), Some(&Peer(42)));
+
+        // Default-constructed context has empty extensions.
+        let ctx = Context::default();
+        assert!(ctx.extensions.get::<Peer>().is_none());
     }
 }
