@@ -10,6 +10,17 @@ increment the patch version.
 
 ## [Unreleased]
 
+### Added
+
+- **`emit_register_fn` option** on `connectrpc_codegen::codegen::Options` and
+  `connectrpc_build::Config`, plumbing through to
+  `buffa_codegen::CodeGenConfig::emit_register_fn`. Set to `false` to suppress
+  the per-file `register_types(&mut TypeRegistry)` aggregator when multiple
+  generated files are `include!`d into the same module (the identically-named
+  functions would otherwise collide). The protoc plugin accepts a matching
+  `no_register_fn` parameter for path-compat with the unified `connectrpc-build`
+  flow.
+
 ## [0.3.0] - 2026-04-02
 
 ### Changed
