@@ -39,6 +39,9 @@ axum = { workspace = true }
 rand = "0.10"
 regex = "1.5.5"
 
+# CORS (for browser clients)
+tower-http = { workspace = true, features = ["cors"] }
+
 # Logging
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
