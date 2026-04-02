@@ -39,16 +39,16 @@ use std::io;
 use std::io::Read;
 use std::io::Write;
 
-/// Initialize the global `AnyRegistry` with conformance message types.
+/// Initialize the global `TypeRegistry` with conformance message types.
 ///
 /// Must be called before any JSON serialization/deserialization of messages
 /// containing `google.protobuf.Any` fields (e.g., `ConformancePayload.RequestInfo.requests`).
-pub fn init_any_registry() {
-    use buffa::any_registry::{AnyRegistry, AnyTypeEntry};
+pub fn init_type_registry() {
+    use buffa::type_registry::{JsonAnyEntry, TypeRegistry};
 
     macro_rules! register {
         ($registry:expr, $ty:ty) => {
-            $registry.register(AnyTypeEntry {
+            $registry.register_json_any(JsonAnyEntry {
                 type_url: <$ty>::TYPE_URL,
                 to_json: |bytes| {
                     let msg = <$ty>::decode_from_slice(bytes).map_err(|e| e.to_string())?;
@@ -63,7 +63,7 @@ pub fn init_any_registry() {
         };
     }
 
-    let mut registry = AnyRegistry::new();
+    let mut registry = TypeRegistry::new();
     buffa_types::register_wkt_types(&mut registry);
     register!(registry, UnaryRequest);
     register!(registry, ServerStreamRequest);
@@ -76,7 +76,7 @@ pub fn init_any_registry() {
     register!(registry, Header);
     register!(registry, RawHTTPRequest);
     register!(registry, RawHTTPResponse);
-    buffa::any_registry::set_any_registry(Box::new(registry));
+    buffa::type_registry::set_type_registry(registry);
 }
 
 /// Read a length-prefixed protobuf message from stdin.

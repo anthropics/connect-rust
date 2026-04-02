@@ -28,9 +28,9 @@ futures = "0.3"
 pin-project = "1"
 
 # Protobuf
-buffa = { version = "0.2", features = ["json"] }
-buffa-types = { version = "0.2", features = ["json"] }
-buffa-codegen = { version = "0.2" }
+buffa = { version = "0.3", features = ["json"] }
+buffa-types = { version = "0.3", features = ["json"] }
+buffa-codegen = { version = "0.3" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

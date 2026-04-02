@@ -32,7 +32,7 @@ use connectrpc_conformance::HTTPVersion;
 use connectrpc_conformance::Header;
 use connectrpc_conformance::Protocol;
 use connectrpc_conformance::StreamType;
-use connectrpc_conformance::init_any_registry;
+use connectrpc_conformance::init_type_registry;
 use connectrpc_conformance::proto::connectrpc::conformance::v1::{
     BidiStreamResponseView, ClientStreamResponseView, IdempotentUnaryResponseView,
     ServerStreamResponseView, UnaryResponseView,
@@ -196,7 +196,7 @@ async fn main() -> Result<()> {
     tracing::info!("Conformance client starting");
 
     // Initialize the Any type registry for proper proto3 JSON serialization
-    init_any_registry();
+    init_type_registry();
 
     // Read requests from stdin until EOF
     loop {
