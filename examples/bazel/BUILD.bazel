@@ -1,0 +1,73 @@
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+# Code generation: invoke protoc with our three plugins.
+#
+# Output naming is deterministic given the proto file path: a file at
+# `proto/greet/v1/greet.proto` becomes `greet.v1.greet.rs`. The packaging
+# plugin emits a `mod.rs` that nests `pub mod` blocks matching the proto's
+# `package` declaration and `include!`s the per-file output as a sibling.
+#
+# Two output trees are produced — one with buffa message types, one with
+# connectrpc service stubs — because the plugins emit colliding filenames
+# (both `mod.rs` and `<package>.rs`).
+genrule(
+    name = "gen_code",
+    srcs = ["proto/greet/v1/greet.proto"],
+    outs = [
+        "generated/buffa/mod.rs",
+        "generated/buffa/greet.v1.greet.rs",
+        "generated/connect/mod.rs",
+        "generated/connect/greet.v1.greet.rs",
+    ],
+    cmd = """
+        mkdir -p $(@D)/generated/buffa $(@D)/generated/connect
+        $(location @com_google_protobuf//:protoc) \
+            --plugin=protoc-gen-buffa=$(location //tools:protoc-gen-buffa) \
+            --plugin=protoc-gen-buffa-packaging=$(location //tools:protoc-gen-buffa-packaging) \
+            --plugin=protoc-gen-connect-rust=$(location //tools:protoc-gen-connect-rust) \
+            --buffa_out=$(@D)/generated/buffa \
+            --buffa_opt=views=true,json=true \
+            --buffa-packaging_out=$(@D)/generated/buffa \
+            --connect-rust_out=$(@D)/generated/connect \
+            --connect-rust_opt=buffa_module=crate::proto \
+            --buffa-packaging_out=$(@D)/generated/connect \
+            --buffa-packaging_opt=filter=services \
+            --proto_path=proto \
+            greet/v1/greet.proto
+    """,
+    tools = [
+        "@com_google_protobuf//:protoc",
+        "//tools:protoc-gen-buffa",
+        "//tools:protoc-gen-buffa-packaging",
+        "//tools:protoc-gen-connect-rust",
+    ],
+)
+
+# Library compiles src/lib.rs plus the full generated code (both buffa
+# message types and connectrpc service stubs).
+rust_library(
+    name = "greet_lib",
+    srcs = [
+        "src/lib.rs",
+        "generated/buffa/mod.rs",
+        "generated/buffa/greet.v1.greet.rs",
+        "generated/connect/mod.rs",
+        "generated/connect/greet.v1.greet.rs",
+    ],
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    deps = [
+        "@crates//:buffa",
+        "@crates//:connectrpc",
+        "@crates//:futures",
+        "@crates//:http-body",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+)
+
+rust_test(
+    name = "greet_lib_test",
+    crate = ":greet_lib",
+    edition = "2021",
+)

@@ -1,0 +1,9 @@
+# Plugin binaries are built outside Bazel (`./setup.sh`) and symlinked into
+# this directory. They are exposed as labels so genrules can reference them
+# with `tools = [...]` and `$(location ...)`.
+
+exports_files([
+    "protoc-gen-buffa",
+    "protoc-gen-buffa-packaging",
+    "protoc-gen-connect-rust",
+])
