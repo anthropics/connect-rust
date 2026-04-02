@@ -8,6 +8,8 @@
 //! TokenStreams, which provides better syntax highlighting, type safety,
 //! and maintainability compared to string-based generation.
 
+use std::collections::HashMap;
+
 use anyhow::Result;
 use heck::ToSnakeCase;
 use heck::ToUpperCamelCase;
@@ -434,6 +436,33 @@ fn generate_connect_services(
 }
 
 /// Generate code for a single service.
+/// Reject RPC method sets whose generated Rust identifiers collide.
+///
+/// Each proto method `Foo` produces both `foo` and `foo_with_options` on the
+/// client. Two methods that normalize to the same snake_case name (e.g.
+/// `GetFoo` and `get_foo`), or one whose snake form equals another's
+/// `_with_options` form, would emit duplicate definitions and fail to
+/// compile with an error pointing at generated code rather than the proto.
+fn check_method_collisions(service_name: &str, service: &ServiceDescriptorProto) -> Result<()> {
+    let mut seen: HashMap<String, String> = HashMap::new();
+    for m in &service.method {
+        let proto_name = m.name.as_deref().unwrap_or("");
+        let snake = proto_name.to_snake_case();
+        let with_opts = format!("{snake}_with_options");
+        for ident in [snake.as_str(), with_opts.as_str()] {
+            if let Some(prev) = seen.get(ident) {
+                anyhow::bail!(
+                    "service {service_name}: RPC methods {prev:?} and {proto_name:?} \
+                     both generate Rust identifier `{ident}`; rename one in the proto"
+                );
+            }
+        }
+        seen.insert(snake, proto_name.to_string());
+        seen.insert(with_opts, proto_name.to_string());
+    }
+    Ok(())
+}
+
 fn generate_service(
     file: &FileDescriptorProto,
     service: &ServiceDescriptorProto,
@@ -441,6 +470,7 @@ fn generate_service(
 ) -> Result<TokenStream> {
     let package = file.package.as_deref().unwrap_or("");
     let service_name = service.name.as_deref().unwrap_or("");
+    check_method_collisions(service_name, service)?;
     // Empty package is valid proto; the fully-qualified service name is just
     // `ServiceName`, not `.ServiceName` (which would break interop).
     let full_service_name = if package.is_empty() {
@@ -1318,6 +1348,36 @@ mod tests {
         }
     }
 
+    /// Build a minimal proto file with one service holding the given method
+    /// names, all typed `Empty` -> `Empty`. Used for collision tests where
+    /// the method *names* are what's under test.
+    fn minimal_file_with_methods(package: &str, method_names: &[&str]) -> FileDescriptorProto {
+        let methods = method_names
+            .iter()
+            .map(|n| MethodDescriptorProto {
+                name: Some((*n).into()),
+                input_type: Some(format!(".{package}.Empty")),
+                output_type: Some(format!(".{package}.Empty")),
+                ..Default::default()
+            })
+            .collect();
+        let service = ServiceDescriptorProto {
+            name: Some("PingService".into()),
+            method: methods,
+            ..Default::default()
+        };
+        FileDescriptorProto {
+            name: Some("ping.proto".into()),
+            package: Some(package.into()),
+            service: vec![service],
+            message_type: vec![DescriptorProto {
+                name: Some("Empty".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
     /// Generate service code for `files[target_idx]`. All files are visible
     /// to the resolver (as transitive deps via `--include_imports`), but
     /// only the target is in `file_to_generate` — mirroring real protoc use.
@@ -1599,6 +1659,44 @@ mod tests {
         assert!(code.contains("trait SelfExt"));
         assert!(code.contains("struct SelfClient"));
         assert!(code.contains("struct SelfServer"));
+        syn::parse_str::<syn::File>(&code).expect("generated code parses");
+    }
+
+    #[test]
+    fn method_snake_collision_errors() {
+        // protoc accepts `GetFoo` and `get_foo` in the same service; both
+        // snake-case to `get_foo`, which would emit duplicate Rust methods.
+        let file = minimal_file_with_methods("example.v1", &["GetFoo", "get_foo"]);
+        let err = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("PingService"), "missing service name: {msg}");
+        assert!(msg.contains("\"GetFoo\""), "missing first method: {msg}");
+        assert!(msg.contains("\"get_foo\""), "missing second method: {msg}");
+        assert!(msg.contains("`get_foo`"), "missing rust ident: {msg}");
+    }
+
+    #[test]
+    fn method_with_options_collision_errors() {
+        // `Ping` generates client method `ping_with_options`; a proto method
+        // `PingWithOptions` would generate the same base name.
+        let file = minimal_file_with_methods("example.v1", &["Ping", "PingWithOptions"]);
+        let err = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("\"Ping\""), "missing first method: {msg}");
+        assert!(
+            msg.contains("\"PingWithOptions\""),
+            "missing second method: {msg}"
+        );
+        assert!(
+            msg.contains("`ping_with_options`"),
+            "missing rust ident: {msg}"
+        );
+    }
+
+    #[test]
+    fn distinct_methods_do_not_collide() {
+        let file = minimal_file_with_methods("example.v1", &["GetFoo", "GetBar"]);
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
         syn::parse_str::<syn::File>(&code).expect("generated code parses");
     }
 }
