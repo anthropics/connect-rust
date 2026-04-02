@@ -120,6 +120,18 @@ impl Config {
         self
     }
 
+    /// Emit the per-file `register_types(&mut TypeRegistry)` aggregator
+    /// (default: true).
+    ///
+    /// Set to `false` when the generated files are `include!`d into the
+    /// same module — the identically-named functions would otherwise
+    /// collide. See [`Options::emit_register_fn`].
+    #[must_use]
+    pub fn emit_register_fn(mut self, enabled: bool) -> Self {
+        self.options.emit_register_fn = enabled;
+        self
+    }
+
     /// Invoke `buf build` instead of `protoc`.
     ///
     /// Requires `buf` on PATH. Uses buf's dependency resolution (BSR modules)
@@ -528,11 +540,13 @@ mod tests {
             .includes(&["proto/"])
             .strict_utf8_mapping(true)
             .generate_json(false)
+            .emit_register_fn(false)
             .include_file("_inc.rs");
         assert_eq!(cfg.files.len(), 2);
         assert_eq!(cfg.includes.len(), 1);
         assert!(cfg.options.strict_utf8_mapping);
         assert!(!cfg.options.generate_json);
+        assert!(!cfg.options.emit_register_fn);
         assert_eq!(cfg.include_file.as_deref(), Some("_inc.rs"));
     }
 
@@ -541,6 +555,7 @@ mod tests {
         let cfg = Config::new();
         assert!(!cfg.options.strict_utf8_mapping);
         assert!(cfg.options.generate_json);
+        assert!(cfg.options.emit_register_fn);
         assert!(matches!(cfg.descriptor_source, DescriptorSource::Protoc));
     }
 

@@ -61,6 +61,15 @@ pub struct Options {
     /// stubs so they compile independently of co-generated message types.
     /// Unused by [`generate_files`] (the unified `super::`-relative path).
     pub extern_paths: Vec<(String, String)>,
+    /// Emit the per-file `register_types(&mut TypeRegistry)` function that
+    /// aggregates every message in the file. Default `true`. See
+    /// `buffa_codegen::CodeGenConfig::emit_register_fn`.
+    ///
+    /// Set to `false` when multiple generated files are `include!`d into
+    /// the same module — the identically-named `register_types` fns would
+    /// otherwise collide. The per-message `__*_JSON_ANY` consts are still
+    /// emitted; only the aggregating function is suppressed.
+    pub emit_register_fn: bool,
 }
 
 impl Default for Options {
@@ -69,6 +78,7 @@ impl Default for Options {
             strict_utf8_mapping: false,
             generate_json: true,
             extern_paths: Vec::new(),
+            emit_register_fn: true,
         }
     }
 }
@@ -80,6 +90,7 @@ impl Options {
         config.generate_json = self.generate_json;
         config.strict_utf8_mapping = self.strict_utf8_mapping;
         config.extern_paths.clone_from(&self.extern_paths);
+        config.emit_register_fn = self.emit_register_fn;
         config
     }
 }
@@ -197,6 +208,10 @@ pub fn generate_services(
 /// - `no_json` — disable `serde` derives on generated message types.
 ///   Ignored in this plugin (no message types emitted); accepted for
 ///   compatibility with the unified path.
+/// - `no_register_fn` — suppress the per-file
+///   `register_types(&mut TypeRegistry)` aggregator. See
+///   [`Options::emit_register_fn`]. Ignored in this plugin (no message
+///   types emitted); accepted for compatibility with the unified path.
 pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse> {
     let mut options = Options::default();
 
@@ -236,11 +251,12 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                 match opt {
                     "strict_utf8_mapping" => options.strict_utf8_mapping = true,
                     "no_json" => options.generate_json = false,
+                    "no_register_fn" => options.emit_register_fn = false,
                     _ => {
                         return Err(anyhow::anyhow!(
                             "unknown plugin option: {opt:?}. Supported: \
                              buffa_module=<rust_path>, extern_path=<proto>=<rust>, \
-                             strict_utf8_mapping, no_json"
+                             strict_utf8_mapping, no_json, no_register_fn"
                         ));
                     }
                 }
@@ -1698,5 +1714,80 @@ mod tests {
         let file = minimal_file_with_methods("example.v1", &["GetFoo", "GetBar"]);
         let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
         syn::parse_str::<syn::File>(&code).expect("generated code parses");
+    }
+
+    #[test]
+    fn options_default_emits_register_fn() {
+        let opts = Options::default();
+        assert!(opts.emit_register_fn);
+        let cfg = opts.to_buffa_config();
+        assert!(cfg.emit_register_fn);
+    }
+
+    #[test]
+    fn options_emit_register_fn_false_disables_buffa_register_fn() {
+        let opts = Options {
+            emit_register_fn: false,
+            ..Options::default()
+        };
+        let cfg = opts.to_buffa_config();
+        assert!(!cfg.emit_register_fn);
+    }
+
+    #[test]
+    fn generate_files_emit_register_fn_false_suppresses_register_types() {
+        // Build a file with a single message so buffa would normally emit
+        // `pub fn register_types(&mut TypeRegistry)` aggregating it.
+        let file = FileDescriptorProto {
+            name: Some("ping.proto".into()),
+            package: Some("example.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("PingReq".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let with_fn = generate_files(
+            std::slice::from_ref(&file),
+            &["ping.proto".into()],
+            &Options::default(),
+        )
+        .unwrap();
+        assert_eq!(with_fn.len(), 1);
+        assert!(
+            with_fn[0].content.contains("fn register_types"),
+            "expected register_types in default output: {}",
+            with_fn[0].content
+        );
+
+        let without_fn = generate_files(
+            std::slice::from_ref(&file),
+            &["ping.proto".into()],
+            &Options {
+                emit_register_fn: false,
+                ..Options::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(without_fn.len(), 1);
+        assert!(
+            !without_fn[0].content.contains("fn register_types"),
+            "register_types should be suppressed: {}",
+            without_fn[0].content
+        );
+    }
+
+    #[test]
+    fn plugin_no_register_fn_parses() {
+        let request = CodeGeneratorRequest {
+            parameter: Some("buffa_module=crate::proto,no_register_fn".into()),
+            file_to_generate: vec![],
+            proto_file: vec![],
+            ..Default::default()
+        };
+        // Plugin path emits services only, so we can't observe the buffa
+        // config directly — just make sure the option parses without error.
+        generate(&request).expect("no_register_fn should be a recognized plugin option");
     }
 }
