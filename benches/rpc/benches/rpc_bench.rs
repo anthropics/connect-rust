@@ -1,7 +1,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use pprof::criterion::{Output, PProfProfiler};
 
-use connectrpc::client::{CallOptions, HttpClient};
+use connectrpc::client::{HttpClient, full_body};
 use connectrpc::{CodecFormat, Protocol};
 use rpc_bench::*;
 
@@ -216,7 +216,7 @@ fn bench_client_stream(c: &mut Criterion) {
         group.bench_function(BenchmarkId::from_parameter(protocol), |b| {
             b.to_async(&rt).iter(|| async {
                 client
-                    .client_stream(messages.clone(), CallOptions::default())
+                    .client_stream(messages.clone())
                     .await
                     .expect("client_stream failed")
             });
@@ -264,7 +264,7 @@ fn bench_bidi_stream(c: &mut Criterion) {
                 .uri(uri.clone())
                 .header("content-type", "application/connect+proto")
                 .header("connect-protocol-version", "1")
-                .body(http_body_util::Full::new(body_bytes.clone()))
+                .body(full_body(body_bytes.clone()))
                 .expect("failed to build request");
 
             let response = http.send(request).await.expect("bidi request failed");
