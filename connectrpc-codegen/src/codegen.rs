@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use heck::ToSnakeCase;
 use heck::ToUpperCamelCase;
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, TokenStream};
 use quote::format_ident;
 use quote::quote;
 
@@ -629,7 +629,15 @@ fn generate_service(
     let client_methods: Vec<TokenStream> = service
         .method
         .iter()
-        .map(|m| generate_client_method(&full_service_name, m, resolver, package))
+        .map(|m| {
+            generate_client_method(
+                &service_name_const,
+                &full_service_name,
+                m,
+                resolver,
+                package,
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
 
     // Generate monomorphic FooServiceServer<T> dispatcher.
@@ -1097,6 +1105,7 @@ fn generate_trait_method(
 /// ClientConfig defaults, so the no-options variant still picks up any
 /// client-wide defaults the user configured.
 fn generate_client_method(
+    service_name_const: &Ident,
     full_service_name: &str,
     method: &MethodDescriptorProto,
     resolver: &TypeResolver<'_>,
@@ -1138,7 +1147,7 @@ fn generate_client_method(
         call_body = quote! {
             call_client_stream(
                 &self.transport, &self.config,
-                #full_service_name, #method_name,
+                #service_name_const, #method_name,
                 requests, options,
             ).await
         };
@@ -1159,7 +1168,7 @@ fn generate_client_method(
         call_body = quote! {
             call_bidi_stream(
                 &self.transport, &self.config,
-                #full_service_name, #method_name, options,
+                #service_name_const, #method_name, options,
             ).await
         };
         short_args = quote! {};
@@ -1176,7 +1185,7 @@ fn generate_client_method(
         call_body = quote! {
             call_server_stream(
                 &self.transport, &self.config,
-                #full_service_name, #method_name,
+                #service_name_const, #method_name,
                 request, options,
             ).await
         };
@@ -1194,7 +1203,7 @@ fn generate_client_method(
         call_body = quote! {
             call_unary(
                 &self.transport, &self.config,
-                #full_service_name, #method_name,
+                #service_name_const, #method_name,
                 request, options,
             ).await
         };
