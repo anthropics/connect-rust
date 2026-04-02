@@ -10,6 +10,53 @@ increment the patch version.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-04-01
+
+### Changed
+
+- **Upgraded `buffa` to 0.3.0** ([#24]). buffa 0.3 renames `AnyRegistry` to
+  `TypeRegistry` (with `JsonAnyEntry` and `register_json_any()` replacing the
+  old `AnyTypeEntry` / `register()`). Generated code and the runtime crate
+  now use the new types; users who construct a registry manually for
+  `google.protobuf.Any` JSON encoding will need to migrate.
+- **`connectrpc-build` only rewrites output files when content changes**
+  ([#22]). Preserves mtimes so touching one `.proto` no longer triggers a
+  full downstream recompile of every generated `.rs` file. Mirrors
+  prost-build's `write_file_if_changed`.
+
+### Added
+
+- **`Http2Connection::lazy_with_connector` / `connect_with_connector`** ([#15])
+  as the generic transport escape hatch — supply any `tower::Service<Uri>`
+  yielding a `hyper::rt::Read + Write` stream and the library runs the h2
+  handshake over it. `lazy_unix` / `connect_unix` are thin wrappers for
+  Unix domain sockets.
+- **Codegen now rejects RPC method names that collide after `to_snake_case`**
+  ([#28]). `rpc GetFoo(...)` and `rpc get_foo(...)` in the same service
+  previously emitted duplicate `fn get_foo` and failed with a rustc error
+  pointing at generated code; the build script now fails with a clear error
+  naming both proto methods. Also catches a method whose name collides with
+  another's `_with_options` client variant.
+
+### Fixed
+
+- **RPC methods whose snake_case names are Rust keywords now generate valid
+  code** ([#23], [#26]). `rpc Move(...)` previously emitted `fn move(...)`
+  and failed at build-script time. Method idents are now routed through
+  buffa's keyword escaper, producing `r#move` (or a `_` suffix for the four
+  keywords that cannot be raw identifiers).
+- **`service Self {}` no longer generates `trait Self`** ([#27]). The handler
+  trait is suffixed to `Self_`; the `SelfExt` / `SelfClient` / `SelfServer`
+  derivatives are unaffected since the suffix already de-keywords them.
+
+[#15]: https://github.com/anthropics/connect-rust/pull/15
+[#22]: https://github.com/anthropics/connect-rust/pull/22
+[#23]: https://github.com/anthropics/connect-rust/issues/23
+[#24]: https://github.com/anthropics/connect-rust/pull/24
+[#26]: https://github.com/anthropics/connect-rust/pull/26
+[#27]: https://github.com/anthropics/connect-rust/pull/27
+[#28]: https://github.com/anthropics/connect-rust/pull/28
+
 ## [0.2.1] - 2026-03-18
 
 ### Fixed
