@@ -58,6 +58,53 @@ use crate::error::ErrorCode;
 use crate::router::Router;
 use crate::service::ConnectRpcService;
 
+/// Remote socket address of the connected peer.
+///
+/// Inserted into every request's extensions by the built-in server's accept
+/// loop. Handlers read it via `ctx.extensions.get::<PeerAddr>()`.
+///
+/// Callers using a different HTTP stack (axum, raw hyper) in front of
+/// [`ConnectRpcService`] can insert this same type
+/// from a tower layer so handlers stay agnostic to the transport.
+#[derive(Clone, Debug)]
+pub struct PeerAddr(pub SocketAddr);
+
+/// TLS client certificate chain presented by the peer (leaf first).
+///
+/// Inserted by the built-in server's TLS accept loop when the
+/// [`rustls::ServerConfig`] requests client authentication and the peer
+/// presents a valid chain. Absent on plaintext connections or when the
+/// client presents no certificate. Handlers read it via
+/// `ctx.extensions.get::<PeerCerts>()`.
+///
+/// The `Arc` makes per-request insertion cheap: all requests on a
+/// connection share one chain, so this is a refcount bump, not a copy.
+#[cfg(feature = "server-tls")]
+#[derive(Clone, Debug)]
+pub struct PeerCerts(pub Arc<[rustls::pki_types::CertificateDer<'static>]>);
+
+/// Connection-scoped peer info captured once per accepted stream and
+/// inserted into every request's extensions by [`PeerInfo::insert_into`].
+#[derive(Clone, Debug)]
+struct PeerInfo {
+    addr: SocketAddr,
+    #[cfg(feature = "server-tls")]
+    certs: Option<Arc<[rustls::pki_types::CertificateDer<'static>]>>,
+}
+
+impl PeerInfo {
+    /// Insert this connection's peer info as public extension types
+    /// ([`PeerAddr`], [`PeerCerts`]) so handlers can read them via
+    /// `ctx.extensions.get::<T>()`.
+    fn insert_into(&self, ext: &mut http::Extensions) {
+        ext.insert(PeerAddr(self.addr));
+        #[cfg(feature = "server-tls")]
+        if let Some(certs) = &self.certs {
+            ext.insert(PeerCerts(Arc::clone(certs)));
+        }
+    }
+}
+
 /// Default TLS handshake timeout.
 ///
 /// Bounds how long the server waits after TCP accept for a client to complete
@@ -192,6 +239,24 @@ impl Server {
     ///   via IPv4-mapped addresses by default)
     /// - `"localhost:8080"` — resolves via DNS/hosts (may yield v4, v6, or both)
     ///
+    /// Wrap a pre-bound [`TcpListener`].
+    ///
+    /// Use this instead of [`Server::bind`] when you need to configure
+    /// socket options before binding — e.g. `IPV6_V6ONLY=false` for
+    /// dual-stack listening, `SO_REUSEPORT` for multi-process accept,
+    /// or binding to a listener inherited from a parent process.
+    #[must_use]
+    pub fn from_listener(listener: TcpListener) -> BoundServer {
+        BoundServer {
+            listener,
+            http1_keep_alive: true,
+            #[cfg(feature = "server-tls")]
+            tls_config: None,
+            #[cfg(feature = "server-tls")]
+            tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
+        }
+    }
+
     /// When multiple addresses are returned (e.g. `localhost` resolving to
     /// both `::1` and `127.0.0.1`), the first that successfully binds is used.
     pub async fn bind(
@@ -380,18 +445,24 @@ type WrappedService<D> = tower_http::catch_panic::CatchPanic<
 ///
 /// Generic over the IO type so it works for both plain TCP and TLS streams.
 /// Logs connection outcome at trace level.
+///
+/// `peer` is inserted into every request's extensions so handlers can read
+/// the remote address (and TLS client cert chain, if any) via
+/// `ctx.extensions.get::<PeerAddr>()` / `get::<PeerCerts>()`.
 async fn serve_accepted_stream<D, S>(
     io: S,
-    remote_addr: SocketAddr,
+    peer: PeerInfo,
     service: Arc<WrappedService<D>>,
     http1_keep_alive: bool,
 ) where
     D: Dispatcher,
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
-    tracing::trace!(remote_addr = %remote_addr, "Accepted new connection");
+    tracing::trace!(remote_addr = %peer.addr, "Accepted new connection");
 
-    let svc = hyper::service::service_fn(move |req| {
+    let peer_for_requests = peer.clone();
+    let svc = hyper::service::service_fn(move |mut req| {
+        peer_for_requests.insert_into(req.extensions_mut());
         let mut service = (*service).clone();
         async move { service.call(req).await }
     });
@@ -401,11 +472,11 @@ async fn serve_accepted_stream<D, S>(
 
     match builder.serve_connection(TokioIo::new(io), svc).await {
         Ok(()) => {
-            tracing::trace!(remote_addr = %remote_addr, "Connection completed normally");
+            tracing::trace!(remote_addr = %peer.addr, "Connection completed normally");
         }
         Err(err) => {
             tracing::trace!(
-                remote_addr = %remote_addr,
+                remote_addr = %peer.addr,
                 error = %err,
                 "Connection ended with error",
             );
@@ -496,8 +567,21 @@ async fn serve_with_listener<D: Dispatcher>(
                 // indefinitely, holding a task and file descriptor per connection.
                 match tokio::time::timeout(tls_handshake_timeout, acceptor.accept(stream)).await {
                     Ok(Ok(tls_stream)) => {
-                        serve_accepted_stream(tls_stream, remote_addr, service, http1_keep_alive)
-                            .await;
+                        // Extract the client cert chain now — once hyper owns
+                        // the stream for I/O we can't borrow it again.
+                        // `into_owned()` detaches from the session's lifetime
+                        // so the Arc can outlive the TlsStream (which it must,
+                        // since we move the stream into hyper but need the certs
+                        // for every request on this connection).
+                        let (_, conn) = tls_stream.get_ref();
+                        let certs = conn.peer_certificates().map(|chain| -> Arc<[_]> {
+                            chain.iter().map(|c| c.clone().into_owned()).collect()
+                        });
+                        let peer = PeerInfo {
+                            addr: remote_addr,
+                            certs,
+                        };
+                        serve_accepted_stream(tls_stream, peer, service, http1_keep_alive).await;
                     }
                     Ok(Err(err)) => {
                         tracing::debug!(
@@ -517,7 +601,12 @@ async fn serve_with_listener<D: Dispatcher>(
             }
 
             // Plain TCP (no TLS or TLS not configured)
-            serve_accepted_stream(stream, remote_addr, service, http1_keep_alive).await;
+            let peer = PeerInfo {
+                addr: remote_addr,
+                #[cfg(feature = "server-tls")]
+                certs: None,
+            };
+            serve_accepted_stream(stream, peer, service, http1_keep_alive).await;
         });
     }
 
@@ -608,7 +697,23 @@ fn is_transient_accept_error(err: &std::io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
     use std::time::Duration;
+    use tokio::io::AsyncReadExt;
+    use tokio::io::AsyncWriteExt;
+
+    /// Hand-crafted Connect unary request (`POST /svc/Echo`, empty proto
+    /// body, `Connection: close`). Used by the peer-info tests to probe the
+    /// server over raw TCP/TLS without pulling in an HTTP client dep.
+    const ECHO_REQ: &[u8] = concat!(
+        "POST /svc/Echo HTTP/1.1\r\n",
+        "Host: localhost\r\n",
+        "Content-Type: application/proto\r\n",
+        "Content-Length: 0\r\n",
+        "Connection: close\r\n",
+        "\r\n",
+    )
+    .as_bytes();
 
     #[test]
     fn test_server_creation() {
@@ -719,5 +824,186 @@ mod tests {
             connect_result.is_err(),
             "expected connection refused after shutdown"
         );
+    }
+
+    // ========================================================================
+    // PeerAddr / PeerCerts extension plumbing
+    // ========================================================================
+
+    #[tokio::test]
+    async fn peer_addr_reaches_handler() {
+        // Handler stashes the PeerAddr it sees into a shared slot.
+        let captured: Arc<Mutex<Option<PeerAddr>>> = Arc::new(Mutex::new(None));
+        let handler_captured = Arc::clone(&captured);
+        let router = Router::new().route(
+            "svc",
+            "Echo",
+            crate::handler_fn(move |ctx: crate::Context, _req: buffa_types::Empty| {
+                let cap = Arc::clone(&handler_captured);
+                async move {
+                    *cap.lock().unwrap() = ctx.extensions.get::<PeerAddr>().cloned();
+                    Ok((buffa_types::Empty::default(), ctx))
+                }
+            }),
+        );
+
+        let bound = Server::bind("127.0.0.1:0").await.unwrap();
+        let addr = bound.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(router, async {
+                    rx.await.ok();
+                })
+                .await
+        });
+
+        // Hand-crafted Connect unary request over raw TCP (HTTP/1.1).
+        // Body is an empty-serialized `Empty` message (zero bytes).
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let client_local = stream.local_addr().unwrap();
+        stream.write_all(ECHO_REQ).await.unwrap();
+        // Drain the response so the server-side connection can complete.
+        let mut resp = Vec::new();
+        stream.read_to_end(&mut resp).await.unwrap();
+        // Sanity: 2xx status.
+        assert!(
+            resp.starts_with(b"HTTP/1.1 2"),
+            "expected 2xx, got: {}",
+            String::from_utf8_lossy(&resp[..resp.len().min(80)])
+        );
+
+        tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), serve)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        let peer = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("handler should have captured PeerAddr");
+        // The server sees the client's local_addr() as the remote peer.
+        assert_eq!(peer.0, client_local);
+    }
+
+    /// End-to-end mTLS: client presents a cert; handler reads it from
+    /// `ctx.extensions.get::<PeerCerts>()` and the DER bytes round-trip.
+    #[cfg(feature = "server-tls")]
+    #[tokio::test]
+    async fn peer_certs_reach_handler() {
+        // Inline minimal mTLS PKI: one CA → one server leaf + one client leaf.
+        // Returns (server_config, client_config, client_cert_der).
+        fn pki() -> (
+            Arc<rustls::ServerConfig>,
+            Arc<rustls::ClientConfig>,
+            rustls::pki_types::CertificateDer<'static>,
+        ) {
+            use rcgen::CertificateParams;
+            use rcgen::KeyPair;
+            use rcgen::SanType;
+            use rustls::pki_types::CertificateDer;
+            use rustls::pki_types::PrivatePkcs8KeyDer;
+
+            // Idempotent; err = already installed (tests share process state).
+            let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+            let ca_key = KeyPair::generate().unwrap();
+            let mut ca = CertificateParams::default();
+            ca.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+            let ca = ca.self_signed(&ca_key).unwrap();
+
+            let issue = |sans: &[SanType]| {
+                let k = KeyPair::generate().unwrap();
+                let mut p = CertificateParams::default();
+                p.subject_alt_names = sans.to_vec();
+                let c = p.signed_by(&k, &ca, &ca_key).unwrap();
+                (
+                    CertificateDer::from(c.der().to_vec()),
+                    PrivatePkcs8KeyDer::from(k.serialized_der().to_vec()).into(),
+                )
+            };
+
+            let (srv_cert, srv_key) = issue(&[SanType::DnsName("localhost".try_into().unwrap())]);
+            let (cli_cert, cli_key) = issue(&[]);
+            let mut roots = rustls::RootCertStore::empty();
+            roots.add(CertificateDer::from(ca.der().to_vec())).unwrap();
+            let roots = Arc::new(roots);
+
+            let cv = rustls::server::WebPkiClientVerifier::builder(Arc::clone(&roots))
+                .build()
+                .unwrap();
+            let server = rustls::ServerConfig::builder()
+                .with_client_cert_verifier(cv)
+                .with_single_cert(vec![srv_cert], srv_key)
+                .unwrap();
+            let client = rustls::ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_client_auth_cert(vec![cli_cert.clone()], cli_key)
+                .unwrap();
+            (Arc::new(server), Arc::new(client), cli_cert)
+        }
+
+        let (server_cfg, client_cfg, expected_client_der) = pki();
+
+        let captured: Arc<Mutex<Option<PeerCerts>>> = Arc::new(Mutex::new(None));
+        let handler_captured = Arc::clone(&captured);
+        let router = Router::new().route(
+            "svc",
+            "Echo",
+            crate::handler_fn(move |ctx: crate::Context, _req: buffa_types::Empty| {
+                let cap = Arc::clone(&handler_captured);
+                async move {
+                    *cap.lock().unwrap() = ctx.extensions.get::<PeerCerts>().cloned();
+                    Ok((buffa_types::Empty::default(), ctx))
+                }
+            }),
+        );
+
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_tls(server_cfg);
+        let addr = bound.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(router, async {
+                    rx.await.ok();
+                })
+                .await
+        });
+
+        // TLS-over-raw-TCP + hand-crafted HTTP/1.1 Connect unary request.
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let connector = tokio_rustls::TlsConnector::from(client_cfg);
+        let sni = rustls::pki_types::ServerName::try_from("localhost").unwrap();
+        let mut tls = connector.connect(sni, tcp).await.unwrap();
+        tls.write_all(ECHO_REQ).await.unwrap();
+        let mut resp = Vec::new();
+        tls.read_to_end(&mut resp).await.unwrap();
+        assert!(
+            resp.starts_with(b"HTTP/1.1 2"),
+            "expected 2xx, got: {}",
+            String::from_utf8_lossy(&resp[..resp.len().min(80)])
+        );
+
+        tx.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), serve)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+
+        let certs = captured
+            .lock()
+            .unwrap()
+            .take()
+            .expect("handler should have captured PeerCerts");
+        // The exact DER bytes the client presented.
+        assert_eq!(certs.0.len(), 1);
+        assert_eq!(certs.0[0].as_ref(), expected_client_der.as_ref());
     }
 }
