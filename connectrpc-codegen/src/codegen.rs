@@ -20,6 +20,8 @@ use buffa_codegen::generated::descriptor::MethodDescriptorProto;
 use buffa_codegen::generated::descriptor::ServiceDescriptorProto;
 use buffa_codegen::generated::descriptor::SourceCodeInfo;
 use buffa_codegen::generated::descriptor::method_options::IdempotencyLevel;
+use buffa_codegen::idents::make_field_ident;
+use buffa_codegen::idents::rust_path_to_tokens;
 
 pub use buffa_codegen::GeneratedFile;
 pub use buffa_codegen::generated::descriptor;
@@ -372,16 +374,14 @@ impl<'a> TypeResolver<'a> {
     /// Resolve a proto FQN to Rust type-path tokens.
     fn rust_type(&self, proto_fqn: &str, current_package: &str) -> Result<TokenStream> {
         let path = self.resolve_path(proto_fqn, current_package)?;
-        Ok(buffa_codegen::idents::rust_path_to_tokens(&path))
+        Ok(rust_path_to_tokens(&path))
     }
 
     /// Like [`rust_type`] but appends `View` to the last path segment, e.g.
     /// `super::foo::Bar` -> `super::foo::BarView`.
     fn rust_view_type(&self, proto_fqn: &str, current_package: &str) -> Result<TokenStream> {
         let path = self.resolve_path(proto_fqn, current_package)?;
-        Ok(buffa_codegen::idents::rust_path_to_tokens(&format!(
-            "{path}View"
-        )))
+        Ok(rust_path_to_tokens(&format!("{path}View")))
     }
 }
 
@@ -489,8 +489,7 @@ fn generate_service(
         .iter()
         .map(|m| {
             let method_name = m.name.as_deref().unwrap_or("");
-            let method_snake =
-                buffa_codegen::idents::make_field_ident(&method_name.to_snake_case());
+            let method_snake = make_field_ident(&method_name.to_snake_case());
 
             let client_streaming = m.client_streaming.unwrap_or(false);
             let server_streaming = m.server_streaming.unwrap_or(false);
@@ -587,7 +586,7 @@ fn generate_service(
         .method
         .first()
         .and_then(|m| m.name.as_deref())
-        .map(|n| buffa_codegen::idents::make_field_ident(&n.to_snake_case()).to_string())
+        .map(|n| make_field_ident(&n.to_snake_case()).to_string())
         .unwrap_or_else(|| "method".to_string());
 
     // Build client doc comment with interpolated example method
@@ -775,7 +774,7 @@ fn generate_service_server(
 
     for m in &service.method {
         let method_name = m.name.as_deref().unwrap_or("");
-        let method_snake = buffa_codegen::idents::make_field_ident(&method_name.to_snake_case());
+        let method_snake = make_field_ident(&method_name.to_snake_case());
         let input_view = resolver.rust_view_type(m.input_type.as_deref().unwrap_or(""), package)?;
         let cs = m.client_streaming.unwrap_or(false);
         let ss = m.server_streaming.unwrap_or(false);
@@ -969,7 +968,7 @@ fn generate_trait_method(
     package: &str,
 ) -> Result<TokenStream> {
     let method_name = method.name.as_deref().unwrap_or("");
-    let method_snake = buffa_codegen::idents::make_field_ident(&method_name.to_snake_case());
+    let method_snake = make_field_ident(&method_name.to_snake_case());
     let input_view_type =
         resolver.rust_view_type(method.input_type.as_deref().unwrap_or(""), package)?;
     let output_type = resolver.rust_type(method.output_type.as_deref().unwrap_or(""), package)?;
@@ -1043,7 +1042,7 @@ fn generate_client_method(
     package: &str,
 ) -> Result<TokenStream> {
     let method_name = method.name.as_deref().unwrap_or("");
-    let method_snake = buffa_codegen::idents::make_field_ident(&method_name.to_snake_case());
+    let method_snake = make_field_ident(&method_name.to_snake_case());
     let method_with_opts = format_ident!("{}_with_options", method_name.to_snake_case());
     let input_type = resolver.rust_type(method.input_type.as_deref().unwrap_or(""), package)?;
     let output_view_type =
