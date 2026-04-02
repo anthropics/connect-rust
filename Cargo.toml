@@ -49,6 +49,7 @@ anyhow = "1"
 percent-encoding = "2.3"
 base64 = "0.22"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 # HTTP server/client
 hyper = "1"
