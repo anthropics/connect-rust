@@ -4,7 +4,16 @@ module(
 )
 
 bazel_dep(name = "protobuf", version = "29.1", repo_name = "com_google_protobuf")
+bazel_dep(name = "rules_proto", version = "7.0.2")
+bazel_dep(name = "rules_buf", version = "0.3.0")
 bazel_dep(name = "rules_rust", version = "0.69.0")
+
+# rules_buf brings the `buf` CLI as a registered toolchain. The lint and
+# breaking-change checks invoke it from `bazel test` runs.
+buf = use_extension("@rules_buf//buf:extensions.bzl", "buf")
+buf.toolchains(version = "v1.47.2")
+use_repo(buf, "rules_buf_toolchains")
+register_toolchains("@rules_buf_toolchains//:all")
 
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(

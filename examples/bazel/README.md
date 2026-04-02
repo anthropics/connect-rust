@@ -1,7 +1,7 @@
 # Bazel example
 
 End-to-end demonstration that the buffa and connectrpc protoc plugins
-work cleanly under Bazel. A `bazel test //:greet_lib_test` invocation:
+work cleanly under Bazel. A `bazel test //...` invocation:
 
 1. Runs `protoc` with all three plugins (`protoc-gen-buffa`,
    `protoc-gen-buffa-packaging`, `protoc-gen-connect-rust`) via a
@@ -13,6 +13,8 @@ work cleanly under Bazel. A `bazel test //:greet_lib_test` invocation:
 4. Runs three `rust_test`s that exercise the generated message types
    (construction, encode/decode round-trip via `buffa::Message`) and
    the connectrpc service-stub constants.
+5. Runs `buf_lint_test` (from `rules_buf`) over the proto sources,
+   enforcing the buf STANDARD lint ruleset on every CI run.
 
 No `env!`-baked paths anywhere in the generated code, no checked-in
 generated `.rs` files, no `build.rs`.
@@ -21,11 +23,13 @@ generated `.rs` files, no `build.rs`.
 
 | File | Purpose |
 | --- | --- |
-| `MODULE.bazel` | bzlmod deps: `protobuf`, `rules_rust`, `crates_universe`. |
-| `BUILD.bazel` | The `gen_code` genrule, the `greet_lib` library, and `greet_lib_test`. |
+| `MODULE.bazel` | bzlmod deps: `protobuf`, `rules_proto`, `rules_buf`, `rules_rust`, `crates_universe`. |
+| `BUILD.bazel` | The `gen_code` genrule, the `greet_proto` `proto_library`, `greet_proto_lint`, the `greet_lib` library, and `greet_lib_test`. |
+| `.bazelrc` | Enables `--experimental_proto_descriptor_sets_include_source_info` so `buf_lint_test` can read source positions from descriptor sets. |
+| `buf.yaml` | The buf module + lint/breaking config, shared with the local `buf` CLI. |
 | `Cargo.toml` / `Cargo.lock` | Dependency manifest fed to `crates_universe.from_cargo`. |
 | `stub.rs` | Empty crate body — `cargo metadata` needs a target so `crates_universe` can resolve the graph. |
-| `proto/greet/v1/greet.proto` | Minimal `GreetService` definition. |
+| `proto/anthropic/connectrpc/examples/greet/v1/greet.proto` | Minimal `GreetService` definition. |
 | `tools/BUILD.bazel` | Exposes the plugin binaries as Bazel labels. |
 | `setup.sh` | Builds the plugins via cargo and symlinks them under `tools/`. |
 | `src/lib.rs` | Mounts both generated trees via `#[path = "..."]` and contains the tests. |
@@ -46,15 +50,22 @@ repo, and symlinks all three into `tools/`. The symlinks are gitignored.
 ## Run the build
 
 ```sh
-bazel test //:greet_lib_test
+bazel test //...
 ```
 
 On the first invocation Bazel will build `protoc` from source (~30s),
-fetch + compile ~70 crates from crates.io, and produce the generated
-sources. Subsequent runs are cached. Expected output:
+fetch the `buf` toolchain, fetch + compile ~70 crates from crates.io,
+and produce the generated sources. Subsequent runs are cached. Expected
+output:
 
 ```
-running 3 tests
+//:greet_lib_test       PASSED
+//:greet_proto_lint     PASSED
+```
+
+The `greet_lib_test` log shows three Rust unit tests passing:
+
+```
 test tests::message_types_are_constructible ... ok
 test tests::message_types_round_trip_through_buffa ... ok
 test tests::service_name_constant_is_correct ... ok
@@ -64,14 +75,14 @@ test tests::service_name_constant_is_correct ... ok
 
 The `gen_code` genrule invokes `protoc` once with all three plugins
 attached. Output naming is deterministic from the proto file path: a
-file at `proto/greet/v1/greet.proto` becomes `greet.v1.greet.rs`. The
-packaging plugin emits a `mod.rs` that nests `pub mod` blocks matching
-the proto's `package` declaration and `include!`s the per-file output
-as a sibling.
+file at `proto/anthropic/connectrpc/examples/greet/v1/greet.proto`
+becomes `anthropic.connectrpc.examples.greet.v1.greet.rs`. The packaging
+plugin emits a `mod.rs` that nests `pub mod` blocks matching the proto's
+`package` declaration and `include!`s the per-file output as a sibling.
 
 Two output trees are produced — one with buffa message types, one with
 connectrpc service stubs — because the plugins emit colliding filenames
-(both `mod.rs` and `<proto-path>.rs`). The packaging plugin runs twice,
+(both `mod.rs` and `<package>.rs`). The packaging plugin runs twice,
 once over each tree (the second invocation passes `filter=services` so
 files without services are skipped from the connect output).
 
@@ -92,13 +103,17 @@ for each output tree we want a `mod.rs` for: once over the buffa output
 (default behavior, includes every file) and once over the connect output
 with `filter=services` (skip files that contain no services).
 
-## Why not use `rules_buf` for codegen?
+## What `rules_buf` adds (and doesn't)
 
-`rules_buf` provides `buf_dependencies`, `buf_lint_test`, and
-`buf_breaking_test` — proto source management and quality checks. It
-does **not** provide a code generation rule. Codegen still goes through
-either a custom Skylark rule or, as here, a `genrule` invoking `protoc`.
+`rules_buf` provides `buf_dependencies`, `buf_lint_test`,
+`buf_breaking_test`, and `buf_format` — proto source management and
+quality checks that work alongside `rules_proto`'s `proto_library`. It
+does **not** provide a code generation rule, so codegen still goes
+through the `gen_code` genrule.
 
-A future iteration could add `buf_lint_test` and `buf_breaking_test`
-targets alongside the codegen genrule to demonstrate the full
-`rules_buf` integration story.
+Here we wire in `buf_lint_test` against the `greet_proto`
+`proto_library`, sharing config (`buf.yaml`) with the local `buf` CLI.
+`buf_breaking_test` against a snapshot or git ref would be the natural
+next addition. If the proto imported from BSR (e.g.
+`buf.build/protocolbuffers/wellknowntypes`), `buf_dependencies` would
+fetch and expose those modules — this example has no BSR imports.

@@ -1,10 +1,33 @@
+load("@rules_buf//buf:defs.bzl", "buf_lint_test")
+load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+# A standard rules_proto target wrapping the .proto file. The
+# `strip_import_prefix` makes imports resolve from the canonical
+# package path (`anthropic/connectrpc/examples/greet/v1/greet.proto`)
+# rather than the on-disk `proto/...` location.
+proto_library(
+    name = "greet_proto",
+    srcs = ["proto/anthropic/connectrpc/examples/greet/v1/greet.proto"],
+    strip_import_prefix = "/proto",
+)
+
+# rules_buf integration: enforces lint rules from the buf STANDARD ruleset
+# on every `bazel test` invocation. The same `buf.yaml` is consumed by the
+# `buf` CLI for local development.
+buf_lint_test(
+    name = "greet_proto_lint",
+    config = "//:buf.yaml",
+    module = "proto",
+    targets = [":greet_proto"],
+)
 
 # Code generation: invoke protoc with our three plugins.
 #
 # Output naming is deterministic given the proto file path: a file at
-# `proto/greet/v1/greet.proto` becomes `greet.v1.greet.rs`. The packaging
-# plugin emits a `mod.rs` that nests `pub mod` blocks matching the proto's
+# `proto/anthropic/connectrpc/examples/greet/v1/greet.proto` becomes
+# `anthropic.connectrpc.examples.greet.v1.greet.rs`. The packaging plugin
+# emits a `mod.rs` that nests `pub mod` blocks matching the proto's
 # `package` declaration and `include!`s the per-file output as a sibling.
 #
 # Two output trees are produced — one with buffa message types, one with
@@ -12,12 +35,12 @@ load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 # (both `mod.rs` and `<package>.rs`).
 genrule(
     name = "gen_code",
-    srcs = ["proto/greet/v1/greet.proto"],
+    srcs = ["proto/anthropic/connectrpc/examples/greet/v1/greet.proto"],
     outs = [
         "generated/buffa/mod.rs",
-        "generated/buffa/greet.v1.greet.rs",
+        "generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.rs",
         "generated/connect/mod.rs",
-        "generated/connect/greet.v1.greet.rs",
+        "generated/connect/anthropic.connectrpc.examples.greet.v1.greet.rs",
     ],
     cmd = """
         mkdir -p $(@D)/generated/buffa $(@D)/generated/connect
@@ -33,7 +56,7 @@ genrule(
             --buffa-packaging_out=$(@D)/generated/connect \
             --buffa-packaging_opt=filter=services \
             --proto_path=proto \
-            greet/v1/greet.proto
+            anthropic/connectrpc/examples/greet/v1/greet.proto
     """,
     tools = [
         "@com_google_protobuf//:protoc",
@@ -50,9 +73,9 @@ rust_library(
     srcs = [
         "src/lib.rs",
         "generated/buffa/mod.rs",
-        "generated/buffa/greet.v1.greet.rs",
+        "generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.rs",
         "generated/connect/mod.rs",
-        "generated/connect/greet.v1.greet.rs",
+        "generated/connect/anthropic.connectrpc.examples.greet.v1.greet.rs",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
