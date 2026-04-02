@@ -574,7 +574,15 @@ fn generate_service(
     let client_methods: Vec<TokenStream> = service
         .method
         .iter()
-        .map(|m| generate_client_method(&service_name_const, &full_service_name, m, resolver, package))
+        .map(|m| {
+            generate_client_method(
+                &service_name_const,
+                &full_service_name,
+                m,
+                resolver,
+                package,
+            )
+        })
         .collect::<Result<Vec<_>>>()?;
 
     // Generate monomorphic FooServiceServer<T> dispatcher.
