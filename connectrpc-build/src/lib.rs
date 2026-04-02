@@ -598,10 +598,16 @@ mod tests {
         // Service trait + client from connectrpc-codegen.
         assert!(content.contains("pub trait EchoService"));
         assert!(content.contains("pub struct EchoServiceClient"));
-        // Absolute crate path (the module-collision fix).
+        // Fully qualified paths (the module-collision fix): no top-level `use`
+        // statements, all references are inline absolute paths like
+        // `::connectrpc::Context`, `::std::sync::Arc`, etc.
         assert!(
-            content.contains("use ::connectrpc::"),
-            "service imports should use ::connectrpc:: absolute path"
+            content.contains("::connectrpc::"),
+            "service code should use ::connectrpc:: fully qualified paths"
+        );
+        assert!(
+            !content.contains("\nuse "),
+            "service code should not emit top-level use statements"
         );
 
         // Include file nests under test.echo.v1. Because out_dir() was set

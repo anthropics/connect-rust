@@ -425,24 +425,10 @@ fn generate_connect_services(
 ) -> Result<TokenStream> {
     let mut tokens = TokenStream::new();
 
-    // All crate-level imports use `::connectrpc` (absolute path) so that
-    // proto packages named `connectrpc.*` (e.g. `connectrpc.conformance.v1`)
-    // don't shadow the crate in generated module scopes.
-    let imports = quote! {
-        use std::future::Future;
-        use std::pin::Pin;
-        use std::sync::Arc;
-
-        use ::connectrpc::{Context, ConnectError, Router, Dispatcher, view_handler_fn, view_streaming_handler_fn, view_client_streaming_handler_fn, view_bidi_streaming_handler_fn};
-        use ::connectrpc::dispatcher::codegen as __crpc_codegen;
-        use ::connectrpc::CodecFormat as __CodecFormat;
-        use buffa::bytes::Bytes as __Bytes;
-        use ::connectrpc::client::{ClientConfig, ClientTransport, CallOptions, call_unary, call_server_stream, call_client_stream, call_bidi_stream};
-        use futures::Stream;
-        use buffa::Message;
-        use buffa::view::OwnedView;
-    };
-    tokens.extend(imports);
+    // All types in generated code use fully qualified paths (e.g.
+    // `::std::sync::Arc`, `::connectrpc::Context`) so that multiple service
+    // files can be `include!`d into the same module without E0252 duplicate
+    // import errors.
 
     for service in &file.service {
         tokens.extend(generate_service(file, service, resolver)?);
@@ -555,10 +541,10 @@ fn generate_service(
                     .route_view_server_stream(
                         #service_name_const,
                         #method_name,
-                        view_streaming_handler_fn({
-                            let svc = Arc::clone(&self);
+                        ::connectrpc::view_streaming_handler_fn({
+                            let svc = ::std::sync::Arc::clone(&self);
                             move |ctx, req| {
-                                let svc = Arc::clone(&svc);
+                                let svc = ::std::sync::Arc::clone(&svc);
                                 async move { svc.#method_snake(ctx, req).await }
                             }
                         }),
@@ -570,10 +556,10 @@ fn generate_service(
                     .route_view_client_stream(
                         #service_name_const,
                         #method_name,
-                        view_client_streaming_handler_fn({
-                            let svc = Arc::clone(&self);
+                        ::connectrpc::view_client_streaming_handler_fn({
+                            let svc = ::std::sync::Arc::clone(&self);
                             move |ctx, req| {
-                                let svc = Arc::clone(&svc);
+                                let svc = ::std::sync::Arc::clone(&svc);
                                 async move { svc.#method_snake(ctx, req).await }
                             }
                         }),
@@ -585,10 +571,10 @@ fn generate_service(
                     .route_view_bidi_stream(
                         #service_name_const,
                         #method_name,
-                        view_bidi_streaming_handler_fn({
-                            let svc = Arc::clone(&self);
+                        ::connectrpc::view_bidi_streaming_handler_fn({
+                            let svc = ::std::sync::Arc::clone(&self);
                             move |ctx, req| {
-                                let svc = Arc::clone(&svc);
+                                let svc = ::std::sync::Arc::clone(&svc);
                                 async move { svc.#method_snake(ctx, req).await }
                             }
                         }),
@@ -613,9 +599,9 @@ fn generate_service(
                         #service_name_const,
                         #method_name,
                         {
-                            let svc = Arc::clone(&self);
-                            view_handler_fn(move |ctx, req| {
-                                let svc = Arc::clone(&svc);
+                            let svc = ::std::sync::Arc::clone(&self);
+                            ::connectrpc::view_handler_fn(move |ctx, req| {
+                                let svc = ::std::sync::Arc::clone(&svc);
                                 async move { svc.#method_snake(ctx, req).await }
                             })
                         },
@@ -744,11 +730,11 @@ let owned = client.{example_method}(request).await?.into_owned();
             ///
             /// Takes ownership of the `Arc<Self>` and returns a new Router with
             /// this service's methods registered.
-            fn register(self: Arc<Self>, router: Router) -> Router;
+            fn register(self: ::std::sync::Arc<Self>, router: ::connectrpc::Router) -> ::connectrpc::Router;
         }
 
         impl<S: #trait_name> #ext_trait_name for S {
-            fn register(self: Arc<Self>, router: Router) -> Router {
+            fn register(self: ::std::sync::Arc<Self>, router: ::connectrpc::Router) -> ::connectrpc::Router {
                 router
                     #(#route_registrations)*
             }
@@ -760,26 +746,26 @@ let owned = client.{example_method}(request).await?.into_owned();
         #[derive(Clone)]
         pub struct #client_name<T> {
             transport: T,
-            config: ClientConfig,
+            config: ::connectrpc::client::ClientConfig,
         }
 
         impl<T> #client_name<T>
         where
-            T: ClientTransport,
-            <T::ResponseBody as http_body::Body>::Error: std::fmt::Display,
+            T: ::connectrpc::client::ClientTransport,
+            <T::ResponseBody as http_body::Body>::Error: ::std::fmt::Display,
         {
             /// Create a new client with the given transport and configuration.
-            pub fn new(transport: T, config: ClientConfig) -> Self {
+            pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
                 Self { transport, config }
             }
 
             /// Get the client configuration.
-            pub fn config(&self) -> &ClientConfig {
+            pub fn config(&self) -> &::connectrpc::client::ClientConfig {
                 &self.config
             }
 
             /// Get a mutable reference to the client configuration.
-            pub fn config_mut(&mut self) -> &mut ClientConfig {
+            pub fn config_mut(&mut self) -> &mut ::connectrpc::client::ClientConfig {
                 &mut self.config
             }
 
@@ -820,13 +806,13 @@ fn generate_service_server(
                 .unwrap_or(false);
 
             let desc = if client_streaming && server_streaming {
-                quote! { __crpc_codegen::MethodDescriptor::bidi_streaming() }
+                quote! { ::connectrpc::dispatcher::codegen::MethodDescriptor::bidi_streaming() }
             } else if client_streaming {
-                quote! { __crpc_codegen::MethodDescriptor::client_streaming() }
+                quote! { ::connectrpc::dispatcher::codegen::MethodDescriptor::client_streaming() }
             } else if server_streaming {
-                quote! { __crpc_codegen::MethodDescriptor::server_streaming() }
+                quote! { ::connectrpc::dispatcher::codegen::MethodDescriptor::server_streaming() }
             } else {
-                quote! { __crpc_codegen::MethodDescriptor::unary(#is_idempotent) }
+                quote! { ::connectrpc::dispatcher::codegen::MethodDescriptor::unary(#is_idempotent) }
             };
             quote! { #method_name => Some(#desc), }
         })
@@ -852,11 +838,11 @@ fn generate_service_server(
             // Bidi streaming
             call_bidi_arms.push(quote! {
                 #method_name => {
-                    let svc = Arc::clone(&self.inner);
+                    let svc = ::std::sync::Arc::clone(&self.inner);
                     Box::pin(async move {
-                        let req_stream = __crpc_codegen::decode_view_request_stream::<#input_view>(requests, format);
+                        let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<#input_view>(requests, format);
                         let (resp_stream, ctx) = svc.#method_snake(ctx, req_stream).await?;
-                        Ok((__crpc_codegen::encode_response_stream(resp_stream, format), ctx))
+                        Ok((::connectrpc::dispatcher::codegen::encode_response_stream(resp_stream, format), ctx))
                     })
                 }
             });
@@ -864,11 +850,11 @@ fn generate_service_server(
             // Client streaming
             call_cs_arms.push(quote! {
                 #method_name => {
-                    let svc = Arc::clone(&self.inner);
+                    let svc = ::std::sync::Arc::clone(&self.inner);
                     Box::pin(async move {
-                        let req_stream = __crpc_codegen::decode_view_request_stream::<#input_view>(requests, format);
+                        let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<#input_view>(requests, format);
                         let (res, ctx) = svc.#method_snake(ctx, req_stream).await?;
-                        let bytes = __crpc_codegen::encode_response(&res, format)?;
+                        let bytes = ::connectrpc::dispatcher::codegen::encode_response(&res, format)?;
                         Ok((bytes, ctx))
                     })
                 }
@@ -877,11 +863,11 @@ fn generate_service_server(
             // Server streaming
             call_ss_arms.push(quote! {
                 #method_name => {
-                    let svc = Arc::clone(&self.inner);
+                    let svc = ::std::sync::Arc::clone(&self.inner);
                     Box::pin(async move {
-                        let req = __crpc_codegen::decode_request_view::<#input_view>(request, format)?;
+                        let req = ::connectrpc::dispatcher::codegen::decode_request_view::<#input_view>(request, format)?;
                         let (resp_stream, ctx) = svc.#method_snake(ctx, req).await?;
-                        Ok((__crpc_codegen::encode_response_stream(resp_stream, format), ctx))
+                        Ok((::connectrpc::dispatcher::codegen::encode_response_stream(resp_stream, format), ctx))
                     })
                 }
             });
@@ -889,11 +875,11 @@ fn generate_service_server(
             // Unary
             call_unary_arms.push(quote! {
                 #method_name => {
-                    let svc = Arc::clone(&self.inner);
+                    let svc = ::std::sync::Arc::clone(&self.inner);
                     Box::pin(async move {
-                        let req = __crpc_codegen::decode_request_view::<#input_view>(request, format)?;
+                        let req = ::connectrpc::dispatcher::codegen::decode_request_view::<#input_view>(request, format)?;
                         let (res, ctx) = svc.#method_snake(ctx, req).await?;
-                        let bytes = __crpc_codegen::encode_response(&res, format)?;
+                        let bytes = ::connectrpc::dispatcher::codegen::encode_response(&res, format)?;
                         Ok((bytes, ctx))
                     })
                 }
@@ -919,30 +905,30 @@ fn generate_service_server(
     Ok(quote! {
         #server_doc_tokens
         pub struct #server_name<T> {
-            inner: Arc<T>,
+            inner: ::std::sync::Arc<T>,
         }
 
         impl<T: #trait_name> #server_name<T> {
             /// Wrap a service implementation in a monomorphic dispatcher.
             pub fn new(service: T) -> Self {
-                Self { inner: Arc::new(service) }
+                Self { inner: ::std::sync::Arc::new(service) }
             }
 
             /// Wrap an already-`Arc`'d service implementation.
-            pub fn from_arc(inner: Arc<T>) -> Self {
+            pub fn from_arc(inner: ::std::sync::Arc<T>) -> Self {
                 Self { inner }
             }
         }
 
         impl<T> Clone for #server_name<T> {
             fn clone(&self) -> Self {
-                Self { inner: Arc::clone(&self.inner) }
+                Self { inner: ::std::sync::Arc::clone(&self.inner) }
             }
         }
 
-        impl<T: #trait_name> Dispatcher for #server_name<T> {
+        impl<T: #trait_name> ::connectrpc::Dispatcher for #server_name<T> {
             #[inline]
-            fn lookup(&self, path: &str) -> Option<__crpc_codegen::MethodDescriptor> {
+            fn lookup(&self, path: &str) -> Option<::connectrpc::dispatcher::codegen::MethodDescriptor> {
                 let method = path.strip_prefix(#path_prefix)?;
                 match method {
                     #(#lookup_arms)*
@@ -953,69 +939,69 @@ fn generate_service_server(
             fn call_unary(
                 &self,
                 path: &str,
-                ctx: Context,
-                request: __Bytes,
-                format: __CodecFormat,
-            ) -> __crpc_codegen::UnaryResult {
+                ctx: ::connectrpc::Context,
+                request: ::buffa::bytes::Bytes,
+                format: ::connectrpc::CodecFormat,
+            ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
                 let Some(method) = path.strip_prefix(#path_prefix) else {
-                    return __crpc_codegen::unimplemented_unary(path);
+                    return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
                 };
                 // Suppress unused warnings when this service has no unary methods.
                 let _ = (&ctx, &request, &format);
                 match method {
                     #(#call_unary_arms)*
-                    _ => __crpc_codegen::unimplemented_unary(path),
+                    _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
                 }
             }
 
             fn call_server_streaming(
                 &self,
                 path: &str,
-                ctx: Context,
-                request: __Bytes,
-                format: __CodecFormat,
-            ) -> __crpc_codegen::StreamingResult {
+                ctx: ::connectrpc::Context,
+                request: ::buffa::bytes::Bytes,
+                format: ::connectrpc::CodecFormat,
+            ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
                 let Some(method) = path.strip_prefix(#path_prefix) else {
-                    return __crpc_codegen::unimplemented_streaming(path);
+                    return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
                 };
                 let _ = (&ctx, &request, &format);
                 match method {
                     #(#call_ss_arms)*
-                    _ => __crpc_codegen::unimplemented_streaming(path),
+                    _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
                 }
             }
 
             fn call_client_streaming(
                 &self,
                 path: &str,
-                ctx: Context,
-                requests: __crpc_codegen::RequestStream,
-                format: __CodecFormat,
-            ) -> __crpc_codegen::UnaryResult {
+                ctx: ::connectrpc::Context,
+                requests: ::connectrpc::dispatcher::codegen::RequestStream,
+                format: ::connectrpc::CodecFormat,
+            ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
                 let Some(method) = path.strip_prefix(#path_prefix) else {
-                    return __crpc_codegen::unimplemented_unary(path);
+                    return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
                 };
                 let _ = (&ctx, &requests, &format);
                 match method {
                     #(#call_cs_arms)*
-                    _ => __crpc_codegen::unimplemented_unary(path),
+                    _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
                 }
             }
 
             fn call_bidi_streaming(
                 &self,
                 path: &str,
-                ctx: Context,
-                requests: __crpc_codegen::RequestStream,
-                format: __CodecFormat,
-            ) -> __crpc_codegen::StreamingResult {
+                ctx: ::connectrpc::Context,
+                requests: ::connectrpc::dispatcher::codegen::RequestStream,
+                format: ::connectrpc::CodecFormat,
+            ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
                 let Some(method) = path.strip_prefix(#path_prefix) else {
-                    return __crpc_codegen::unimplemented_streaming(path);
+                    return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
                 };
                 let _ = (&ctx, &requests, &format);
                 match method {
                     #(#call_bidi_arms)*
-                    _ => __crpc_codegen::unimplemented_streaming(path),
+                    _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
                 }
             }
         }
@@ -1057,9 +1043,9 @@ fn generate_trait_method(
             #method_doc_tokens
             fn #method_snake(
                 &self,
-                ctx: Context,
-                request: OwnedView<#input_view_type<'static>>,
-            ) -> impl Future<Output = Result<(Pin<Box<dyn Stream<Item = Result<#output_type, ConnectError>> + Send>>, Context), ConnectError>> + Send;
+                ctx: ::connectrpc::Context,
+                request: ::buffa::view::OwnedView<#input_view_type<'static>>,
+            ) -> impl ::std::future::Future<Output = Result<(::std::pin::Pin<Box<dyn ::futures::Stream<Item = Result<#output_type, ::connectrpc::ConnectError>> + Send>>, ::connectrpc::Context), ::connectrpc::ConnectError>> + Send;
         })
     } else if client_streaming && !server_streaming {
         // Client streaming method
@@ -1067,9 +1053,9 @@ fn generate_trait_method(
             #method_doc_tokens
             fn #method_snake(
                 &self,
-                ctx: Context,
-                requests: Pin<Box<dyn Stream<Item = Result<OwnedView<#input_view_type<'static>>, ConnectError>> + Send>>,
-            ) -> impl Future<Output = Result<(#output_type, Context), ConnectError>> + Send;
+                ctx: ::connectrpc::Context,
+                requests: ::std::pin::Pin<Box<dyn ::futures::Stream<Item = Result<::buffa::view::OwnedView<#input_view_type<'static>>, ::connectrpc::ConnectError>> + Send>>,
+            ) -> impl ::std::future::Future<Output = Result<(#output_type, ::connectrpc::Context), ::connectrpc::ConnectError>> + Send;
         })
     } else if client_streaming && server_streaming {
         // Bidi streaming method
@@ -1077,9 +1063,9 @@ fn generate_trait_method(
             #method_doc_tokens
             fn #method_snake(
                 &self,
-                ctx: Context,
-                requests: Pin<Box<dyn Stream<Item = Result<OwnedView<#input_view_type<'static>>, ConnectError>> + Send>>,
-            ) -> impl Future<Output = Result<(Pin<Box<dyn Stream<Item = Result<#output_type, ConnectError>> + Send>>, Context), ConnectError>> + Send;
+                ctx: ::connectrpc::Context,
+                requests: ::std::pin::Pin<Box<dyn ::futures::Stream<Item = Result<::buffa::view::OwnedView<#input_view_type<'static>>, ::connectrpc::ConnectError>> + Send>>,
+            ) -> impl ::std::future::Future<Output = Result<(::std::pin::Pin<Box<dyn ::futures::Stream<Item = Result<#output_type, ::connectrpc::ConnectError>> + Send>>, ::connectrpc::Context), ::connectrpc::ConnectError>> + Send;
         })
     } else {
         // Unary method
@@ -1087,9 +1073,9 @@ fn generate_trait_method(
             #method_doc_tokens
             fn #method_snake(
                 &self,
-                ctx: Context,
-                request: OwnedView<#input_view_type<'static>>,
-            ) -> impl Future<Output = Result<(#output_type, Context), ConnectError>> + Send;
+                ctx: ::connectrpc::Context,
+                request: ::buffa::view::OwnedView<#input_view_type<'static>>,
+            ) -> impl ::std::future::Future<Output = Result<(#output_type, ::connectrpc::Context), ::connectrpc::ConnectError>> + Send;
         })
     }
 }
@@ -1140,21 +1126,20 @@ fn generate_client_method(
         // Client-stream
         ret_ty = quote! {
             Result<
-                ::connectrpc::client::UnaryResponse<OwnedView<#output_view_type<'static>>>,
-                ConnectError,
+                ::connectrpc::client::UnaryResponse<::buffa::view::OwnedView<#output_view_type<'static>>>,
+                ::connectrpc::ConnectError,
             >
         };
         call_body = quote! {
-            call_client_stream(
+            ::connectrpc::client::call_client_stream(
                 &self.transport, &self.config,
                 #service_name_const, #method_name,
                 requests, options,
             ).await
         };
         short_args = quote! { requests: impl IntoIterator<Item = #input_type> };
-        opts_args =
-            quote! { requests: impl IntoIterator<Item = #input_type>, options: CallOptions };
-        short_delegate_args = quote! { requests, CallOptions::default() };
+        opts_args = quote! { requests: impl IntoIterator<Item = #input_type>, options: ::connectrpc::client::CallOptions };
+        short_delegate_args = quote! { requests, ::connectrpc::client::CallOptions::default() };
     } else if client_streaming && server_streaming {
         // Bidi
         ret_ty = quote! {
@@ -1162,54 +1147,54 @@ fn generate_client_method(
                 ::connectrpc::client::BidiStream<
                     T::ResponseBody, #input_type, #output_view_type<'static>
                 >,
-                ConnectError,
+                ::connectrpc::ConnectError,
             >
         };
         call_body = quote! {
-            call_bidi_stream(
+            ::connectrpc::client::call_bidi_stream(
                 &self.transport, &self.config,
                 #service_name_const, #method_name, options,
             ).await
         };
         short_args = quote! {};
-        opts_args = quote! { options: CallOptions };
-        short_delegate_args = quote! { CallOptions::default() };
+        opts_args = quote! { options: ::connectrpc::client::CallOptions };
+        short_delegate_args = quote! { ::connectrpc::client::CallOptions::default() };
     } else if server_streaming {
         // Server-stream
         ret_ty = quote! {
             Result<
                 ::connectrpc::client::ServerStream<T::ResponseBody, #output_view_type<'static>>,
-                ConnectError,
+                ::connectrpc::ConnectError,
             >
         };
         call_body = quote! {
-            call_server_stream(
+            ::connectrpc::client::call_server_stream(
                 &self.transport, &self.config,
                 #service_name_const, #method_name,
                 request, options,
             ).await
         };
         short_args = quote! { request: #input_type };
-        opts_args = quote! { request: #input_type, options: CallOptions };
-        short_delegate_args = quote! { request, CallOptions::default() };
+        opts_args = quote! { request: #input_type, options: ::connectrpc::client::CallOptions };
+        short_delegate_args = quote! { request, ::connectrpc::client::CallOptions::default() };
     } else {
         // Unary
         ret_ty = quote! {
             Result<
-                ::connectrpc::client::UnaryResponse<OwnedView<#output_view_type<'static>>>,
-                ConnectError,
+                ::connectrpc::client::UnaryResponse<::buffa::view::OwnedView<#output_view_type<'static>>>,
+                ::connectrpc::ConnectError,
             >
         };
         call_body = quote! {
-            call_unary(
+            ::connectrpc::client::call_unary(
                 &self.transport, &self.config,
                 #service_name_const, #method_name,
                 request, options,
             ).await
         };
         short_args = quote! { request: #input_type };
-        opts_args = quote! { request: #input_type, options: CallOptions };
-        short_delegate_args = quote! { request, CallOptions::default() };
+        opts_args = quote! { request: #input_type, options: ::connectrpc::client::CallOptions };
+        short_delegate_args = quote! { request, ::connectrpc::client::CallOptions::default() };
     }
 
     Ok(quote! {
@@ -1798,5 +1783,118 @@ mod tests {
         // Plugin path emits services only, so we can't observe the buffa
         // config directly — just make sure the option parses without error.
         generate(&request).expect("no_register_fn should be a recognized plugin option");
+    }
+
+    #[test]
+    fn no_top_level_use_statements_in_generated_code() {
+        // When multiple service files are `include!`d into the same module,
+        // top-level `use` statements cause E0252 (duplicate imports). Verify
+        // the generated code uses fully qualified paths instead.
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        let formatted = format_token_stream(&code.parse::<TokenStream>().unwrap()).unwrap();
+        assert!(
+            !formatted.contains("\nuse "),
+            "generated code must not contain top-level use statements: {formatted}"
+        );
+    }
+
+    #[test]
+    fn multi_service_include_no_e0252() {
+        // Simulate `buffa-packaging` including two service files into one
+        // module. Both files must parse together without duplicate imports.
+        let file_a = {
+            let method = MethodDescriptorProto {
+                name: Some("Ping".into()),
+                input_type: Some(".svc.v1.PingReq".into()),
+                output_type: Some(".svc.v1.PingResp".into()),
+                ..Default::default()
+            };
+            let service = ServiceDescriptorProto {
+                name: Some("Alpha".into()),
+                method: vec![method],
+                ..Default::default()
+            };
+            FileDescriptorProto {
+                name: Some("alpha.proto".into()),
+                package: Some("svc.v1".into()),
+                service: vec![service],
+                message_type: vec![
+                    DescriptorProto {
+                        name: Some("PingReq".into()),
+                        ..Default::default()
+                    },
+                    DescriptorProto {
+                        name: Some("PingResp".into()),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }
+        };
+        let file_b = {
+            let method = MethodDescriptorProto {
+                name: Some("Pong".into()),
+                input_type: Some(".svc.v1.PongReq".into()),
+                output_type: Some(".svc.v1.PongResp".into()),
+                ..Default::default()
+            };
+            let service = ServiceDescriptorProto {
+                name: Some("Beta".into()),
+                method: vec![method],
+                ..Default::default()
+            };
+            FileDescriptorProto {
+                name: Some("beta.proto".into()),
+                package: Some("svc.v1".into()),
+                service: vec![service],
+                message_type: vec![
+                    DescriptorProto {
+                        name: Some("PongReq".into()),
+                        ..Default::default()
+                    },
+                    DescriptorProto {
+                        name: Some("PongResp".into()),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }
+        };
+
+        let files = vec![file_a, file_b];
+        let config = buffa_codegen::CodeGenConfig::default();
+        let targets = vec!["alpha.proto".to_string(), "beta.proto".to_string()];
+        let resolver = TypeResolver::new(&files, &targets, &config, false);
+
+        let code_a = generate_connect_services(&files[0], &resolver).unwrap();
+        let code_b = generate_connect_services(&files[1], &resolver).unwrap();
+
+        let formatted_a = format_token_stream(&code_a).unwrap();
+        let formatted_b = format_token_stream(&code_b).unwrap();
+
+        // Each file independently must parse.
+        syn::parse_str::<syn::File>(&formatted_a).expect("service A should parse independently");
+        syn::parse_str::<syn::File>(&formatted_b).expect("service B should parse independently");
+
+        // Both files combined into one module must also parse (the E0252 scenario).
+        let combined = format!("{formatted_a}\n{formatted_b}");
+        syn::parse_str::<syn::File>(&combined)
+            .expect("combined services should parse without E0252");
+
+        // No top-level `use` in either file.
+        assert!(
+            !formatted_a.contains("\nuse "),
+            "service A has top-level use: {formatted_a}"
+        );
+        assert!(
+            !formatted_b.contains("\nuse "),
+            "service B has top-level use: {formatted_b}"
+        );
     }
 }
