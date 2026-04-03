@@ -269,7 +269,9 @@ async fn serve_plaintext(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app = axum::Router::new()
         .route("/health", axum::routing::get(|| async { "OK" }))
-        .fallback_service(router.into_axum_service());
+        .fallback_service(router.into_axum_service())
+        // Required for browser-based clients (e.g. wasm-client example).
+        .layer(tower_http::cors::CorsLayer::permissive());
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("ELIZA server listening on http://{addr}");

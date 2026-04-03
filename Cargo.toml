@@ -1,5 +1,5 @@
 [workspace]
-members = ["connectrpc", "connectrpc-codegen", "connectrpc-build", "conformance", "examples/eliza", "examples/multiservice", "tests/streaming", "benches/rpc", "benches/rpc-tonic"]
+members = ["connectrpc", "connectrpc-codegen", "connectrpc-build", "conformance", "examples/eliza", "examples/multiservice", "examples/wasm-client", "tests/streaming", "benches/rpc", "benches/rpc-tonic"]
 resolver = "2"
 
 [workspace.package]
@@ -21,9 +21,9 @@ tower = { version = "0.5", features = ["util", "buffer"] }
 tower-http = { version = "0.6", features = ["catch-panic"] }
 
 # Async runtime
-tokio = { version = "1", features = ["macros", "net", "time", "sync", "signal", "rt", "rt-multi-thread", "io-util"] }
+tokio = "1"
 tokio-stream = "0.1"
-tokio-util = { version = "0.7", features = ["codec"] }
+tokio-util = "0.7"
 futures = "0.3"
 pin-project = "1"
 
