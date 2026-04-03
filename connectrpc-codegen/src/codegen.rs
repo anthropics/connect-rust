@@ -1112,7 +1112,7 @@ fn generate_client_method(
     );
     let doc_opts = format!(
         " Call the {method_name} RPC with explicit per-call options. \
-         Options override [`connectrpc::client::ClientConfig`] defaults."
+         Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults."
     );
 
     // Return type is protocol-specific. Compute once.
