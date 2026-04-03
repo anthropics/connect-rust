@@ -752,7 +752,7 @@ let owned = client.{example_method}(request).await?.into_owned();
         impl<T> #client_name<T>
         where
             T: ::connectrpc::client::ClientTransport,
-            <T::ResponseBody as http_body::Body>::Error: ::std::fmt::Display,
+            <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
         {
             /// Create a new client with the given transport and configuration.
             pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
@@ -1112,7 +1112,7 @@ fn generate_client_method(
     );
     let doc_opts = format!(
         " Call the {method_name} RPC with explicit per-call options. \
-         Options override [`ClientConfig`] defaults."
+         Options override [`connectrpc::client::ClientConfig`] defaults."
     );
 
     // Return type is protocol-specific. Compute once.
@@ -1413,6 +1413,26 @@ mod tests {
         let file = &files[target_idx];
         let service = &file.service[0];
         Ok(generate_service(file, service, &resolver)?.to_string())
+    }
+
+    /// Assert that `formatted` (a Rust source string) contains no `use`
+    /// items at the file root. Parses with `syn` rather than string-matching
+    /// so doc comments, string literals, and indented `use` statements in
+    /// nested modules cannot trigger false positives.
+    fn assert_no_top_level_use(formatted: &str, label: &str) {
+        let parsed: syn::File = syn::parse_str(formatted).expect("formatted code parses");
+        let offenders: Vec<String> = parsed
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                syn::Item::Use(u) => Some(quote!(#u).to_string()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "{label} contains top-level use statement(s): {offenders:?}\nFull source:\n{formatted}"
+        );
     }
 
     #[test]
@@ -1798,10 +1818,7 @@ mod tests {
         );
         let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
         let formatted = format_token_stream(&code.parse::<TokenStream>().unwrap()).unwrap();
-        assert!(
-            !formatted.contains("\nuse "),
-            "generated code must not contain top-level use statements: {formatted}"
-        );
+        assert_no_top_level_use(&formatted, "generated code");
     }
 
     #[test]
@@ -1888,13 +1905,7 @@ mod tests {
             .expect("combined services should parse without E0252");
 
         // No top-level `use` in either file.
-        assert!(
-            !formatted_a.contains("\nuse "),
-            "service A has top-level use: {formatted_a}"
-        );
-        assert!(
-            !formatted_b.contains("\nuse "),
-            "service B has top-level use: {formatted_b}"
-        );
+        assert_no_top_level_use(&formatted_a, "service A");
+        assert_no_top_level_use(&formatted_b, "service B");
     }
 }
