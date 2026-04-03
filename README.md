@@ -3,10 +3,21 @@
 [![crates.io](https://img.shields.io/crates/v/connectrpc.svg)](https://crates.io/crates/connectrpc)
 [![docs.rs](https://img.shields.io/docsrs/connectrpc)](https://docs.rs/connectrpc)
 [![CI](https://github.com/anthropics/connect-rust/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/anthropics/connect-rust/actions/workflows/ci.yml)
+[![MSRV](https://img.shields.io/crates/msrv/connectrpc)](Cargo.toml)
 [![deps.rs](https://deps.rs/repo/github/anthropics/connect-rust/status.svg)](https://deps.rs/repo/github/anthropics/connect-rust)
 [![License](https://img.shields.io/crates/l/connectrpc)](LICENSE)
 
-A [Tower](https://docs.rs/tower/latest/tower/)-based Rust implementation of the [ConnectRPC](https://connectrpc.com/) protocol, providing HTTP-based RPC with protobuf messages in either binary or JSON form.
+A [Tower](https://docs.rs/tower/latest/tower/)-based Rust implementation of [ConnectRPC](https://connectrpc.com/), serving Connect, gRPC, and gRPC-Web clients over HTTP with binary or JSON protobuf messages.
+
+**Status:** pre-1.0. The API surface is settling but may shift in 0.x. Production-quality runtime: passes all 6,558 ConnectRPC conformance tests across the three protocols.
+
+**MSRV:** Rust 1.88 (declared on the workspace, verified in CI).
+
+**Documentation:**
+
+- [User guide](docs/guide.md) - long-form coverage of installation, code generation, server/client usage, streaming, tower middleware, TLS, and errors.
+- [`examples/`](examples/) - runnable end-to-end examples (streaming, tower middleware, TLS, multi-service, browser/wasm, Bazel).
+- [docs.rs](https://docs.rs/connectrpc) - API reference.
 
 ## Overview
 
@@ -279,6 +290,14 @@ let response = client.greet(request).await?;
 ```
 
 Per-call `CallOptions` override config defaults (options win).
+
+### Streaming, middleware, TLS
+
+The Quick Start above shows the unary path. For everything else, see the user guide and the focused examples:
+
+- **Streaming RPCs** (server, client, bidi) - see [docs/guide.md#streaming-rpcs](docs/guide.md#streaming-rpcs) and [`examples/streaming-tour/`](examples/streaming-tour) for all four RPC types side-by-side.
+- **Tower middleware on the server** (auth, tracing, timeouts, response trailers) - see [docs/guide.md#tower-middleware](docs/guide.md#tower-middleware) and [`examples/middleware/`](examples/middleware) for a custom auth layer that stamps caller identity into request extensions.
+- **TLS / mTLS** - see [docs/guide.md#tls](docs/guide.md#tls) and [`examples/eliza/README.md`](examples/eliza/README.md) for cert generation and `Server::with_tls` / `HttpClient::with_tls` patterns.
 
 ## Feature Flags
 
