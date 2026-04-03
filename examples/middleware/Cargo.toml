@@ -1,0 +1,51 @@
+[package]
+name = "middleware-example"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "middleware-server"
+path = "src/server.rs"
+
+[[bin]]
+name = "middleware-client"
+path = "src/client.rs"
+
+[dependencies]
+connectrpc = { path = "../../connectrpc", features = ["axum", "client", "server"] }
+
+# Protobuf
+buffa = { workspace = true }
+buffa-types = { workspace = true }
+
+# Serialization (for generated message types)
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# HTTP types (for generated client bounds + custom layer)
+http-body = { workspace = true }
+http-body-util = { workspace = true }
+http = { workspace = true }
+bytes = { workspace = true }
+
+# Async
+tokio = { workspace = true, features = ["full"] }
+futures = { workspace = true }
+
+# Web framework + tower middleware
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true, features = ["trace", "timeout"] }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[build-dependencies]
+connectrpc-build = { path = "../../connectrpc-build" }
+
+[lints]
+workspace = true

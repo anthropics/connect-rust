@@ -1,0 +1,59 @@
+edition = "2023";
+
+package anthropic.connectrpc.tour.v1;
+
+// NumberService demonstrates all four ConnectRPC RPC types over a small
+// numeric API. The methods are deliberately trivial — the example exists
+// to show the wire-protocol shapes, not to be useful.
+service NumberService {
+  // Unary: one request, one response.
+  rpc Square(SquareRequest) returns (SquareResponse);
+
+  // Server streaming: one request, stream of responses.
+  // Emits `count` consecutive integers starting from `start`.
+  rpc Range(RangeRequest) returns (stream RangeResponse);
+
+  // Client streaming: stream of requests, one response.
+  // Sums every value the client sends, returns the total once the
+  // client closes its send side.
+  rpc Sum(stream SumRequest) returns (SumResponse);
+
+  // Bidirectional streaming: stream of requests, stream of responses.
+  // After each request, emits the running total — letting the client
+  // observe the cumulative sum mid-stream rather than waiting for the
+  // end.
+  rpc RunningSum(stream RunningSumRequest) returns (stream RunningSumResponse);
+}
+
+message SquareRequest {
+  int32 value = 1;
+}
+
+message SquareResponse {
+  int64 squared = 1;
+}
+
+message RangeRequest {
+  int32 start = 1;
+  int32 count = 2;
+}
+
+message RangeResponse {
+  int32 value = 1;
+}
+
+message SumRequest {
+  int32 value = 1;
+}
+
+message SumResponse {
+  int64 total = 1;
+}
+
+message RunningSumRequest {
+  int32 value = 1;
+}
+
+message RunningSumResponse {
+  int64 total = 1;
+}
