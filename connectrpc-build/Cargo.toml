@@ -2,6 +2,7 @@
 name = "connectrpc-build"
 version = "0.3.2"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Build-time integration for connectrpc (use in build.rs)"
