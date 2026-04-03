@@ -2,6 +2,7 @@
 name = "connectrpc-codegen"
 version = "0.3.2"
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Library for generating ConnectRPC Rust service bindings from proto descriptors"
