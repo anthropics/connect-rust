@@ -235,12 +235,14 @@ impl CompressionRegistry {
     /// Get a provider by encoding name.
     ///
     /// Returns `None` if no provider is registered for the given name.
+    #[inline]
     #[must_use]
     pub fn get(&self, name: &str) -> Option<Arc<dyn CompressionProvider>> {
         self.providers.get(name).cloned()
     }
 
     /// Check if a provider is registered for the given encoding name.
+    #[inline]
     pub fn supports(&self, name: &str) -> bool {
         self.providers.contains_key(name)
     }
@@ -254,6 +256,7 @@ impl CompressionRegistry {
     ///
     /// Useful for Accept-Encoding headers. The string is computed once when
     /// providers are registered and cached, so this is a cheap lookup.
+    #[inline]
     pub fn accept_encoding_header(&self) -> &str {
         &self.accept_encoding
     }

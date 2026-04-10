@@ -77,6 +77,7 @@ pub struct Context {
 
 impl Context {
     /// Create a new context with the given headers.
+    #[inline]
     pub fn new(headers: http::HeaderMap) -> Self {
         Self {
             headers,
@@ -92,6 +93,7 @@ impl Context {
     ///
     /// Used by the server dispatch paths to expose the parsed timeout
     /// to handlers, allowing deadline propagation to downstream calls.
+    #[inline]
     #[must_use]
     pub fn with_deadline(mut self, deadline: Option<std::time::Instant>) -> Self {
         self.deadline = deadline;
@@ -101,6 +103,7 @@ impl Context {
     /// Attach request extensions captured from the underlying `http::Request`.
     ///
     /// Used by the server dispatch paths; see [`Context::extensions`].
+    #[inline]
     #[must_use]
     pub fn with_extensions(mut self, extensions: http::Extensions) -> Self {
         self.extensions = extensions;
@@ -118,6 +121,7 @@ impl Context {
     }
 
     /// Get a request header value.
+    #[inline]
     pub fn header(&self, key: &http::header::HeaderName) -> Option<&http::header::HeaderValue> {
         self.headers.get(key)
     }

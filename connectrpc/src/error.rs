@@ -275,81 +275,97 @@ impl ConnectError {
     }
 
     /// Create a canceled error.
+    #[inline]
     pub fn canceled(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Canceled, message)
     }
 
     /// Create an unknown error.
+    #[inline]
     pub fn unknown(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Unknown, message)
     }
 
     /// Create an invalid argument error.
+    #[inline]
     pub fn invalid_argument(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::InvalidArgument, message)
     }
 
     /// Create a deadline exceeded error.
+    #[inline]
     pub fn deadline_exceeded(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::DeadlineExceeded, message)
     }
 
     /// Create a not found error.
+    #[inline]
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::NotFound, message)
     }
 
     /// Create an already exists error.
+    #[inline]
     pub fn already_exists(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::AlreadyExists, message)
     }
 
     /// Create a permission denied error.
+    #[inline]
     pub fn permission_denied(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::PermissionDenied, message)
     }
 
     /// Create a resource exhausted error.
+    #[inline]
     pub fn resource_exhausted(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::ResourceExhausted, message)
     }
 
     /// Create a failed precondition error.
+    #[inline]
     pub fn failed_precondition(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::FailedPrecondition, message)
     }
 
     /// Create an aborted error.
+    #[inline]
     pub fn aborted(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Aborted, message)
     }
 
     /// Create an out of range error.
+    #[inline]
     pub fn out_of_range(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::OutOfRange, message)
     }
 
     /// Create an unimplemented error.
+    #[inline]
     pub fn unimplemented(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Unimplemented, message)
     }
 
     /// Create an internal error.
+    #[inline]
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Internal, message)
     }
 
     /// Create an unavailable error.
+    #[inline]
     pub fn unavailable(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Unavailable, message)
     }
 
     /// Create a data loss error.
+    #[inline]
     pub fn data_loss(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::DataLoss, message)
     }
 
     /// Create an unauthenticated error.
+    #[inline]
     pub fn unauthenticated(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Unauthenticated, message)
     }

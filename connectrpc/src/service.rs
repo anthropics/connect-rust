@@ -720,8 +720,8 @@ fn headers_to_metadata(
 ) -> std::collections::HashMap<String, Vec<String>> {
     let mut metadata = std::collections::HashMap::new();
     for (key, value) in headers.iter() {
-        let key_str = key.as_str().to_owned();
-        let value_str = value.to_str().unwrap_or("").to_owned();
+        let key_str = key.as_str().to_string();
+        let value_str = value.to_str().unwrap_or("").to_string();
         metadata
             .entry(key_str)
             .or_insert_with(Vec::new)

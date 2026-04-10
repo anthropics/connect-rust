@@ -39,6 +39,7 @@ pub struct Envelope {
 
 impl Envelope {
     /// Create a new data envelope.
+    #[inline]
     pub fn data(data: Bytes) -> Self {
         Self {
             flags: flags::DATA,
@@ -47,6 +48,7 @@ impl Envelope {
     }
 
     /// Create a new compressed data envelope.
+    #[inline]
     pub fn compressed(data: Bytes) -> Self {
         Self {
             flags: flags::COMPRESSED,
@@ -55,6 +57,7 @@ impl Envelope {
     }
 
     /// Create a new end-stream envelope.
+    #[inline]
     pub fn end_stream(data: Bytes) -> Self {
         Self {
             flags: flags::END_STREAM,
@@ -63,11 +66,13 @@ impl Envelope {
     }
 
     /// Check if this is a compressed message.
+    #[inline]
     pub fn is_compressed(&self) -> bool {
         self.flags & flags::COMPRESSED != 0
     }
 
     /// Check if this is an end-of-stream message.
+    #[inline]
     pub fn is_end_stream(&self) -> bool {
         self.flags & flags::END_STREAM != 0
     }
@@ -568,7 +573,7 @@ mod tests {
             Some((Arc::clone(&registry), "gzip")),
             CompressionPolicy::default(),
         );
-        let mut dec = EnvelopeDecoder::new(1024, Some("gzip".to_owned()), registry);
+        let mut dec = EnvelopeDecoder::new(1024, Some("gzip".to_string()), registry);
 
         let original = Bytes::from_static(b"roundtrip test data");
         let mut buf = BytesMut::new();

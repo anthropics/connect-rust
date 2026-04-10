@@ -185,7 +185,7 @@ mod tests {
         use base64::Engine;
 
         let detail = ErrorDetail {
-            type_url: "type.googleapis.com/test.Detail".to_string(),
+            type_url: "type.googleapis.com/test.Detail".into(),
             value: Some(base64::engine::general_purpose::STANDARD_NO_PAD.encode(b"\x01\x02\x03")),
             debug: None,
         };

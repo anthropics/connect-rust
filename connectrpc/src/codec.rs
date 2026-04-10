@@ -35,17 +35,20 @@ pub mod header {
 }
 
 /// Encode a protobuf message to binary format.
+#[inline]
 pub fn encode_proto<M: Message>(message: &M) -> Result<Bytes, ConnectError> {
     Ok(message.encode_to_bytes())
 }
 
 /// Decode bytes into a protobuf message.
+#[inline]
 pub fn decode_proto<M: Message>(data: &[u8]) -> Result<M, ConnectError> {
     M::decode_from_slice(data)
         .map_err(|e| ConnectError::invalid_argument(format!("failed to decode proto: {e}")))
 }
 
 /// Encode a message to JSON format.
+#[inline]
 pub fn encode_json<M: Serialize>(message: &M) -> Result<Bytes, ConnectError> {
     serde_json::to_vec(message)
         .map(Bytes::from)
@@ -53,6 +56,7 @@ pub fn encode_json<M: Serialize>(message: &M) -> Result<Bytes, ConnectError> {
 }
 
 /// Decode JSON bytes into a message.
+#[inline]
 pub fn decode_json<M: DeserializeOwned>(data: &[u8]) -> Result<M, ConnectError> {
     serde_json::from_slice(data)
         .map_err(|e| ConnectError::invalid_argument(format!("failed to decode JSON: {e}")))
@@ -64,16 +68,19 @@ pub struct ProtoCodec;
 
 impl ProtoCodec {
     /// Get the content type for this codec.
+    #[inline]
     pub fn content_type() -> &'static str {
         content_type::PROTO
     }
 
     /// Encode a protobuf message to bytes.
+    #[inline]
     pub fn encode<M: Message>(message: &M) -> Result<Bytes, ConnectError> {
         encode_proto(message)
     }
 
     /// Decode bytes into a protobuf message.
+    #[inline]
     pub fn decode<M: Message>(data: &[u8]) -> Result<M, ConnectError> {
         decode_proto(data)
     }
@@ -85,16 +92,19 @@ pub struct JsonCodec;
 
 impl JsonCodec {
     /// Get the content type for this codec.
+    #[inline]
     pub fn content_type() -> &'static str {
         content_type::JSON
     }
 
     /// Encode a message to JSON bytes.
+    #[inline]
     pub fn encode<M: Serialize>(message: &M) -> Result<Bytes, ConnectError> {
         encode_json(message)
     }
 
     /// Decode JSON bytes into a message.
+    #[inline]
     pub fn decode<M: DeserializeOwned>(data: &[u8]) -> Result<M, ConnectError> {
         decode_json(data)
     }

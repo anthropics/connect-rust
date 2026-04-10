@@ -172,6 +172,7 @@ impl Protocol {
     /// - `""` or `"+proto"` → Proto (default)
     /// - `"+json"` → Json
     /// - anything else → None
+    #[inline]
     fn grpc_subtype_to_codec(suffix: &str) -> Option<CodecFormat> {
         match suffix {
             "" => Some(CodecFormat::Proto),
