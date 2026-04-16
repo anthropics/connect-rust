@@ -9,9 +9,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -Dwarnings
-  # Ubuntu's apt protobuf-compiler is too old (v21.x) to recognize the
-  # `edition = "2023"` proto syntax used by some examples. Pull a recent
-  # protoc directly from the GitHub release.
+  # Pinned protoc version for proto edition="2023" compatibility.
+  # Installed via arduino/setup-protoc, which caches across runs.
   PROTOC_VERSION: "33.5"
 
 jobs:
@@ -23,11 +22,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc
-        run: |
-          curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" -o /tmp/protoc.zip
-          sudo unzip -o /tmp/protoc.zip -d /usr/local
-          protoc --version
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: ${{ env.PROTOC_VERSION }}
       - run: cargo check --workspace --all-features --all-targets
 
   msrv-check:
@@ -40,11 +37,9 @@ jobs:
         with:
           toolchain: '1.88'
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc
-        run: |
-          curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" -o /tmp/protoc.zip
-          sudo unzip -o /tmp/protoc.zip -d /usr/local
-          protoc --version
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: ${{ env.PROTOC_VERSION }}
       - run: cargo check --workspace --all-features --all-targets
 
   test:
@@ -55,11 +50,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc
-        run: |
-          curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" -o /tmp/protoc.zip
-          sudo unzip -o /tmp/protoc.zip -d /usr/local
-          protoc --version
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: ${{ env.PROTOC_VERSION }}
       - run: cargo test --workspace --all-features
 
   clippy:
@@ -72,11 +65,9 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc
-        run: |
-          curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" -o /tmp/protoc.zip
-          sudo unzip -o /tmp/protoc.zip -d /usr/local
-          protoc --version
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: ${{ env.PROTOC_VERSION }}
       - run: cargo clippy --workspace --all-features --all-targets -- -D warnings
 
   fmt:
@@ -100,11 +91,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc
-        run: |
-          curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" -o /tmp/protoc.zip
-          sudo unzip -o /tmp/protoc.zip -d /usr/local
-          protoc --version
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: ${{ env.PROTOC_VERSION }}
       - run: cargo doc --workspace --all-features --no-deps
 
   # Integration test: start server, run client, verify RPCs work end-to-end
@@ -116,11 +105,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc
-        run: |
-          curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" -o /tmp/protoc.zip
-          sudo unzip -o /tmp/protoc.zip -d /usr/local
-          protoc --version
+      # No protoc needed: multiservice uses checked-in generated code
       - run: ./examples/multiservice/test.sh
 
   # Conformance tests: validate protocol compliance.
@@ -165,11 +150,9 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
-      - name: Install protoc
-        run: |
-          curl -fsSL "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" -o /tmp/protoc.zip
-          sudo unzip -o /tmp/protoc.zip -d /usr/local
-          protoc --version
+      - uses: arduino/setup-protoc@v3
+        with:
+          version: ${{ env.PROTOC_VERSION }}
       - run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - run: cargo check -p connectrpc --no-default-features --target wasm32-unknown-unknown
       - run: cargo check -p connectrpc --no-default-features --features gzip --target wasm32-unknown-unknown
