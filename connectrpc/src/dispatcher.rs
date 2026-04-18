@@ -291,7 +291,6 @@ pub mod codegen {
     use bytes::Bytes;
     use futures::Stream;
     use futures::StreamExt;
-    use serde::Serialize;
     use serde::de::DeserializeOwned;
 
     use crate::codec::CodecFormat;
@@ -300,6 +299,7 @@ pub mod codegen {
 
     // Re-exports that generated code needs direct access to.
     pub use crate::handler::BoxFuture;
+    pub use crate::handler::IntoResponseBytes;
     pub use crate::handler::decode_request_view;
     pub use crate::handler::encode_response;
 
@@ -321,7 +321,7 @@ pub mod codegen {
         format: CodecFormat,
     ) -> BoxStream<Result<Bytes, ConnectError>>
     where
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
         S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     {
         Box::pin(
@@ -332,7 +332,7 @@ pub mod codegen {
                     format,
                 ),
                 async |(mut s, fmt)| match s.next().await {
-                    Some(Ok(res)) => Some((encode_response(&res, fmt), (s, fmt))),
+                    Some(Ok(res)) => Some((res.into_response_bytes(fmt), (s, fmt))),
                     Some(Err(e)) => Some((Err(e), (s, fmt))),
                     None => None,
                 },

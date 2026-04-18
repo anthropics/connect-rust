@@ -6,10 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use buffa::Message;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-
 use buffa::view::MessageView;
+use serde::de::DeserializeOwned;
 
 use crate::handler::BidiStreamingHandler;
 use crate::handler::BidiStreamingHandlerWrapper;
@@ -22,6 +20,7 @@ use crate::handler::ErasedClientStreamingHandler;
 use crate::handler::ErasedHandler;
 use crate::handler::ErasedStreamingHandler;
 use crate::handler::Handler;
+use crate::handler::IntoResponseBytes;
 use crate::handler::ServerStreamingHandlerWrapper;
 use crate::handler::ServerStreamingViewHandlerWrapper;
 use crate::handler::StreamingHandler;
@@ -113,7 +112,7 @@ impl Router {
     where
         H: Handler<Req, Res>,
         Req: Message + DeserializeOwned + Send + 'static,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         self.route_unary_internal(service_name, method_name, handler, false)
     }
@@ -147,7 +146,7 @@ impl Router {
     where
         H: Handler<Req, Res>,
         Req: Message + DeserializeOwned + Send + 'static,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         self.route_unary_internal(service_name, method_name, handler, true)
     }
@@ -163,7 +162,7 @@ impl Router {
     where
         H: Handler<Req, Res>,
         Req: Message + DeserializeOwned + Send + 'static,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = UnaryHandlerWrapper::new(handler);
@@ -202,7 +201,7 @@ impl Router {
     where
         H: StreamingHandler<Req, Res>,
         Req: Message + DeserializeOwned + Send + 'static,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = ServerStreamingHandlerWrapper::new(handler);
@@ -228,7 +227,7 @@ impl Router {
     where
         H: ClientStreamingHandler<Req, Res>,
         Req: Message + DeserializeOwned + Send + 'static,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = ClientStreamingHandlerWrapper::new(handler);
@@ -253,7 +252,7 @@ impl Router {
     where
         H: BidiStreamingHandler<Req, Res>,
         Req: Message + DeserializeOwned + Send + 'static,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = BidiStreamingHandlerWrapper::new(handler);
@@ -281,7 +280,7 @@ impl Router {
         H: ViewHandler<ReqView, Res>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         self.route_view_internal(service_name, method_name, handler, false)
     }
@@ -297,7 +296,7 @@ impl Router {
         H: ViewHandler<ReqView, Res>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         self.route_view_internal(service_name, method_name, handler, true)
     }
@@ -314,7 +313,7 @@ impl Router {
         H: ViewHandler<ReqView, Res>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = UnaryViewHandlerWrapper::new(handler);
@@ -339,7 +338,7 @@ impl Router {
         H: ViewStreamingHandler<ReqView, Res>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = ServerStreamingViewHandlerWrapper::new(handler);
@@ -364,7 +363,7 @@ impl Router {
         H: ViewClientStreamingHandler<ReqView, Res>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = ClientStreamingViewHandlerWrapper::new(handler);
@@ -388,7 +387,7 @@ impl Router {
         H: ViewBidiStreamingHandler<ReqView, Res>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
+        Res: IntoResponseBytes,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = BidiStreamingViewHandlerWrapper::new(handler);

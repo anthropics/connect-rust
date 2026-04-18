@@ -194,6 +194,8 @@ pub use handler::BidiStreamingHandler;
 pub use handler::ClientStreamingHandler;
 pub use handler::Context;
 pub use handler::Handler;
+pub use handler::IntoResponseBytes;
+pub use handler::PreEncoded;
 pub use handler::StreamingHandler;
 pub use handler::ViewBidiStreamingHandler;
 pub use handler::ViewClientStreamingHandler;

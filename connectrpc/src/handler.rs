@@ -50,6 +50,62 @@ where
     }
 }
 
+/// Convert a handler return value into response bytes for the requested codec.
+///
+/// This is the bound the dispatch layer places on handler return types.
+/// Generated owned message types satisfy it via the blanket impl below;
+/// [`PreEncoded`] satisfies it directly so handlers can encode the response
+/// themselves (e.g. via `buffa::view::ViewEncode` to skip building an owned
+/// message) and hand back raw bytes.
+pub trait IntoResponseBytes: Send + 'static {
+    /// Encode `self` as a response body in `format`.
+    fn into_response_bytes(self, format: CodecFormat) -> Result<Bytes, ConnectError>;
+}
+
+impl<T> IntoResponseBytes for T
+where
+    T: Message + Serialize + Send + 'static,
+{
+    fn into_response_bytes(self, format: CodecFormat) -> Result<Bytes, ConnectError> {
+        encode_response(&self, format)
+    }
+}
+
+/// Pre-encoded protobuf response bytes.
+///
+/// Return this from a handler when you've already serialized the response
+/// (typically via [`buffa::view::ViewEncode`] to encode from borrowed data
+/// without building an owned message). The dispatch layer hands the bytes
+/// through unchanged for the protobuf codec.
+///
+/// JSON requests fail with `Unimplemented`: pre-encoding only makes sense for
+/// the binary codec, and there's no general way to translate proto bytes to
+/// JSON. Use the typed return for JSON-facing methods.
+///
+/// For the generated service trait to accept `PreEncoded`, set
+/// `Options::generic_response_type(true)` in your codegen config; otherwise
+/// the trait return type is the concrete owned message.
+#[derive(Debug, Clone)]
+pub struct PreEncoded(pub Bytes);
+
+impl PreEncoded {
+    /// Wrap an owned `Vec<u8>`.
+    pub fn from_vec(v: Vec<u8>) -> Self {
+        Self(Bytes::from(v))
+    }
+}
+
+impl IntoResponseBytes for PreEncoded {
+    fn into_response_bytes(self, format: CodecFormat) -> Result<Bytes, ConnectError> {
+        match format {
+            CodecFormat::Proto => Ok(self.0),
+            CodecFormat::Json => Err(ConnectError::unimplemented(
+                "PreEncoded responses only support the protobuf codec",
+            )),
+        }
+    }
+}
+
 /// Context passed to RPC handlers.
 #[derive(Debug, Clone, Default)]
 pub struct Context {
@@ -150,7 +206,7 @@ pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub trait Handler<Req, Res>: Send + Sync + 'static
 where
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// Handle a unary RPC request.
     fn call(
@@ -177,7 +233,7 @@ where
     F: Fn(Context, Req) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call(
         &self,
@@ -195,7 +251,7 @@ where
 pub trait StreamingHandler<Req, Res>: Send + Sync + 'static
 where
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// The stream type returned by this handler.
     type Stream: Stream<Item = Result<Res, ConnectError>> + Send + 'static;
@@ -226,7 +282,7 @@ where
     Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
     S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     type Stream = S;
 
@@ -267,7 +323,7 @@ where
     Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
     S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     FnStreamingHandler::new(f)
 }
@@ -295,7 +351,7 @@ pub(crate) struct UnaryHandlerWrapper<H, Req, Res>
 where
     H: Handler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     handler: Arc<H>,
     _phantom: std::marker::PhantomData<fn(Req) -> Res>,
@@ -305,7 +361,7 @@ impl<H, Req, Res> UnaryHandlerWrapper<H, Req, Res>
 where
     H: Handler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// Create a new wrapper around the given handler.
     pub fn new(handler: H) -> Self {
@@ -320,7 +376,7 @@ impl<H, Req, Res> ErasedHandler for UnaryHandlerWrapper<H, Req, Res>
 where
     H: Handler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call_erased(
         &self,
@@ -332,7 +388,7 @@ where
         Box::pin(async move {
             let req: Req = decode_request(&request, format)?;
             let (res, ctx) = handler.call(ctx, req).await?;
-            let response_bytes = encode_response(&res, format)?;
+            let response_bytes = res.into_response_bytes(format)?;
             Ok((response_bytes, ctx))
         })
     }
@@ -368,7 +424,7 @@ pub(crate) struct ServerStreamingHandlerWrapper<H, Req, Res>
 where
     H: StreamingHandler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     handler: Arc<H>,
     _phantom: std::marker::PhantomData<fn(Req) -> Res>,
@@ -378,7 +434,7 @@ impl<H, Req, Res> ServerStreamingHandlerWrapper<H, Req, Res>
 where
     H: StreamingHandler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// Create a new wrapper around the given streaming handler.
     pub fn new(handler: H) -> Self {
@@ -393,7 +449,7 @@ impl<H, Req, Res> ErasedStreamingHandler for ServerStreamingHandlerWrapper<H, Re
 where
     H: StreamingHandler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call_erased(
         &self,
@@ -419,7 +475,7 @@ where
                         ),
                         async |(mut stream, format)| match stream.next().await {
                             Some(Ok(res)) => {
-                                let encoded = encode_response(&res, format);
+                                let encoded = res.into_response_bytes(format);
                                 Some((encoded, (stream, format)))
                             }
                             Some(Err(e)) => Some((Err(e), (stream, format))),
@@ -456,7 +512,7 @@ where
     F: Fn(Context, Req) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     FnHandler::new(f)
 }
@@ -467,7 +523,7 @@ where
 pub trait ClientStreamingHandler<Req, Res>: Send + Sync + 'static
 where
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// Handle a client streaming RPC request.
     fn call(
@@ -494,7 +550,7 @@ where
     F: Fn(Context, BoxStream<Result<Req, ConnectError>>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call(
         &self,
@@ -512,7 +568,7 @@ where
     F: Fn(Context, BoxStream<Result<Req, ConnectError>>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     FnClientStreamingHandler::new(f)
 }
@@ -533,7 +589,7 @@ pub(crate) struct ClientStreamingHandlerWrapper<H, Req, Res>
 where
     H: ClientStreamingHandler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     handler: Arc<H>,
     _phantom: std::marker::PhantomData<fn(Req) -> Res>,
@@ -543,7 +599,7 @@ impl<H, Req, Res> ClientStreamingHandlerWrapper<H, Req, Res>
 where
     H: ClientStreamingHandler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// Create a new wrapper around the given client streaming handler.
     pub fn new(handler: H) -> Self {
@@ -558,7 +614,7 @@ impl<H, Req, Res> ErasedClientStreamingHandler for ClientStreamingHandlerWrapper
 where
     H: ClientStreamingHandler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call_erased(
         &self,
@@ -576,7 +632,7 @@ where
             );
 
             let (res, ctx) = handler.call(ctx, request_stream).await?;
-            let response_bytes = encode_response(&res, format)?;
+            let response_bytes = res.into_response_bytes(format)?;
             Ok((response_bytes, ctx))
         })
     }
@@ -588,7 +644,7 @@ where
 pub trait BidiStreamingHandler<Req, Res>: Send + Sync + 'static
 where
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// The stream type returned by this handler.
     type Stream: Stream<Item = Result<Res, ConnectError>> + Send + 'static;
@@ -619,7 +675,7 @@ where
     Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
     S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     type Stream = S;
 
@@ -640,7 +696,7 @@ where
     Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
     S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     FnBidiStreamingHandler::new(f)
 }
@@ -683,7 +739,7 @@ where
 pub trait ViewHandler<ReqView, Res>: Send + Sync + 'static
 where
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// Handle a unary RPC request with a zero-copy view.
     fn call(
@@ -710,7 +766,7 @@ where
     F: Fn(Context, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call(
         &self,
@@ -728,7 +784,7 @@ where
     F: Fn(Context, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     FnViewHandler::new(f)
 }
@@ -739,7 +795,7 @@ where
     H: ViewHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     handler: Arc<H>,
     _phantom: std::marker::PhantomData<fn(ReqView) -> Res>,
@@ -750,7 +806,7 @@ where
     H: ViewHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     pub fn new(handler: H) -> Self {
         Self {
@@ -765,7 +821,7 @@ where
     H: ViewHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call_erased(
         &self,
@@ -777,7 +833,7 @@ where
         Box::pin(async move {
             let req = decode_request_view::<ReqView>(request, format)?;
             let (res, ctx) = handler.call(ctx, req).await?;
-            let response_bytes = encode_response(&res, format)?;
+            let response_bytes = res.into_response_bytes(format)?;
             Ok((response_bytes, ctx))
         })
     }
@@ -791,7 +847,7 @@ where
 pub trait ViewStreamingHandler<ReqView, Res>: Send + Sync + 'static
 where
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// The stream type returned by this handler.
     type Stream: Stream<Item = Result<Res, ConnectError>> + Send + 'static;
@@ -822,7 +878,7 @@ where
     Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
     S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     type Stream = S;
 
@@ -843,7 +899,7 @@ where
     Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
     S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     FnViewStreamingHandler::new(f)
 }
@@ -854,7 +910,7 @@ where
     H: ViewStreamingHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     handler: Arc<H>,
     _phantom: std::marker::PhantomData<fn(ReqView) -> Res>,
@@ -865,7 +921,7 @@ where
     H: ViewStreamingHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     pub fn new(handler: H) -> Self {
         Self {
@@ -880,7 +936,7 @@ where
     H: ViewStreamingHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call_erased(
         &self,
@@ -904,7 +960,7 @@ where
                         ),
                         async |(mut stream, format)| match stream.next().await {
                             Some(Ok(res)) => {
-                                let encoded = encode_response(&res, format);
+                                let encoded = res.into_response_bytes(format);
                                 Some((encoded, (stream, format)))
                             }
                             Some(Err(e)) => Some((Err(e), (stream, format))),
@@ -924,7 +980,7 @@ where
 pub trait ViewClientStreamingHandler<ReqView, Res>: Send + Sync + 'static
 where
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// Handle a client streaming RPC request with zero-copy view items.
     fn call(
@@ -955,7 +1011,7 @@ where
         + 'static,
     Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call(
         &self,
@@ -978,7 +1034,7 @@ where
         + 'static,
     Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     FnViewClientStreamingHandler::new(f)
 }
@@ -989,7 +1045,7 @@ where
     H: ViewClientStreamingHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     handler: Arc<H>,
     _phantom: std::marker::PhantomData<fn(ReqView) -> Res>,
@@ -1000,7 +1056,7 @@ where
     H: ViewClientStreamingHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     pub fn new(handler: H) -> Self {
         Self {
@@ -1016,7 +1072,7 @@ where
     H: ViewClientStreamingHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call_erased(
         &self,
@@ -1034,7 +1090,7 @@ where
                 }));
 
             let (res, ctx) = handler.call(ctx, request_stream).await?;
-            let response_bytes = encode_response(&res, format)?;
+            let response_bytes = res.into_response_bytes(format)?;
             Ok((response_bytes, ctx))
         })
     }
@@ -1044,7 +1100,7 @@ where
 pub trait ViewBidiStreamingHandler<ReqView, Res>: Send + Sync + 'static
 where
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// The stream type returned by this handler.
     type Stream: Stream<Item = Result<Res, ConnectError>> + Send + 'static;
@@ -1079,7 +1135,7 @@ where
     Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
     S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     type Stream = S;
 
@@ -1105,7 +1161,7 @@ where
     Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
     S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
+    Res: IntoResponseBytes,
 {
     FnViewBidiStreamingHandler::new(f)
 }
@@ -1116,7 +1172,7 @@ where
     H: ViewBidiStreamingHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     handler: Arc<H>,
     _phantom: std::marker::PhantomData<fn(ReqView) -> Res>,
@@ -1127,7 +1183,7 @@ where
     H: ViewBidiStreamingHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     pub fn new(handler: H) -> Self {
         Self {
@@ -1143,7 +1199,7 @@ where
     H: ViewBidiStreamingHandler<ReqView, Res>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call_erased(
         &self,
@@ -1172,7 +1228,7 @@ where
                         ),
                         async |(mut stream, format)| match stream.next().await {
                             Some(Ok(res)) => {
-                                let encoded = encode_response(&res, format);
+                                let encoded = res.into_response_bytes(format);
                                 Some((encoded, (stream, format)))
                             }
                             Some(Err(e)) => Some((Err(e), (stream, format))),
@@ -1204,7 +1260,7 @@ pub(crate) struct BidiStreamingHandlerWrapper<H, Req, Res>
 where
     H: BidiStreamingHandler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     handler: Arc<H>,
     _phantom: std::marker::PhantomData<fn(Req) -> Res>,
@@ -1214,7 +1270,7 @@ impl<H, Req, Res> BidiStreamingHandlerWrapper<H, Req, Res>
 where
     H: BidiStreamingHandler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     /// Create a new wrapper around the given bidi streaming handler.
     pub fn new(handler: H) -> Self {
@@ -1229,7 +1285,7 @@ impl<H, Req, Res> ErasedBidiStreamingHandler for BidiStreamingHandlerWrapper<H, 
 where
     H: BidiStreamingHandler<Req, Res>,
     Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
+    Res: IntoResponseBytes,
 {
     fn call_erased(
         &self,
@@ -1259,7 +1315,7 @@ where
                         ),
                         async |(mut stream, format)| match stream.next().await {
                             Some(Ok(res)) => {
-                                let encoded = encode_response(&res, format);
+                                let encoded = res.into_response_bytes(format);
                                 Some((encoded, (stream, format)))
                             }
                             Some(Err(e)) => Some((Err(e), (stream, format))),
@@ -1343,6 +1399,53 @@ mod tests {
         let encoded = encode_response(&msg, CodecFormat::Json).unwrap();
         let decoded: StringValue = decode_request(&encoded, CodecFormat::Json).unwrap();
         assert_eq!(decoded.value, msg.value);
+    }
+
+    // ── IntoResponseBytes / PreEncoded ─────────────────────────────────
+
+    #[test]
+    fn test_into_response_bytes_blanket_matches_encode_response() {
+        let msg = StringValue::from("blanket");
+        let via_blanket = msg.clone().into_response_bytes(CodecFormat::Proto).unwrap();
+        let via_helper = encode_response(&msg, CodecFormat::Proto).unwrap();
+        assert_eq!(via_blanket, via_helper);
+    }
+
+    #[test]
+    fn test_pre_encoded_proto_passthrough() {
+        let msg = StringValue::from("pre");
+        let raw = msg.encode_to_bytes();
+        let bytes = PreEncoded(raw.clone())
+            .into_response_bytes(CodecFormat::Proto)
+            .unwrap();
+        assert_eq!(bytes, raw);
+        let decoded = StringValue::decode_from_slice(&bytes).unwrap();
+        assert_eq!(decoded.value, "pre");
+    }
+
+    #[test]
+    fn test_pre_encoded_json_unimplemented() {
+        let err = PreEncoded(Bytes::new())
+            .into_response_bytes(CodecFormat::Json)
+            .unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::Unimplemented);
+    }
+
+    #[tokio::test]
+    async fn test_erased_handler_with_pre_encoded() {
+        // A handler that pre-encodes the response itself.
+        let handler = handler_fn(|ctx, req: StringValue| async move {
+            let resp = StringValue::from(format!("echo:{}", req.value));
+            Ok((PreEncoded(resp.encode_to_bytes()), ctx))
+        });
+        let wrapper = UnaryHandlerWrapper::new(handler);
+        let req_bytes = StringValue::from("x").encode_to_bytes();
+        let (resp_bytes, _ctx) = wrapper
+            .call_erased(Context::default(), req_bytes, CodecFormat::Proto)
+            .await
+            .unwrap();
+        let decoded = StringValue::decode_from_slice(&resp_bytes).unwrap();
+        assert_eq!(decoded.value, "echo:x");
     }
 
     // ── decode_request_view (zero-copy views) ───────────────────────────
