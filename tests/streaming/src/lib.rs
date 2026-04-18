@@ -22,6 +22,7 @@ mod tests {
     /// Test echo service that echoes messages back with configurable delays.
     struct TestEchoService;
 
+    #[allow(refining_impl_trait)]
     impl EchoService for TestEchoService {
         async fn echo(
             &self,
@@ -178,6 +179,101 @@ mod tests {
     fn make_client(addr: std::net::SocketAddr) -> EchoServiceClient<HttpClient> {
         let config = ClientConfig::new(format!("http://{addr}").parse().unwrap());
         EchoServiceClient::new(HttpClient::plaintext(), config)
+    }
+
+    /// Echo impl whose unary method encodes the response itself via
+    /// `ViewEncode` and returns `PreEncoded` bytes — exercises the
+    /// `IntoResponseBytes` escape hatch end-to-end through both the
+    /// monomorphic dispatcher and the generated trait's
+    /// `impl IntoResponseBytes` return position.
+    struct PreEncodedEchoService;
+
+    #[allow(refining_impl_trait)]
+    impl EchoService for PreEncodedEchoService {
+        async fn echo(
+            &self,
+            ctx: Context,
+            request: OwnedView<EchoRequestView<'static>>,
+        ) -> Result<(connectrpc::PreEncoded, Context), ConnectError> {
+            use buffa::view::ViewEncode;
+            let data = format!("pre:{}", request.data);
+            let view = EchoResponseView {
+                sequence: request.sequence,
+                data: &data,
+                ..Default::default()
+            };
+            Ok((connectrpc::PreEncoded(view.encode_to_bytes()), ctx))
+        }
+
+        async fn server_stream(
+            &self,
+            _ctx: Context,
+            _request: OwnedView<EchoRequestView<'static>>,
+        ) -> Result<
+            (
+                Pin<Box<dyn Stream<Item = Result<EchoResponse, ConnectError>> + Send>>,
+                Context,
+            ),
+            ConnectError,
+        > {
+            Err(ConnectError::unimplemented("test impl: unary only"))
+        }
+
+        async fn client_stream(
+            &self,
+            _ctx: Context,
+            _requests: Pin<
+                Box<
+                    dyn Stream<Item = Result<OwnedView<EchoRequestView<'static>>, ConnectError>>
+                        + Send,
+                >,
+            >,
+        ) -> Result<(EchoResponse, Context), ConnectError> {
+            Err(ConnectError::unimplemented("test impl: unary only"))
+        }
+
+        async fn bidi_stream(
+            &self,
+            _ctx: Context,
+            _requests: Pin<
+                Box<
+                    dyn Stream<Item = Result<OwnedView<EchoRequestView<'static>>, ConnectError>>
+                        + Send,
+                >,
+            >,
+        ) -> Result<
+            (
+                Pin<Box<dyn Stream<Item = Result<EchoResponse, ConnectError>> + Send>>,
+                Context,
+            ),
+            ConnectError,
+        > {
+            Err(ConnectError::unimplemented("test impl: unary only"))
+        }
+    }
+
+    #[tokio::test]
+    async fn unary_echo_pre_encoded() {
+        let server = EchoServiceServer::new(PreEncodedEchoService);
+        let service = ConnectRpcService::new(server);
+        let app = axum::Router::new().fallback_service(service);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = make_client(addr);
+        let resp = client
+            .echo(EchoRequest {
+                sequence: 7,
+                data: "view".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let msg = resp.into_view();
+        assert_eq!(msg.sequence, 7);
+        assert_eq!(msg.data, "pre:view");
     }
 
     #[tokio::test]
