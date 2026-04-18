@@ -132,14 +132,6 @@ impl Config {
         self
     }
 
-    /// Emit `impl ViewEncode<'a>` on generated `*View<'a>` types (default:
-    /// false). See [`Options::view_encode`].
-    #[must_use]
-    pub fn view_encode(mut self, enabled: bool) -> Self {
-        self.options.view_encode = enabled;
-        self
-    }
-
     /// Field paths whose proto `bytes` type should generate `bytes::Bytes`
     /// instead of `Vec<u8>`. See [`Options::bytes_fields`].
     #[must_use]

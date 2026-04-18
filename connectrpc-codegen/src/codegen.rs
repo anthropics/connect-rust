@@ -70,10 +70,6 @@ pub struct Options {
     /// otherwise collide. The per-message `__*_JSON_ANY` consts are still
     /// emitted; only the aggregating function is suppressed.
     pub emit_register_fn: bool,
-    /// Emit `impl ViewEncode<'a>` on generated `*View<'a>` types so they can
-    /// be encoded directly from borrowed data. Passed through to
-    /// `buffa_codegen::CodeGenConfig::view_encode`. Default `false`.
-    pub view_encode: bool,
     /// Field paths whose proto `bytes` type should generate `bytes::Bytes`
     /// instead of `Vec<u8>` (e.g. `[".my.pkg.Msg.field"]`). Passed through
     /// to `buffa_codegen::CodeGenConfig::bytes_fields`. Empty by default.
@@ -103,7 +99,6 @@ impl Default for Options {
             generate_json: true,
             extern_paths: Vec::new(),
             emit_register_fn: true,
-            view_encode: false,
             bytes_fields: Vec::new(),
             generic_response_type: false,
         }
@@ -118,7 +113,6 @@ impl Options {
         config.strict_utf8_mapping = self.strict_utf8_mapping;
         config.extern_paths.clone_from(&self.extern_paths);
         config.emit_register_fn = self.emit_register_fn;
-        config.view_encode = self.view_encode;
         config.bytes_fields.clone_from(&self.bytes_fields);
         config
     }
@@ -284,14 +278,13 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                     "strict_utf8_mapping" => options.strict_utf8_mapping = true,
                     "no_json" => options.generate_json = false,
                     "no_register_fn" => options.emit_register_fn = false,
-                    "view_encode" => options.view_encode = true,
                     "generic_response_type" => options.generic_response_type = true,
                     _ => {
                         return Err(anyhow::anyhow!(
                             "unknown plugin option: {opt:?}. Supported: \
                              buffa_module=<rust_path>, extern_path=<proto>=<rust>, \
                              bytes_field=<proto_path>, strict_utf8_mapping, no_json, \
-                             no_register_fn, view_encode, generic_response_type"
+                             no_register_fn, generic_response_type"
                         ));
                     }
                 }
