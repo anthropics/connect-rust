@@ -149,14 +149,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     fields.insert(
         "name".to_string(),
         Value {
-            kind: Some(value::Kind::StringValue("hello".to_string())),
+            kind: Some(value::KindOneof::StringValue("hello".to_string())),
             ..Default::default()
         },
     );
     fields.insert(
         "count".to_string(),
         Value {
-            kind: Some(value::Kind::NumberValue(42.0)),
+            kind: Some(value::KindOneof::NumberValue(42.0)),
             ..Default::default()
         },
     );

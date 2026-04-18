@@ -187,14 +187,14 @@ impl WellKnownTypesService for MyWellKnownTypesService {
         output_fields.insert(
             "processed".to_string(),
             Value {
-                kind: Some(value::Kind::BoolValue(true)),
+                kind: Some(value::KindOneof::BoolValue(true)),
                 ..Default::default()
             },
         );
         output_fields.insert(
             "original_field_count".to_string(),
             Value {
-                kind: Some(value::Kind::NumberValue(field_count as f64)),
+                kind: Some(value::KindOneof::NumberValue(field_count as f64)),
                 ..Default::default()
             },
         );

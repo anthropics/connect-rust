@@ -123,7 +123,7 @@ fn build_request_info(
         timeout_ms,
         requests: vec![Any {
             type_url: type_url.to_string(),
-            value: request_bytes.to_vec(),
+            value: bytes::Bytes::copy_from_slice(request_bytes),
             ..Default::default()
         }],
         connect_get_info: Default::default(),
@@ -554,7 +554,7 @@ impl ConformanceService for ConformanceServiceImpl {
                 .map(|(bytes, _)| Any {
                     type_url: "type.googleapis.com/connectrpc.conformance.v1.ClientStreamRequest"
                         .to_string(),
-                    value: bytes.clone(),
+                    value: bytes.clone().into(),
                     ..Default::default()
                 })
                 .collect(),
@@ -731,7 +731,7 @@ impl ConformanceService for ConformanceServiceImpl {
                     requests: vec![Any {
                         type_url: "type.googleapis.com/connectrpc.conformance.v1.BidiStreamRequest"
                             .to_string(),
-                        value: first_msg_bytes,
+                        value: first_msg_bytes.into(),
                         ..Default::default()
                     }],
                     connect_get_info: Default::default(),
@@ -848,7 +848,7 @@ impl ConformanceService for ConformanceServiceImpl {
                             timeout_ms: timeout,
                             requests: vec![Any {
                                 type_url: "type.googleapis.com/connectrpc.conformance.v1.BidiStreamRequest".to_string(),
-                                value: msg_bytes,
+                                value: msg_bytes.into(),
                                 ..Default::default()
                             }],
                             connect_get_info: Default::default(),
@@ -861,7 +861,7 @@ impl ConformanceService for ConformanceServiceImpl {
                             timeout_ms: None,
                             requests: vec![Any {
                                 type_url: "type.googleapis.com/connectrpc.conformance.v1.BidiStreamRequest".to_string(),
-                                value: msg_bytes,
+                                value: msg_bytes.into(),
                                 ..Default::default()
                             }],
                             connect_get_info: Default::default(),
@@ -933,7 +933,7 @@ impl ConformanceService for ConformanceServiceImpl {
                     .map(|(bytes, _)| Any {
                         type_url: "type.googleapis.com/connectrpc.conformance.v1.BidiStreamRequest"
                             .to_string(),
-                        value: bytes.clone(),
+                        value: bytes.clone().into(),
                         ..Default::default()
                     })
                     .collect(),

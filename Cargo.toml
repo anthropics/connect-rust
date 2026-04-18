@@ -83,6 +83,15 @@ prettyplease = "0.2"
 tempfile = "3"
 rcgen = "0.14"
 
+# --- DO NOT MERGE -------------------------------------------------------------
+# Path-dep buffa from local rpb/view-encode-optin for ViewEncode + PreEncoded
+# integration testing. Replace with `version = "0.4"` once buffa publishes.
+[patch.crates-io]
+buffa = { path = "../buffa/buffa" }
+buffa-codegen = { path = "../buffa/buffa-codegen" }
+buffa-types = { path = "../buffa/buffa-types" }
+# --- /DO NOT MERGE ------------------------------------------------------------
+
 [workspace.lints.rust]
 dead_code = "warn"
 explicit_outlives_requirements = "warn"
