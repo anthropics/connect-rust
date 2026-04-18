@@ -132,6 +132,32 @@ impl Config {
         self
     }
 
+    /// Emit `impl ViewEncode<'a>` on generated `*View<'a>` types (default:
+    /// false). See [`Options::view_encode`].
+    #[must_use]
+    pub fn view_encode(mut self, enabled: bool) -> Self {
+        self.options.view_encode = enabled;
+        self
+    }
+
+    /// Field paths whose proto `bytes` type should generate `bytes::Bytes`
+    /// instead of `Vec<u8>`. See [`Options::bytes_fields`].
+    #[must_use]
+    pub fn bytes_field(mut self, path: impl Into<String>) -> Self {
+        self.options.bytes_fields.push(path.into());
+        self
+    }
+
+    /// Emit the generated service trait's response position as
+    /// `impl IntoResponseBytes` instead of the concrete owned message type
+    /// (default: false). Handlers can then return either the typed message
+    /// or [`connectrpc::PreEncoded`]. See [`Options::generic_response_type`].
+    #[must_use]
+    pub fn generic_response_type(mut self, enabled: bool) -> Self {
+        self.options.generic_response_type = enabled;
+        self
+    }
+
     /// Invoke `buf build` instead of `protoc`.
     ///
     /// Requires `buf` on PATH. Uses buf's dependency resolution (BSR modules)

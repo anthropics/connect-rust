@@ -70,6 +70,30 @@ pub struct Options {
     /// otherwise collide. The per-message `__*_JSON_ANY` consts are still
     /// emitted; only the aggregating function is suppressed.
     pub emit_register_fn: bool,
+    /// Emit `impl ViewEncode<'a>` on generated `*View<'a>` types so they can
+    /// be encoded directly from borrowed data. Passed through to
+    /// `buffa_codegen::CodeGenConfig::view_encode`. Default `false`.
+    pub view_encode: bool,
+    /// Field paths whose proto `bytes` type should generate `bytes::Bytes`
+    /// instead of `Vec<u8>` (e.g. `[".my.pkg.Msg.field"]`). Passed through
+    /// to `buffa_codegen::CodeGenConfig::bytes_fields`. Empty by default.
+    pub bytes_fields: Vec<String>,
+    /// Emit the generated service trait's response position as
+    /// `impl ::connectrpc::IntoResponseBytes` instead of the concrete owned
+    /// message type. Handlers can then return either the owned message
+    /// (covered by the blanket impl) or [`connectrpc::PreEncoded`] bytes.
+    ///
+    /// Default `false`: the concrete type is emitted, so test callers can
+    /// inspect response fields directly.
+    ///
+    /// Applies to unary and client-streaming methods. Server-streaming and
+    /// bidi keep the concrete item type (the stream's `dyn` bound cannot
+    /// hold `impl Trait`).
+    ///
+    /// Impls that name the concrete owned type in their return signature
+    /// will trigger the `refining_impl_trait` lint (rust-lang/rust#121718);
+    /// add `#[allow(refining_impl_trait)]` on the `impl` block.
+    pub generic_response_type: bool,
 }
 
 impl Default for Options {
@@ -79,6 +103,9 @@ impl Default for Options {
             generate_json: true,
             extern_paths: Vec::new(),
             emit_register_fn: true,
+            view_encode: false,
+            bytes_fields: Vec::new(),
+            generic_response_type: false,
         }
     }
 }
@@ -91,6 +118,8 @@ impl Options {
         config.strict_utf8_mapping = self.strict_utf8_mapping;
         config.extern_paths.clone_from(&self.extern_paths);
         config.emit_register_fn = self.emit_register_fn;
+        config.view_encode = self.view_encode;
+        config.bytes_fields.clone_from(&self.bytes_fields);
         config
     }
 }
@@ -101,6 +130,7 @@ fn emit_service_files(
     proto_file: &[FileDescriptorProto],
     file_to_generate: &[String],
     resolver: &TypeResolver<'_>,
+    options: &Options,
 ) -> Result<Vec<GeneratedFile>> {
     let mut out = Vec::new();
     for file_name in file_to_generate {
@@ -111,7 +141,7 @@ fn emit_service_files(
         if let Some(file) = file_desc
             && !file.service.is_empty()
         {
-            let service_tokens = generate_connect_services(file, resolver)?;
+            let service_tokens = generate_connect_services(file, resolver, options)?;
             let service_code = format_token_stream(&service_tokens)?;
             out.push(GeneratedFile {
                 name: buffa_codegen::proto_path_to_rust_module(file_name),
@@ -149,7 +179,7 @@ pub fn generate_files(
         .map_err(|e| anyhow::anyhow!("buffa-codegen failed: {e}"))?;
 
     let resolver = TypeResolver::new(proto_file, file_to_generate, &config, false);
-    let service_files = emit_service_files(proto_file, file_to_generate, &resolver)?;
+    let service_files = emit_service_files(proto_file, file_to_generate, &resolver, options)?;
 
     // Append each service file's content to the matching message file.
     for svc in service_files {
@@ -185,7 +215,7 @@ pub fn generate_services(
 ) -> Result<Vec<GeneratedFile>> {
     let config = options.to_buffa_config();
     let resolver = TypeResolver::new(proto_file, file_to_generate, &config, true);
-    emit_service_files(proto_file, file_to_generate, &resolver)
+    emit_service_files(proto_file, file_to_generate, &resolver, options)
 }
 
 /// Generate a `CodeGeneratorResponse` from a protoc `CodeGeneratorRequest`.
@@ -247,16 +277,21 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                     proto.insert(0, '.');
                 }
                 options.extern_paths.push((proto, rust.to_string()));
+            } else if let Some(path) = opt.strip_prefix("bytes_field=") {
+                options.bytes_fields.push(path.to_string());
             } else {
                 match opt {
                     "strict_utf8_mapping" => options.strict_utf8_mapping = true,
                     "no_json" => options.generate_json = false,
                     "no_register_fn" => options.emit_register_fn = false,
+                    "view_encode" => options.view_encode = true,
+                    "generic_response_type" => options.generic_response_type = true,
                     _ => {
                         return Err(anyhow::anyhow!(
                             "unknown plugin option: {opt:?}. Supported: \
                              buffa_module=<rust_path>, extern_path=<proto>=<rust>, \
-                             strict_utf8_mapping, no_json, no_register_fn"
+                             bytes_field=<proto_path>, strict_utf8_mapping, no_json, \
+                             no_register_fn, view_encode, generic_response_type"
                         ));
                     }
                 }
@@ -422,6 +457,7 @@ fn bare_type_name(proto_fqn: &str) -> &str {
 fn generate_connect_services(
     file: &FileDescriptorProto,
     resolver: &TypeResolver<'_>,
+    options: &Options,
 ) -> Result<TokenStream> {
     let mut tokens = TokenStream::new();
 
@@ -431,7 +467,7 @@ fn generate_connect_services(
     // import errors.
 
     for service in &file.service {
-        tokens.extend(generate_service(file, service, resolver)?);
+        tokens.extend(generate_service(file, service, resolver, options)?);
     }
 
     Ok(tokens)
@@ -469,6 +505,7 @@ fn generate_service(
     file: &FileDescriptorProto,
     service: &ServiceDescriptorProto,
     resolver: &TypeResolver<'_>,
+    options: &Options,
 ) -> Result<TokenStream> {
     let package = file.package.as_deref().unwrap_or("");
     let service_name = service.name.as_deref().unwrap_or("");
@@ -521,7 +558,7 @@ fn generate_service(
     let trait_methods: Vec<TokenStream> = service
         .method
         .iter()
-        .map(|m| generate_trait_method(file, service, m, resolver, package))
+        .map(|m| generate_trait_method(file, service, m, resolver, package, options))
         .collect::<Result<Vec<_>>>()?;
 
     // Generate route registrations for extension trait
@@ -854,7 +891,7 @@ fn generate_service_server(
                     Box::pin(async move {
                         let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<#input_view>(requests, format);
                         let (res, ctx) = svc.#method_snake(ctx, req_stream).await?;
-                        let bytes = ::connectrpc::dispatcher::codegen::encode_response(&res, format)?;
+                        let bytes = ::connectrpc::dispatcher::codegen::IntoResponseBytes::into_response_bytes(res, format)?;
                         Ok((bytes, ctx))
                     })
                 }
@@ -879,7 +916,7 @@ fn generate_service_server(
                     Box::pin(async move {
                         let req = ::connectrpc::dispatcher::codegen::decode_request_view::<#input_view>(request, format)?;
                         let (res, ctx) = svc.#method_snake(ctx, req).await?;
-                        let bytes = ::connectrpc::dispatcher::codegen::encode_response(&res, format)?;
+                        let bytes = ::connectrpc::dispatcher::codegen::IntoResponseBytes::into_response_bytes(res, format)?;
                         Ok((bytes, ctx))
                     })
                 }
@@ -1021,12 +1058,13 @@ fn generate_trait_method(
     method: &MethodDescriptorProto,
     resolver: &TypeResolver<'_>,
     package: &str,
+    options: &Options,
 ) -> Result<TokenStream> {
     let method_name = method.name.as_deref().unwrap_or("");
     let method_snake = make_field_ident(&method_name.to_snake_case());
     let input_view_type =
         resolver.rust_view_type(method.input_type.as_deref().unwrap_or(""), package)?;
-    let output_type = resolver.rust_type(method.output_type.as_deref().unwrap_or(""), package)?;
+    let owned_output = resolver.rust_type(method.output_type.as_deref().unwrap_or(""), package)?;
 
     // Get method documentation
     let method_doc = get_method_comment(file, service, method).unwrap_or_default();
@@ -1036,6 +1074,19 @@ fn generate_trait_method(
     // Check for streaming
     let client_streaming = method.client_streaming.unwrap_or(false);
     let server_streaming = method.server_streaming.unwrap_or(false);
+
+    // `impl Trait` is only valid in a direct return position, so the
+    // generic-response form applies to unary and client-streaming (which
+    // return `(output, Context)`). Server/bidi streaming return
+    // `Box<dyn Stream<Item = Result<output, _>>>` where `impl Trait` cannot
+    // appear; those keep the concrete owned type. Handlers can still yield
+    // `PreEncoded` from streams via the runtime `IntoResponseBytes` bound,
+    // but only when registered through the lower-level `Router` API.
+    let output_type = if options.generic_response_type && !server_streaming {
+        quote! { impl ::connectrpc::IntoResponseBytes + use<Self> }
+    } else {
+        owned_output
+    };
 
     if server_streaming && !client_streaming {
         // Server streaming method
@@ -1402,6 +1453,22 @@ mod tests {
         extern_paths: &[(String, String)],
         require_extern: bool,
     ) -> Result<String> {
+        gen_service_with_options(
+            files,
+            target_idx,
+            extern_paths,
+            require_extern,
+            &Options::default(),
+        )
+    }
+
+    fn gen_service_with_options(
+        files: &[FileDescriptorProto],
+        target_idx: usize,
+        extern_paths: &[(String, String)],
+        require_extern: bool,
+        options: &Options,
+    ) -> Result<String> {
         let mut config = buffa_codegen::CodeGenConfig::default();
         config.extern_paths = extern_paths.to_vec();
         let target_name = files[target_idx]
@@ -1412,7 +1479,7 @@ mod tests {
         let resolver = TypeResolver::new(files, &target_name, &config, require_extern);
         let file = &files[target_idx];
         let service = &file.service[0];
-        Ok(generate_service(file, service, &resolver)?.to_string())
+        Ok(generate_service(file, service, &resolver, options)?.to_string())
     }
 
     /// Assert that `formatted` (a Rust source string) contains no `use`
@@ -1445,6 +1512,44 @@ mod tests {
         );
         let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
         assert!(code.contains("\"example.v1.PingService\""), "got: {code}");
+    }
+
+    #[test]
+    fn generic_response_type_emits_impl_trait() {
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        // Default: concrete owned type in the trait return position.
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(
+            code.contains("(PingResp , :: connectrpc :: Context)"),
+            "default should emit concrete type: {code}"
+        );
+        assert!(
+            !code.contains("impl :: connectrpc :: IntoResponseBytes"),
+            "default should not emit impl-trait return: {code}"
+        );
+        // With generic_response_type: impl IntoResponseBytes + use<Self> instead.
+        let opts = Options {
+            generic_response_type: true,
+            ..Options::default()
+        };
+        let code =
+            gen_service_with_options(std::slice::from_ref(&file), 0, &[], false, &opts).unwrap();
+        assert!(
+            code.contains(
+                "impl :: connectrpc :: IntoResponseBytes + use < Self > , :: connectrpc :: Context"
+            ),
+            "expected impl IntoResponseBytes + use<Self> in trait return: {code}"
+        );
+        // The dispatch glue uses into_response_bytes regardless of the flag.
+        assert!(
+            code.contains("IntoResponseBytes :: into_response_bytes"),
+            "dispatch glue should call into_response_bytes: {code}"
+        );
     }
 
     #[test]
@@ -1889,8 +1994,9 @@ mod tests {
         let targets = vec!["alpha.proto".to_string(), "beta.proto".to_string()];
         let resolver = TypeResolver::new(&files, &targets, &config, false);
 
-        let code_a = generate_connect_services(&files[0], &resolver).unwrap();
-        let code_b = generate_connect_services(&files[1], &resolver).unwrap();
+        let opts = Options::default();
+        let code_a = generate_connect_services(&files[0], &resolver, &opts).unwrap();
+        let code_b = generate_connect_services(&files[1], &resolver, &opts).unwrap();
 
         let formatted_a = format_token_stream(&code_a).unwrap();
         let formatted_b = format_token_stream(&code_b).unwrap();
