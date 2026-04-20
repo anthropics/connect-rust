@@ -523,16 +523,12 @@ async fn serve_with_listener<D: Dispatcher>(
     #[cfg(not(feature = "server-tls"))]
     let _ = tls_acceptor; // always None; silence unused warning
 
-    // Track connection tasks so graceful shutdown can wait for them to drain.
-    // TaskTracker::spawn is equivalent to tokio::spawn but records the task;
-    // tracker.wait() resolves when all tracked tasks have completed AND
-    // tracker.close() has been called.
-    let tracker = tokio_util::task::TaskTracker::new();
-
     // Per-connection graceful-shutdown coordinator. Each accepted connection
-    // is wrapped via `graceful.watcher().watch(conn)`; on shutdown,
-    // `graceful.shutdown()` signals every wrapped connection to send GOAWAY
-    // (HTTP/2) or disable keep-alive (HTTP/1), then waits for them to drain.
+    // gets a `Watcher` (created in the accept loop, moved into the task) and
+    // is wrapped via `watcher.watch(conn)`. On shutdown, `graceful.shutdown()`
+    // signals every wrapped connection to send GOAWAY (HTTP/2) or disable
+    // keep-alive (HTTP/1), then waits for every `Watcher` to drop — which
+    // covers tasks still in TLS handshake as well as those serving traffic.
     let graceful = GracefulShutdown::new();
 
     // Pin the shutdown future so we can poll it in select!. If no shutdown
@@ -572,7 +568,7 @@ async fn serve_with_listener<D: Dispatcher>(
         #[cfg(feature = "server-tls")]
         let tls_acceptor = tls_acceptor.clone();
 
-        tracker.spawn(async move {
+        tokio::spawn(async move {
             #[cfg(feature = "server-tls")]
             if let Some(acceptor) = tls_acceptor {
                 // Apply a timeout to the TLS handshake to prevent connection
@@ -624,13 +620,9 @@ async fn serve_with_listener<D: Dispatcher>(
         });
     }
 
-    // Shutdown: drop the listener so the OS rejects new connections (RST),
-    // signal GOAWAY / keep-alive-disable to every live connection and wait for
-    // them to drain, then wait for any remaining task cleanup.
+    // Drop the listener (refuse new conns), then signal & drain existing ones.
     drop(listener);
-    tracker.close();
     graceful.shutdown().await;
-    tracker.wait().await;
     tracing::info!("All connections drained; shutdown complete");
 
     Ok(())
@@ -768,16 +760,19 @@ mod tests {
         // Spawn a server with a handler that blocks until released. Start a
         // request, fire shutdown, verify the server waits for that request to
         // complete (not just the connection to close).
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = tokio::sync::oneshot::channel();
-        let release_rx = Arc::new(tokio::sync::Mutex::new(Some(release_rx)));
+        let chans = Arc::new(Mutex::new(Some((entered_tx, release_rx))));
         let router = Router::new().route(
             "svc",
             "Slow",
             crate::handler_fn(move |ctx: crate::Context, _req: buffa_types::Empty| {
-                let release_rx = Arc::clone(&release_rx);
+                let chans = Arc::clone(&chans);
                 async move {
-                    if let Some(rx) = release_rx.lock().await.take() {
-                        rx.await.ok();
+                    let taken = chans.lock().unwrap().take();
+                    if let Some((entered_tx, release_rx)) = taken {
+                        entered_tx.send(()).ok();
+                        release_rx.await.ok();
                     }
                     Ok((buffa_types::Empty::default(), ctx))
                 }
@@ -807,8 +802,11 @@ mod tests {
             .unwrap();
         let (resp_fut, _) = send_request.send_request(req, true).unwrap();
         let mut resp_fut = tokio::spawn(resp_fut);
-        // Let the server accept and dispatch into the handler.
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Wait until the handler has actually started before firing shutdown.
+        tokio::time::timeout(Duration::from_secs(5), entered_rx)
+            .await
+            .expect("handler never entered")
+            .unwrap();
 
         // Fire shutdown — the in-flight request must still be allowed to
         // complete.
@@ -898,8 +896,8 @@ mod tests {
         let h2_task = tokio::spawn(h2_conn);
 
         // Round-trip a request to prove the h2 connection is fully established
-        // on the server side before we fire the shutdown signal. (Router is
-        // empty so this 404s — that's fine, we just need any response.)
+        // on the server side before we fire the shutdown signal. The router is
+        // empty so this errors (415, no Content-Type), but any response will do.
         let req = http::Request::builder()
             .method(http::Method::POST)
             .uri(format!("http://{addr}/svc/Unknown"))
@@ -920,12 +918,11 @@ mod tests {
             .await
             .expect("server did not close idle h2 connection (no GOAWAY?)")
             .expect("h2 connection task panicked");
-        match conn_result {
-            Ok(()) => {} // clean close after GOAWAY
-            Err(e) => assert!(
+        if let Err(e) = conn_result {
+            assert!(
                 e.is_go_away(),
-                "h2 connection ended with non-GOAWAY error: {e:?}",
-            ),
+                "h2 connection ended with non-GOAWAY error: {e:?}"
+            );
         }
 
         // And the server itself should now drain promptly — the only open

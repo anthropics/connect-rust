@@ -102,7 +102,6 @@ server = [
     "dep:libc",
     "dep:tower-http",
     "tokio/net",
-    "tokio-util/rt",
 ]
 
 # HTTP client with connection pooling
