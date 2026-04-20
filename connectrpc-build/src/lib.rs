@@ -283,7 +283,12 @@ impl Config {
             DescriptorSource::Precompiled(p) => {
                 println!("cargo:rerun-if-changed={}", p.display());
             }
-            DescriptorSource::Protoc | DescriptorSource::Buf => {
+            // Both Buf and Precompiled modes use proto-relative names (not
+            // filesystem paths) in `.files()`. Emitting `rerun-if-changed`
+            // for those would point cargo at non-existent files and force a
+            // rebuild every invocation.
+            DescriptorSource::Buf => {}
+            DescriptorSource::Protoc => {
                 for f in &self.files {
                     println!("cargo:rerun-if-changed={}", f.display());
                 }
