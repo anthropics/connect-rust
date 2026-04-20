@@ -67,7 +67,7 @@ tokio-rustls = "0.26"
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "tls12"] }
 
 # Framework integration
-axum = { version = "0.8", features = ["http2"] }
+axum = { version = "0.8", default-features = false, features = ["http2"] }
 
 # OS types
 libc = "0.2"
