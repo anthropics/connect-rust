@@ -76,6 +76,7 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"
 tempfile = { workspace = true }
 rcgen = { workspace = true }
 buffa-types = { workspace = true }
+h2 = { workspace = true }
 
 [features]
 default = ["gzip", "zstd", "streaming"]
@@ -91,6 +92,8 @@ server = [
     "hyper/http1",
     "hyper/http2",
     "hyper-util/server",
+    "hyper-util/server-auto",
+    "hyper-util/server-graceful",
     "hyper-util/tokio",
     "hyper-util/http1",
     "hyper-util/http2",
@@ -99,7 +102,6 @@ server = [
     "dep:libc",
     "dep:tower-http",
     "tokio/net",
-    "tokio-util/rt",
 ]
 
 # HTTP client with connection pooling
