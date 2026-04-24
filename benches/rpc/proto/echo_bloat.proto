@@ -1,0 +1,49 @@
+syntax = "proto3";
+package bench.v1;
+
+// String-heavy echo payload for measuring ViewEncode impact through
+// the connect-rust codec layer. ~20 fields covering plain strings,
+// repeated strings, a string map, two singular sub-messages, and a
+// repeated sub-message — the field-shape mix where view→view encode
+// (zero string allocations) is expected to win biggest.
+//
+// Target encoded size: ~2-3 KB.
+service BloatEchoService {
+  rpc Echo(BloatEcho) returns (BloatEcho);
+}
+
+message BloatEcho {
+  // 8 plain string fields
+  string tenant_id = 1;
+  string trace_id = 2;
+  string span_id = 3;
+  string service = 4;
+  string region = 5;
+  string instance_id = 6;
+  string request_path = 7;
+  string user_agent = 8;
+
+  // Scalars (round out the field count, low alloc impact)
+  int64 timestamp_nanos = 9;
+  int32 status_code = 10;
+
+  // Repeated strings — N small allocs in owned, N borrows in view
+  repeated string tags = 11;
+
+  // String map — 2N allocs + HashMap insert overhead in owned
+  map<string, string> labels = 12;
+
+  // Two singular nested sub-messages
+  BloatHeader auth = 13;
+  BloatHeader origin = 14;
+
+  // Repeated nested sub-messages
+  repeated BloatHeader extra_headers = 15;
+}
+
+message BloatHeader {
+  string name = 1;
+  string value = 2;
+  string source = 3;
+  string note = 4;
+}
