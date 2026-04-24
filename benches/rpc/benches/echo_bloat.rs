@@ -27,12 +27,29 @@ use std::collections::HashMap;
 use buffa::{Message, MessageView, ViewEncode};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
-use rpc_bench::{
-    BloatEcho, BloatEchoView, BloatHeader, BloatHeaderView, DeepNested, DeepNestedView,
-    FewLargeStrings, FewLargeStringsView, MapDominated, MapDominatedView, NestL1, NestL1View,
-    NestL2, NestL2View, NestL3, NestL3View, NestL4, NestL4View, NestL5, NestL5View, ScalarHeavy,
-    ScalarHeavyView,
+use rpc_bench::proto::bench::v1::__buffa::view::{
+    BloatEchoView, BloatHeaderView, DeepNestedView, FewLargeStringsView, MapDominatedView,
+    NestL1View, NestL2View, NestL3View, NestL4View, NestL5View, ScalarHeavyView,
 };
+use rpc_bench::{
+    BloatEcho, BloatHeader, DeepNested, FewLargeStrings, MapDominated, NestL1, NestL2, NestL3,
+    NestL4, NestL5, ScalarHeavy,
+};
+
+// ──────────────────────────────────────────────────────────────────────
+// Adding a new shape:
+//   1. Define the message in `proto/echo_bloat.proto`, regenerate
+//      (`buf generate` from `benches/rpc/`).
+//   2. Add a `mod <name> { payload, owned_owned, view_owned, owned_view,
+//      view_view }` block below — each fn is `&[u8] -> Vec<u8>` and the
+//      explicit per-field construction is intentional (it makes the
+//      alloc/copy/borrow cost of each path visible in the source).
+//   3. Add a `bench_shape!` invocation and register it in
+//      `criterion_group!`.
+//   To make the shape fanout-able, also provide `clone_from(&Owned)`,
+//   `borrow_from(&Owned)`, `reborrow_from(&View<'a>)` (each `-> Vec<u8>`)
+//   and add a `bench_fanout!` invocation.
+// ──────────────────────────────────────────────────────────────────────
 
 /// Run the four-way comparison for one shape. `$paths` is a module providing
 /// `owned_owned`, `view_owned`, `owned_view`, `view_view` (each `&[u8] -> Vec<u8>`)
@@ -55,6 +72,10 @@ macro_rules! bench_shape {
             }
             let mut g = c.benchmark_group($group);
             g.throughput(Throughput::Bytes(input.len() as u64));
+            // Reference floor: decode → re-encode the SAME struct (no
+            // rebuild). Against this, view→view shows the win when a
+            // handler does zero per-field work; owned/owned should land
+            // within ~1% of it (move-based rebuild is nearly free).
             g.bench_function("identity", |b| {
                 b.iter(|| {
                     black_box(
@@ -853,48 +874,63 @@ bench_shape!(
 /// owned baseline is forced to clone (can't move into N places). Throughput
 /// is N×payload bytes so per-iter time scales with N but per-byte rate is
 /// comparable across N.
-fn bench_fanout(c: &mut Criterion) {
-    use many_small_strings as p;
-    let input = p::payload().encode_to_vec();
-    // Wire-equivalence guard: each per-response builder round-trips.
-    let baseline = BloatEcho::decode_from_slice(&p::owned_owned(&input)).unwrap();
-    for out in [
-        p::clone_from(&BloatEcho::decode_from_slice(&input).unwrap()),
-        p::borrow_from(&BloatEcho::decode_from_slice(&input).unwrap()),
-        p::reborrow_from(&BloatEchoView::decode_view(&input).unwrap()),
-    ] {
-        assert_eq!(BloatEcho::decode_from_slice(&out).unwrap(), baseline);
-    }
-    let mut g = c.benchmark_group("fanout");
-    for &n in &[1usize, 4, 16, 64] {
-        g.throughput(Throughput::Bytes(input.len() as u64 * n as u64));
-        g.bench_with_input(BenchmarkId::new("owned/owned", n), &n, |b, &n| {
-            b.iter(|| {
-                let src = BloatEcho::decode_from_slice(black_box(&input)).unwrap();
-                for _ in 0..n {
-                    black_box(p::clone_from(black_box(&src)));
-                }
-            })
-        });
-        g.bench_with_input(BenchmarkId::new("owned/view", n), &n, |b, &n| {
-            b.iter(|| {
-                let src = BloatEcho::decode_from_slice(black_box(&input)).unwrap();
-                for _ in 0..n {
-                    black_box(p::borrow_from(black_box(&src)));
-                }
-            })
-        });
-        g.bench_with_input(BenchmarkId::new("view/view", n), &n, |b, &n| {
-            b.iter(|| {
-                let src = BloatEchoView::decode_view(black_box(&input)).unwrap();
-                for _ in 0..n {
-                    black_box(p::reborrow_from(black_box(&src)));
-                }
-            })
-        });
-    }
-    g.finish();
+///
+/// `$paths` must provide `payload`, `owned_owned`, `clone_from(&Owned)`,
+/// `borrow_from(&Owned)`, `reborrow_from(&View<'a>)`.
+macro_rules! bench_fanout {
+    ($fn_name:ident, $group:literal, $owned:ty, $view:ty, $paths:path) => {
+        fn $fn_name(c: &mut Criterion) {
+            use $paths as p;
+            let input = p::payload().encode_to_vec();
+            // Wire-equivalence guard: each per-response builder round-trips.
+            let baseline = <$owned>::decode_from_slice(&p::owned_owned(&input)).unwrap();
+            for out in [
+                p::clone_from(&<$owned>::decode_from_slice(&input).unwrap()),
+                p::borrow_from(&<$owned>::decode_from_slice(&input).unwrap()),
+                p::reborrow_from(&<$view>::decode_view(&input).unwrap()),
+            ] {
+                assert_eq!(<$owned>::decode_from_slice(&out).unwrap(), baseline);
+            }
+            let mut g = c.benchmark_group($group);
+            for &n in &[1usize, 4, 16, 64] {
+                g.throughput(Throughput::Bytes(input.len() as u64 * n as u64));
+                g.bench_with_input(BenchmarkId::new("owned/owned", n), &n, |b, &n| {
+                    b.iter(|| {
+                        let src = <$owned>::decode_from_slice(black_box(&input)).unwrap();
+                        for _ in 0..n {
+                            black_box(p::clone_from(black_box(&src)));
+                        }
+                    })
+                });
+                g.bench_with_input(BenchmarkId::new("owned/view", n), &n, |b, &n| {
+                    b.iter(|| {
+                        let src = <$owned>::decode_from_slice(black_box(&input)).unwrap();
+                        for _ in 0..n {
+                            black_box(p::borrow_from(black_box(&src)));
+                        }
+                    })
+                });
+                g.bench_with_input(BenchmarkId::new("view/view", n), &n, |b, &n| {
+                    b.iter(|| {
+                        let src = <$view>::decode_view(black_box(&input)).unwrap();
+                        for _ in 0..n {
+                            black_box(p::reborrow_from(black_box(&src)));
+                        }
+                    })
+                });
+            }
+            g.finish();
+        }
+    };
 }
+
+bench_fanout!(
+    bench_fanout,
+    "fanout",
+    BloatEcho,
+    BloatEchoView,
+    many_small_strings
+);
 
 criterion_group!(
     benches,
