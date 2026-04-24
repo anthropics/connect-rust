@@ -339,7 +339,11 @@ mod many_small_strings {
                 .map(|i| format!("tag-{i:02}-canary-rollout-cohort"))
                 .collect(),
             labels,
-            auth: header("authorization", "Bearer benchmark-placeholder-not-a-real-token").into(),
+            auth: header(
+                "authorization",
+                "Bearer benchmark-placeholder-not-a-real-token",
+            )
+            .into(),
             origin: header("x-forwarded-for", "203.0.113.42, 198.51.100.7, 10.0.0.1").into(),
             extra_headers: vec![
                 header("x-request-id", "req-0193fae1-7d4c-77a2-b8e0-0e9c6ab2d041"),
