@@ -444,16 +444,20 @@ impl<'a> TypeResolver<'a> {
     /// the sentinel path between the two halves.
     fn rust_view_type(&self, proto_fqn: &str, current_package: &str) -> Result<TokenStream> {
         use buffa_codegen::context::SENTINEL_MOD;
-        let (to_package, within) = match self
-            .ctx
-            .rust_type_relative_split(proto_fqn, current_package, 0)
-        {
-            Some(s) => {
-                self.check_extern_coverage(proto_fqn, &s.to_package)?;
-                (s.to_package, s.within_package)
-            }
-            None => (String::new(), self.fallback_unresolved(proto_fqn)?.to_string()),
-        };
+        let (to_package, within) =
+            match self
+                .ctx
+                .rust_type_relative_split(proto_fqn, current_package, 0)
+            {
+                Some(s) => {
+                    self.check_extern_coverage(proto_fqn, &s.to_package)?;
+                    (s.to_package, s.within_package)
+                }
+                None => (
+                    String::new(),
+                    self.fallback_unresolved(proto_fqn)?.to_string(),
+                ),
+            };
         let prefix = if to_package.is_empty() {
             format!("{SENTINEL_MOD}::view")
         } else {
