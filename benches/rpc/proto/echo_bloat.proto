@@ -47,3 +47,63 @@ message BloatHeader {
   string source = 3;
   string note = 4;
 }
+
+// ── Shape-sweep messages for the ViewEncode mental-model bench ────────
+//
+// Each shape isolates one dimension (alloc count, payload bytes, nesting
+// depth) so the four-way {owned,view}×{decode,encode} comparison can
+// attribute the view→view multiplier and half-path penalty/benefit to a
+// specific cause.
+
+// Scalar-heavy: ~18 fields, only 2 strings. Expect view→view ~1×.
+message ScalarHeavy {
+  int64 a = 1;
+  int64 b = 2;
+  int64 c = 3;
+  int64 d = 4;
+  int64 e = 5;
+  int64 f = 6;
+  int64 g = 7;
+  int64 h = 8;
+  int64 i = 9;
+  int64 j = 10;
+  int64 k = 11;
+  int64 l = 12;
+  int32 m = 13;
+  int32 n = 14;
+  int32 o = 15;
+  int32 p = 16;
+  string note_a = 17;
+  string note_b = 18;
+}
+
+// Few large strings: 4×~1200B + 2 scalars. Low alloc count, high bytes.
+message FewLargeStrings {
+  string body_a = 1;
+  string body_b = 2;
+  string body_c = 3;
+  string body_d = 4;
+  int64 ts = 5;
+  int64 seq = 6;
+}
+
+// Deep nested: 5 levels of singular sub-message, 2 strings per level.
+// Tests `MessageFieldView` boxing on the view side.
+message NestL5 { string a = 1; string b = 2; }
+message NestL4 { string a = 1; string b = 2; NestL5 child = 3; }
+message NestL3 { string a = 1; string b = 2; NestL4 child = 3; }
+message NestL2 { string a = 1; string b = 2; NestL3 child = 3; }
+message NestL1 { string a = 1; string b = 2; NestL2 child = 3; }
+message DeepNested {
+  string root_a = 1;
+  string root_b = 2;
+  NestL1 child = 3;
+}
+
+// Map-dominated: 30-entry string map + 2 plain strings. Closest to the
+// LogRecord shape that hit 5.8× in the buffa build_encode benches.
+message MapDominated {
+  string id = 1;
+  string kind = 2;
+  map<string, string> labels = 3;
+}

@@ -54,5 +54,14 @@ pub mod __buffa {
         reg.register_json_any(super::__LOG_INGEST_RESPONSE_JSON_ANY);
         reg.register_json_any(super::__BLOAT_ECHO_JSON_ANY);
         reg.register_json_any(super::__BLOAT_HEADER_JSON_ANY);
+        reg.register_json_any(super::__SCALAR_HEAVY_JSON_ANY);
+        reg.register_json_any(super::__FEW_LARGE_STRINGS_JSON_ANY);
+        reg.register_json_any(super::__NEST_L5_JSON_ANY);
+        reg.register_json_any(super::__NEST_L4_JSON_ANY);
+        reg.register_json_any(super::__NEST_L3_JSON_ANY);
+        reg.register_json_any(super::__NEST_L2_JSON_ANY);
+        reg.register_json_any(super::__NEST_L1_JSON_ANY);
+        reg.register_json_any(super::__DEEP_NESTED_JSON_ANY);
+        reg.register_json_any(super::__MAP_DOMINATED_JSON_ANY);
     }
 }

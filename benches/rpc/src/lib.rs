@@ -11,8 +11,10 @@ pub use proto::bench::v1::*;
 // Re-export them flat so handler signatures can name them unqualified, matching
 // the pre-#62 ergonomics.
 pub use proto::bench::v1::__buffa::view::{
-    BenchRequestView, BenchResponseView, BloatEchoView, BloatHeaderView, EchoRequestView,
-    LogRecordView, LogRequestView, LogSourceView, MetadataView, PayloadView,
+    BenchRequestView, BenchResponseView, BloatEchoView, BloatHeaderView, DeepNestedView,
+    EchoRequestView, FewLargeStringsView, LogRecordView, LogRequestView, LogSourceView,
+    MapDominatedView, MetadataView, NestL1View, NestL2View, NestL3View, NestL4View, NestL5View,
+    PayloadView, ScalarHeavyView,
 };
 
 use std::collections::HashMap;

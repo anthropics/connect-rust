@@ -1,258 +1,568 @@
-//! Codec-layer echo benchmark for ViewEncode.
+//! Codec-layer echo benchmark for ViewEncode — payload-shape sweep.
 //!
-//! Measures all four `{owned, view} × {decode, encode}` combinations on a
-//! ~2-3 KB string-heavy `BloatEcho` payload, isolating the
-//! decode → build response → encode path from HTTP/tokio overhead.
-//! This is the path a connect-rust unary handler exercises between body
-//! receipt and body emission.
+//! Measures all four `{owned, view} × {decode, encode}` combinations across
+//! five payload shapes (scalar-heavy, few-large-strings, many-small-strings,
+//! deep-nested, map-dominated) plus clone-baseline variants for the two
+//! string-heavy shapes. The goal is a mental model: what drives the
+//! view→view multiplier, and when are the half-paths a regression vs a win?
 //!
-//! The hypothesis (verified at the buffa level at 2.19× on a smaller
-//! payload) is that view-decode + view-encode together is super-additive
-//! versus either half alone, because only the combination eliminates the
-//! per-field `String` allocation pass entirely — request-buffer `&str`
-//! borrows flow straight through to the response wire bytes.
+//! Each path models a server-side echo handler: decode request bytes →
+//! build a fresh response struct field-by-field from request data → encode
+//! response bytes. The build phase is **not** identity — it's the explicit
+//! per-field copy/borrow a real handler would write, so container-rebuild
+//! cost is captured.
 
 use std::collections::HashMap;
 
 use buffa::{Message, MessageView, ViewEncode};
 use criterion::{black_box, Criterion, Throughput, criterion_group, criterion_main};
 
-use rpc_bench::{BloatEcho, BloatEchoView, BloatHeader, BloatHeaderView};
+use rpc_bench::{
+    BloatEcho, BloatEchoView, BloatHeader, BloatHeaderView, DeepNested, DeepNestedView,
+    FewLargeStrings, FewLargeStringsView, MapDominated, MapDominatedView, NestL1, NestL1View,
+    NestL2, NestL2View, NestL3, NestL3View, NestL4, NestL4View, NestL5, NestL5View, ScalarHeavy,
+    ScalarHeavyView,
+};
 
-/// Build the request payload. 8 plain strings (40-60 chars each), 9 tags,
-/// 11 label pairs, 2 singular nested headers, 4 repeated nested headers.
-/// Target: ~2-3 KB encoded, ~60 string allocations on the owned path.
-fn bloat_echo() -> BloatEcho {
-    let header = |name: &str, value: &str| BloatHeader {
-        name: name.into(),
-        value: value.into(),
-        source: "client-supplied".into(),
-        note: "validated against allowlist; forwarded as-is".into(),
-        ..Default::default()
+/// Run the four-way comparison for one shape. `$paths` is a module providing
+/// `owned_owned`, `view_owned`, `owned_view`, `view_view` (each `&[u8] -> Vec<u8>`)
+/// and a `payload() -> Owned` builder. Asserts wire-equivalence at startup.
+macro_rules! bench_shape {
+    ($fn_name:ident, $group:literal, $owned:ty, $paths:path) => {
+        fn $fn_name(c: &mut Criterion) {
+            use $paths as p;
+            let input = p::payload().encode_to_vec();
+            eprintln!("{}: {} bytes", $group, input.len());
+            let baseline =
+                <$owned>::decode_from_slice(&p::owned_owned(&input)).expect("baseline decode");
+            for (name, out) in [
+                ("view/owned", p::view_owned(&input)),
+                ("owned/view", p::owned_view(&input)),
+                ("view/view", p::view_view(&input)),
+            ] {
+                let got = <$owned>::decode_from_slice(&out).expect("roundtrip decode");
+                assert_eq!(got, baseline, "{} {name} diverges", $group);
+            }
+            let mut g = c.benchmark_group($group);
+            g.throughput(Throughput::Bytes(input.len() as u64));
+            g.bench_function("owned/owned", |b| {
+                b.iter(|| black_box(p::owned_owned(black_box(&input))))
+            });
+            g.bench_function("view/owned", |b| {
+                b.iter(|| black_box(p::view_owned(black_box(&input))))
+            });
+            g.bench_function("owned/view", |b| {
+                b.iter(|| black_box(p::owned_view(black_box(&input))))
+            });
+            g.bench_function("view/view", |b| {
+                b.iter(|| black_box(p::view_view(black_box(&input))))
+            });
+            g.finish();
+        }
     };
-    let labels: HashMap<String, String> = (0..11)
-        .map(|i| {
-            (
-                format!("k8s.label.app.example.com/tier-{i:02}"),
-                format!("workload-partition-{i:02}-us-west-2a-r5.2xlarge"),
-            )
-        })
-        .collect();
-    BloatEcho {
-        tenant_id: "tenant-0193fae1-7d4c-77a2-b8e0-0e9c6ab2d041".into(),
-        trace_id: "4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7".into(),
-        span_id: "00f067aa0ba902b7".into(),
-        service: "api-gateway.ingress.svc.cluster.local".into(),
-        region: "us-west-2".into(),
-        instance_id: "i-0a1b2c3d4e5f67890-spot-r5.2xlarge".into(),
-        request_path: "/api/v2/orders/0193fae1-7d4c/line-items?expand=product,inventory".into(),
-        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15".into(),
-        timestamp_nanos: 1_714_000_000_000_000_000,
-        status_code: 200,
-        tags: (0..9).map(|i| format!("tag-{i:02}-canary-rollout-cohort")).collect(),
-        labels,
-        auth: header("authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.dGVzdA.x").into(),
-        origin: header("x-forwarded-for", "203.0.113.42, 198.51.100.7, 10.0.0.1").into(),
-        extra_headers: vec![
-            header("x-request-id", "req-0193fae1-7d4c-77a2-b8e0-0e9c6ab2d041"),
-            header("x-correlation-id", "corr-77a2b8e0-0e9c-6ab2-d041-4bf92f3577b3"),
-            header("x-client-version", "mobile-ios/4.21.0 (build 8412; arm64)"),
-            header("accept-language", "en-US,en;q=0.9,fr-CA;q=0.5"),
-        ],
-        ..Default::default()
-    }
 }
 
-/// Borrow a `BloatHeaderView` from an owned `&BloatHeader`.
-fn borrow_header(h: &BloatHeader) -> BloatHeaderView<'_> {
-    BloatHeaderView {
-        name: &h.name,
-        value: &h.value,
-        source: &h.source,
-        note: &h.note,
-        ..Default::default()
-    }
+/// Clone-baseline variant: same four-way but the owned/owned path **clones**
+/// instead of moving (models building a response from `Arc<AppState>`).
+macro_rules! bench_shape_clone {
+    ($fn_name:ident, $group:literal, $owned:ty, $paths:path) => {
+        fn $fn_name(c: &mut Criterion) {
+            use $paths as p;
+            let input = p::payload().encode_to_vec();
+            let mut g = c.benchmark_group($group);
+            g.throughput(Throughput::Bytes(input.len() as u64));
+            g.bench_function("owned/owned", |b| {
+                b.iter(|| black_box(p::owned_owned_clone(black_box(&input))))
+            });
+            g.bench_function("view/owned", |b| {
+                b.iter(|| black_box(p::view_owned(black_box(&input))))
+            });
+            g.bench_function("owned/view", |b| {
+                b.iter(|| black_box(p::owned_view(black_box(&input))))
+            });
+            g.bench_function("view/view", |b| {
+                b.iter(|| black_box(p::view_view(black_box(&input))))
+            });
+            g.finish();
+        }
+    };
 }
 
-/// Re-borrow a `BloatHeaderView<'a>` (request view) into a fresh response
-/// `BloatHeaderView<'a>`. The `&'a str` fields flow through unchanged; only
-/// the `__buffa_cached_size` slot is fresh (reset for re-encode).
-fn echo_header_view<'a>(h: &BloatHeaderView<'a>) -> BloatHeaderView<'a> {
-    BloatHeaderView {
-        name: h.name,
-        value: h.value,
-        source: h.source,
-        note: h.note,
-        ..Default::default()
-    }
-}
+// ── scalar_heavy: 16 ints + 2 short strings, ~2 string allocs ────────
 
-fn header_to_owned(h: &BloatHeaderView<'_>) -> BloatHeader {
-    BloatHeader {
-        name: h.name.into(),
-        value: h.value.into(),
-        source: h.source.into(),
-        note: h.note.into(),
-        ..Default::default()
-    }
-}
+mod scalar_heavy {
+    use super::*;
 
-fn bench_echo_bloat(c: &mut Criterion) {
-    let request = bloat_echo();
-    let input = request.encode_to_vec();
-    let payload_size = input.len() as u64;
-    eprintln!("echo_bloat payload: {} bytes", payload_size);
-
-    // One-time wire-equivalence sanity: all four paths produce a response
-    // that decodes equal to the request.
-    {
-        let baseline =
-            BloatEcho::decode_from_slice(&owned_owned(&input)).expect("owned/owned roundtrip");
-        for (name, out) in [
-            ("view/owned", view_owned(&input)),
-            ("owned/view", owned_view(&input)),
-            ("view/view", view_view(&input)),
-        ] {
-            let got = BloatEcho::decode_from_slice(&out).expect("decode roundtrip output");
-            assert_eq!(got, baseline, "{name} output diverges from owned/owned");
+    pub fn payload() -> ScalarHeavy {
+        ScalarHeavy {
+            a: 1_111_111_111_111,
+            b: 2_222_222_222_222,
+            c: 3_333_333_333_333,
+            d: 4_444_444_444_444,
+            e: 5_555_555_555_555,
+            f: 6_666_666_666_666,
+            g: 7_777_777_777_777,
+            h: 8_888_888_888_888,
+            i: 9_999_999_999_999,
+            j: 1_010_101_010_101,
+            k: 1_212_121_212_121,
+            l: 1_313_131_313_131,
+            m: 1_000_001,
+            n: 2_000_002,
+            o: 3_000_003,
+            p: 4_000_004,
+            note_a: "scalar-heavy-shape-a".into(),
+            note_b: "scalar-heavy-shape-b".into(),
+            ..Default::default()
         }
     }
 
-    let mut group = c.benchmark_group("echo_bloat/codec");
-    group.throughput(Throughput::Bytes(payload_size));
+    pub fn owned_owned(input: &[u8]) -> Vec<u8> {
+        let r = ScalarHeavy::decode_from_slice(input).unwrap();
+        ScalarHeavy {
+            a: r.a, b: r.b, c: r.c, d: r.d, e: r.e, f: r.f, g: r.g, h: r.h,
+            i: r.i, j: r.j, k: r.k, l: r.l, m: r.m, n: r.n, o: r.o, p: r.p,
+            note_a: r.note_a, note_b: r.note_b,
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
 
-    group.bench_function("owned_decode_owned_encode", |b| {
-        b.iter(|| black_box(owned_owned(black_box(&input))))
-    });
-    group.bench_function("view_decode_owned_encode", |b| {
-        b.iter(|| black_box(view_owned(black_box(&input))))
-    });
-    group.bench_function("owned_decode_view_encode", |b| {
-        b.iter(|| black_box(owned_view(black_box(&input))))
-    });
-    group.bench_function("view_decode_view_encode", |b| {
-        b.iter(|| black_box(view_view(black_box(&input))))
-    });
+    pub fn view_owned(input: &[u8]) -> Vec<u8> {
+        let r = ScalarHeavyView::decode_view(input).unwrap();
+        ScalarHeavy {
+            a: r.a, b: r.b, c: r.c, d: r.d, e: r.e, f: r.f, g: r.g, h: r.h,
+            i: r.i, j: r.j, k: r.k, l: r.l, m: r.m, n: r.n, o: r.o, p: r.p,
+            note_a: r.note_a.into(), note_b: r.note_b.into(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
 
-    group.finish();
+    pub fn owned_view(input: &[u8]) -> Vec<u8> {
+        let r = ScalarHeavy::decode_from_slice(input).unwrap();
+        ScalarHeavyView {
+            a: r.a, b: r.b, c: r.c, d: r.d, e: r.e, f: r.f, g: r.g, h: r.h,
+            i: r.i, j: r.j, k: r.k, l: r.l, m: r.m, n: r.n, o: r.o, p: r.p,
+            note_a: &r.note_a, note_b: &r.note_b,
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn view_view(input: &[u8]) -> Vec<u8> {
+        let r = ScalarHeavyView::decode_view(input).unwrap();
+        ScalarHeavyView {
+            a: r.a, b: r.b, c: r.c, d: r.d, e: r.e, f: r.f, g: r.g, h: r.h,
+            i: r.i, j: r.j, k: r.k, l: r.l, m: r.m, n: r.n, o: r.o, p: r.p,
+            note_a: r.note_a, note_b: r.note_b,
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
 }
 
-// ── The four paths ────────────────────────────────────────────────────
-//
-// Each one models a server-side echo handler: decode request bytes →
-// build a response struct field-by-field from request data → encode
-// response bytes. Baseline (owned/owned) uses move semantics, the most
-// charitable owned story.
+// ── few_large_strings: 4×~1200B + 2 ints, 4 allocs / ~5KB ────────────
 
-/// Baseline: owned decode, move every field into a fresh owned response,
-/// owned encode. Allocates on decode (per-string `String`, `Vec`/`HashMap`
-/// containers) but the build phase is pure moves.
-fn owned_owned(input: &[u8]) -> Vec<u8> {
-    let req = BloatEcho::decode_from_slice(input).unwrap();
-    let resp = BloatEcho {
-        tenant_id: req.tenant_id,
-        trace_id: req.trace_id,
-        span_id: req.span_id,
-        service: req.service,
-        region: req.region,
-        instance_id: req.instance_id,
-        request_path: req.request_path,
-        user_agent: req.user_agent,
-        timestamp_nanos: req.timestamp_nanos,
-        status_code: req.status_code,
-        tags: req.tags,
-        labels: req.labels,
-        auth: req.auth,
-        origin: req.origin,
-        extra_headers: req.extra_headers,
-        ..Default::default()
-    };
-    resp.encode_to_vec()
+mod few_large_strings {
+    use super::*;
+
+    pub fn payload() -> FewLargeStrings {
+        let chunk = "the-quick-brown-fox-jumps-over-the-lazy-dog-0123456789-".repeat(22);
+        FewLargeStrings {
+            body_a: chunk.clone(),
+            body_b: chunk.clone(),
+            body_c: chunk.clone(),
+            body_d: chunk,
+            ts: 1_700_000_000_000_000_000,
+            seq: 424_242,
+            ..Default::default()
+        }
+    }
+
+    pub fn owned_owned(input: &[u8]) -> Vec<u8> {
+        let r = FewLargeStrings::decode_from_slice(input).unwrap();
+        FewLargeStrings {
+            body_a: r.body_a, body_b: r.body_b, body_c: r.body_c, body_d: r.body_d,
+            ts: r.ts, seq: r.seq,
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn view_owned(input: &[u8]) -> Vec<u8> {
+        let r = FewLargeStringsView::decode_view(input).unwrap();
+        FewLargeStrings {
+            body_a: r.body_a.into(), body_b: r.body_b.into(),
+            body_c: r.body_c.into(), body_d: r.body_d.into(),
+            ts: r.ts, seq: r.seq,
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn owned_view(input: &[u8]) -> Vec<u8> {
+        let r = FewLargeStrings::decode_from_slice(input).unwrap();
+        FewLargeStringsView {
+            body_a: &r.body_a, body_b: &r.body_b, body_c: &r.body_c, body_d: &r.body_d,
+            ts: r.ts, seq: r.seq,
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn view_view(input: &[u8]) -> Vec<u8> {
+        let r = FewLargeStringsView::decode_view(input).unwrap();
+        FewLargeStringsView {
+            body_a: r.body_a, body_b: r.body_b, body_c: r.body_c, body_d: r.body_d,
+            ts: r.ts, seq: r.seq,
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
 }
 
-/// Zero-copy decode, but the owned-response API forces `.to_owned()` on
-/// every borrowed field — the alloc pass moves from decode to build.
-fn view_owned(input: &[u8]) -> Vec<u8> {
-    let req = BloatEchoView::decode_view(input).unwrap();
-    let resp = BloatEcho {
-        tenant_id: req.tenant_id.into(),
-        trace_id: req.trace_id.into(),
-        span_id: req.span_id.into(),
-        service: req.service.into(),
-        region: req.region.into(),
-        instance_id: req.instance_id.into(),
-        request_path: req.request_path.into(),
-        user_agent: req.user_agent.into(),
-        timestamp_nanos: req.timestamp_nanos,
-        status_code: req.status_code,
-        tags: req.tags.iter().map(|s| (*s).into()).collect(),
-        labels: req
-            .labels
-            .iter()
-            .map(|(k, v)| ((*k).into(), (*v).into()))
-            .collect(),
-        auth: req.auth.as_option().map(header_to_owned).into(),
-        origin: req.origin.as_option().map(header_to_owned).into(),
-        extra_headers: req.extra_headers.iter().map(header_to_owned).collect(),
-        ..Default::default()
-    };
-    resp.encode_to_vec()
+// ── many_small_strings (= original BloatEcho) ────────────────────────
+
+mod many_small_strings {
+    use super::*;
+
+    pub fn payload() -> BloatEcho {
+        let header = |name: &str, value: &str| BloatHeader {
+            name: name.into(),
+            value: value.into(),
+            source: "client-supplied".into(),
+            note: "validated against allowlist; forwarded as-is".into(),
+            ..Default::default()
+        };
+        let labels: HashMap<String, String> = (0..11)
+            .map(|i| {
+                (
+                    format!("k8s.label.app.example.com/tier-{i:02}"),
+                    format!("workload-partition-{i:02}-us-west-2a-r5.2xlarge"),
+                )
+            })
+            .collect();
+        BloatEcho {
+            tenant_id: "tenant-0193fae1-7d4c-77a2-b8e0-0e9c6ab2d041".into(),
+            trace_id: "4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7".into(),
+            span_id: "00f067aa0ba902b7".into(),
+            service: "api-gateway.ingress.svc.cluster.local".into(),
+            region: "us-west-2".into(),
+            instance_id: "i-0a1b2c3d4e5f67890-spot-r5.2xlarge".into(),
+            request_path: "/api/v2/orders/0193fae1-7d4c/line-items?expand=product,inventory".into(),
+            user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15".into(),
+            timestamp_nanos: 1_714_000_000_000_000_000,
+            status_code: 200,
+            tags: (0..9).map(|i| format!("tag-{i:02}-canary-rollout-cohort")).collect(),
+            labels,
+            auth: header("authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.dGVzdA.x").into(),
+            origin: header("x-forwarded-for", "203.0.113.42, 198.51.100.7, 10.0.0.1").into(),
+            extra_headers: vec![
+                header("x-request-id", "req-0193fae1-7d4c-77a2-b8e0-0e9c6ab2d041"),
+                header("x-correlation-id", "corr-77a2b8e0-0e9c-6ab2-d041-4bf92f3577b3"),
+                header("x-client-version", "mobile-ios/4.21.0 (build 8412; arm64)"),
+                header("accept-language", "en-US,en;q=0.9,fr-CA;q=0.5"),
+            ],
+            ..Default::default()
+        }
+    }
+
+    fn borrow_header(h: &BloatHeader) -> BloatHeaderView<'_> {
+        BloatHeaderView {
+            name: &h.name, value: &h.value, source: &h.source, note: &h.note,
+            ..Default::default()
+        }
+    }
+
+    fn echo_header_view<'a>(h: &BloatHeaderView<'a>) -> BloatHeaderView<'a> {
+        BloatHeaderView {
+            name: h.name, value: h.value, source: h.source, note: h.note,
+            ..Default::default()
+        }
+    }
+
+    fn header_to_owned(h: &BloatHeaderView<'_>) -> BloatHeader {
+        BloatHeader {
+            name: h.name.into(), value: h.value.into(),
+            source: h.source.into(), note: h.note.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn owned_owned(input: &[u8]) -> Vec<u8> {
+        let r = BloatEcho::decode_from_slice(input).unwrap();
+        BloatEcho {
+            tenant_id: r.tenant_id, trace_id: r.trace_id, span_id: r.span_id,
+            service: r.service, region: r.region, instance_id: r.instance_id,
+            request_path: r.request_path, user_agent: r.user_agent,
+            timestamp_nanos: r.timestamp_nanos, status_code: r.status_code,
+            tags: r.tags, labels: r.labels, auth: r.auth, origin: r.origin,
+            extra_headers: r.extra_headers,
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn owned_owned_clone(input: &[u8]) -> Vec<u8> {
+        let r = BloatEcho::decode_from_slice(input).unwrap();
+        BloatEcho {
+            tenant_id: r.tenant_id.clone(), trace_id: r.trace_id.clone(),
+            span_id: r.span_id.clone(), service: r.service.clone(),
+            region: r.region.clone(), instance_id: r.instance_id.clone(),
+            request_path: r.request_path.clone(), user_agent: r.user_agent.clone(),
+            timestamp_nanos: r.timestamp_nanos, status_code: r.status_code,
+            tags: r.tags.clone(), labels: r.labels.clone(),
+            auth: r.auth.clone(), origin: r.origin.clone(),
+            extra_headers: r.extra_headers.clone(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn view_owned(input: &[u8]) -> Vec<u8> {
+        let r = BloatEchoView::decode_view(input).unwrap();
+        BloatEcho {
+            tenant_id: r.tenant_id.into(), trace_id: r.trace_id.into(),
+            span_id: r.span_id.into(), service: r.service.into(),
+            region: r.region.into(), instance_id: r.instance_id.into(),
+            request_path: r.request_path.into(), user_agent: r.user_agent.into(),
+            timestamp_nanos: r.timestamp_nanos, status_code: r.status_code,
+            tags: r.tags.iter().map(|s| (*s).into()).collect(),
+            labels: r.labels.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect(),
+            auth: r.auth.as_option().map(header_to_owned).into(),
+            origin: r.origin.as_option().map(header_to_owned).into(),
+            extra_headers: r.extra_headers.iter().map(header_to_owned).collect(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn owned_view(input: &[u8]) -> Vec<u8> {
+        let r = BloatEcho::decode_from_slice(input).unwrap();
+        BloatEchoView {
+            tenant_id: &r.tenant_id, trace_id: &r.trace_id, span_id: &r.span_id,
+            service: &r.service, region: &r.region, instance_id: &r.instance_id,
+            request_path: &r.request_path, user_agent: &r.user_agent,
+            timestamp_nanos: r.timestamp_nanos, status_code: r.status_code,
+            tags: r.tags.iter().map(String::as_str).collect(),
+            labels: r.labels.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect(),
+            auth: r.auth.as_option().map(borrow_header).map(From::from).unwrap_or_default(),
+            origin: r.origin.as_option().map(borrow_header).map(From::from).unwrap_or_default(),
+            extra_headers: r.extra_headers.iter().map(borrow_header).collect(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn view_view(input: &[u8]) -> Vec<u8> {
+        let r = BloatEchoView::decode_view(input).unwrap();
+        BloatEchoView {
+            tenant_id: r.tenant_id, trace_id: r.trace_id, span_id: r.span_id,
+            service: r.service, region: r.region, instance_id: r.instance_id,
+            request_path: r.request_path, user_agent: r.user_agent,
+            timestamp_nanos: r.timestamp_nanos, status_code: r.status_code,
+            tags: r.tags.iter().copied().collect(),
+            labels: r.labels.iter().map(|(k, v)| (*k, *v)).collect(),
+            auth: r.auth.as_option().map(echo_header_view).map(From::from).unwrap_or_default(),
+            origin: r.origin.as_option().map(echo_header_view).map(From::from).unwrap_or_default(),
+            extra_headers: r.extra_headers.iter().map(echo_header_view).collect(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
 }
 
-/// Owned decode allocates per-field; the response borrows from those
-/// allocations and ViewEncode skips the encode-side `String` pass.
-fn owned_view(input: &[u8]) -> Vec<u8> {
-    let req = BloatEcho::decode_from_slice(input).unwrap();
-    let resp = BloatEchoView {
-        tenant_id: &req.tenant_id,
-        trace_id: &req.trace_id,
-        span_id: &req.span_id,
-        service: &req.service,
-        region: &req.region,
-        instance_id: &req.instance_id,
-        request_path: &req.request_path,
-        user_agent: &req.user_agent,
-        timestamp_nanos: req.timestamp_nanos,
-        status_code: req.status_code,
-        tags: req.tags.iter().map(String::as_str).collect(),
-        labels: req
-            .labels
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect(),
-        auth: req.auth.as_option().map(borrow_header).map(From::from).unwrap_or_default(),
-        origin: req.origin.as_option().map(borrow_header).map(From::from).unwrap_or_default(),
-        extra_headers: req.extra_headers.iter().map(borrow_header).collect(),
-        ..Default::default()
-    };
-    resp.encode_to_vec()
+// ── deep_nested: 5 levels of singular sub-message ────────────────────
+
+mod deep_nested {
+    use super::*;
+
+    fn s(tag: &str, lvl: u8) -> String {
+        format!("level-{lvl}-{tag}-payload-string-abcdefghijklmnop-0123456789")
+    }
+
+    pub fn payload() -> DeepNested {
+        DeepNested {
+            root_a: s("root-a", 0), root_b: s("root-b", 0),
+            child: NestL1 {
+                a: s("a", 1), b: s("b", 1),
+                child: NestL2 {
+                    a: s("a", 2), b: s("b", 2),
+                    child: NestL3 {
+                        a: s("a", 3), b: s("b", 3),
+                        child: NestL4 {
+                            a: s("a", 4), b: s("b", 4),
+                            child: NestL5 { a: s("a", 5), b: s("b", 5), ..Default::default() }.into(),
+                            ..Default::default()
+                        }.into(),
+                        ..Default::default()
+                    }.into(),
+                    ..Default::default()
+                }.into(),
+                ..Default::default()
+            }.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn owned_owned(input: &[u8]) -> Vec<u8> {
+        let r = DeepNested::decode_from_slice(input).unwrap();
+        DeepNested { root_a: r.root_a, root_b: r.root_b, child: r.child, ..Default::default() }
+            .encode_to_vec()
+    }
+
+    pub fn view_owned(input: &[u8]) -> Vec<u8> {
+        let r = DeepNestedView::decode_view(input).unwrap();
+        r.to_owned_message().encode_to_vec()
+    }
+
+    pub fn owned_view(input: &[u8]) -> Vec<u8> {
+        let r = DeepNested::decode_from_slice(input).unwrap();
+        fn b5(x: &NestL5) -> NestL5View<'_> {
+            NestL5View { a: &x.a, b: &x.b, ..Default::default() }
+        }
+        fn b4(x: &NestL4) -> NestL4View<'_> {
+            NestL4View { a: &x.a, b: &x.b, child: x.child.as_option().map(b5).map(From::from).unwrap_or_default(), ..Default::default() }
+        }
+        fn b3(x: &NestL3) -> NestL3View<'_> {
+            NestL3View { a: &x.a, b: &x.b, child: x.child.as_option().map(b4).map(From::from).unwrap_or_default(), ..Default::default() }
+        }
+        fn b2(x: &NestL2) -> NestL2View<'_> {
+            NestL2View { a: &x.a, b: &x.b, child: x.child.as_option().map(b3).map(From::from).unwrap_or_default(), ..Default::default() }
+        }
+        fn b1(x: &NestL1) -> NestL1View<'_> {
+            NestL1View { a: &x.a, b: &x.b, child: x.child.as_option().map(b2).map(From::from).unwrap_or_default(), ..Default::default() }
+        }
+        DeepNestedView {
+            root_a: &r.root_a, root_b: &r.root_b,
+            child: r.child.as_option().map(b1).map(From::from).unwrap_or_default(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn view_view(input: &[u8]) -> Vec<u8> {
+        let r = DeepNestedView::decode_view(input).unwrap();
+        fn e5<'a>(x: &NestL5View<'a>) -> NestL5View<'a> {
+            NestL5View { a: x.a, b: x.b, ..Default::default() }
+        }
+        fn e4<'a>(x: &NestL4View<'a>) -> NestL4View<'a> {
+            NestL4View { a: x.a, b: x.b, child: x.child.as_option().map(e5).map(From::from).unwrap_or_default(), ..Default::default() }
+        }
+        fn e3<'a>(x: &NestL3View<'a>) -> NestL3View<'a> {
+            NestL3View { a: x.a, b: x.b, child: x.child.as_option().map(e4).map(From::from).unwrap_or_default(), ..Default::default() }
+        }
+        fn e2<'a>(x: &NestL2View<'a>) -> NestL2View<'a> {
+            NestL2View { a: x.a, b: x.b, child: x.child.as_option().map(e3).map(From::from).unwrap_or_default(), ..Default::default() }
+        }
+        fn e1<'a>(x: &NestL1View<'a>) -> NestL1View<'a> {
+            NestL1View { a: x.a, b: x.b, child: x.child.as_option().map(e2).map(From::from).unwrap_or_default(), ..Default::default() }
+        }
+        DeepNestedView {
+            root_a: r.root_a, root_b: r.root_b,
+            child: r.child.as_option().map(e1).map(From::from).unwrap_or_default(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
 }
 
-/// Zero-copy decode, response view borrows directly from the request view's
-/// `&'a str` fields — request-buffer bytes flow straight to response-buffer
-/// bytes with zero intermediate `String` allocation.
-fn view_view(input: &[u8]) -> Vec<u8> {
-    let req = BloatEchoView::decode_view(input).unwrap();
-    let resp = BloatEchoView {
-        tenant_id: req.tenant_id,
-        trace_id: req.trace_id,
-        span_id: req.span_id,
-        service: req.service,
-        region: req.region,
-        instance_id: req.instance_id,
-        request_path: req.request_path,
-        user_agent: req.user_agent,
-        timestamp_nanos: req.timestamp_nanos,
-        status_code: req.status_code,
-        tags: req.tags.iter().copied().collect(),
-        labels: req.labels.iter().map(|(k, v)| (*k, *v)).collect(),
-        auth: req.auth.as_option().map(echo_header_view).map(From::from).unwrap_or_default(),
-        origin: req.origin.as_option().map(echo_header_view).map(From::from).unwrap_or_default(),
-        extra_headers: req.extra_headers.iter().map(echo_header_view).collect(),
-        ..Default::default()
-    };
-    resp.encode_to_vec()
+// ── map_dominated: 30-entry string map + 2 strings ───────────────────
+
+mod map_dominated {
+    use super::*;
+
+    pub fn payload() -> MapDominated {
+        let labels: HashMap<String, String> = (0..30)
+            .map(|i| {
+                (
+                    format!("k{i:02}"),
+                    format!("workload-partition-{i:02}-us-west-2a-r5.2xlarge-spot-replacement-candidate-v3"),
+                )
+            })
+            .collect();
+        MapDominated {
+            id: "deployment-0193fae1-7d4c".into(),
+            kind: "ReplicaSet".into(),
+            labels,
+            ..Default::default()
+        }
+    }
+
+    pub fn owned_owned(input: &[u8]) -> Vec<u8> {
+        let r = MapDominated::decode_from_slice(input).unwrap();
+        MapDominated { id: r.id, kind: r.kind, labels: r.labels, ..Default::default() }
+            .encode_to_vec()
+    }
+
+    pub fn owned_owned_clone(input: &[u8]) -> Vec<u8> {
+        let r = MapDominated::decode_from_slice(input).unwrap();
+        MapDominated {
+            id: r.id.clone(), kind: r.kind.clone(), labels: r.labels.clone(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn view_owned(input: &[u8]) -> Vec<u8> {
+        let r = MapDominatedView::decode_view(input).unwrap();
+        MapDominated {
+            id: r.id.into(), kind: r.kind.into(),
+            labels: r.labels.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn owned_view(input: &[u8]) -> Vec<u8> {
+        let r = MapDominated::decode_from_slice(input).unwrap();
+        MapDominatedView {
+            id: &r.id, kind: &r.kind,
+            labels: r.labels.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
+
+    pub fn view_view(input: &[u8]) -> Vec<u8> {
+        let r = MapDominatedView::decode_view(input).unwrap();
+        MapDominatedView {
+            id: r.id, kind: r.kind,
+            labels: r.labels.iter().map(|(k, v)| (*k, *v)).collect(),
+            ..Default::default()
+        }
+        .encode_to_vec()
+    }
 }
 
-criterion_group!(benches, bench_echo_bloat);
+bench_shape!(bench_scalar_heavy, "scalar_heavy", ScalarHeavy, scalar_heavy);
+bench_shape!(bench_few_large_strings, "few_large_strings", FewLargeStrings, few_large_strings);
+bench_shape!(bench_many_small_strings, "many_small_strings", BloatEcho, many_small_strings);
+bench_shape!(bench_deep_nested, "deep_nested", DeepNested, deep_nested);
+bench_shape!(bench_map_dominated, "map_dominated", MapDominated, map_dominated);
+
+bench_shape_clone!(
+    bench_many_small_strings_clone,
+    "many_small_strings_clone",
+    BloatEcho,
+    many_small_strings
+);
+bench_shape_clone!(
+    bench_map_dominated_clone,
+    "map_dominated_clone",
+    MapDominated,
+    map_dominated
+);
+
+criterion_group!(
+    benches,
+    bench_scalar_heavy,
+    bench_few_large_strings,
+    bench_many_small_strings,
+    bench_deep_nested,
+    bench_map_dominated,
+    bench_many_small_strings_clone,
+    bench_map_dominated_clone,
+);
 criterion_main!(benches);
