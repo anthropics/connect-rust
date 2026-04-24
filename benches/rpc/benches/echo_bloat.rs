@@ -1,5 +1,11 @@
 //! Codec-layer echo benchmark for ViewEncode — payload-shape sweep.
 //!
+//! NOTE: This benches raw buffa decode→encode (the codec layer), not
+//! connect-rust's handler API — handlers can't return `*View<'a>` yet.
+//! It lands ahead of the view-response API it motivates so the numbers
+//! are reproducible from this repo; once that API exists this becomes
+//! its regression sentinel.
+//!
 //! Measures all four `{owned, view} × {decode, encode}` combinations across
 //! five payload shapes (scalar-heavy, few-large-strings, many-small-strings,
 //! deep-nested, map-dominated) plus clone-baseline variants for the two
