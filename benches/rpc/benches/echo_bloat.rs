@@ -6,22 +6,26 @@
 //! are reproducible from this repo; once that API exists this becomes
 //! its regression sentinel.
 //!
-//! Measures all four `{owned, view} × {decode, encode}` combinations across
-//! five payload shapes (scalar-heavy, few-large-strings, many-small-strings,
-//! deep-nested, map-dominated) plus clone-baseline variants for the two
-//! string-heavy shapes. The goal is a mental model: what drives the
-//! view→view multiplier, and when are the half-paths a regression vs a win?
+//! Two suites:
 //!
-//! Each path models a server-side echo handler: decode request bytes →
-//! build a fresh response struct field-by-field from request data → encode
-//! response bytes. The build phase is **not** identity — it's the explicit
-//! per-field copy/borrow a real handler would write, so container-rebuild
-//! cost is captured.
+//! - **Shape sweep**: five payload shapes × four `{owned,view}×{decode,encode}`
+//!   paths, plus an `identity` re-encode reference (decode → encode with no
+//!   rebuild — the worst case for views, where a real handler would just
+//!   re-serialize the request struct).
+//! - **Fanout**: decode once, then N×(build+encode) for N∈{1,4,16,64},
+//!   modeling a 1-source → N-reader streaming service where the owned
+//!   baseline is forced to clone.
+//!
+//! The four non-identity paths rebuild the response field-by-field from
+//! request data, modeling a handler that **transforms** request fields (the
+//! common case), not pure echo. For the pure-echo case see the `identity`
+//! row. For "build response from already-resident state" (no decode at all),
+//! see buffa's `build_encode` benchmarks.
 
 use std::collections::HashMap;
 
 use buffa::{Message, MessageView, ViewEncode};
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 use rpc_bench::{
     BloatEcho, BloatEchoView, BloatHeader, BloatHeaderView, DeepNested, DeepNestedView,
@@ -51,34 +55,17 @@ macro_rules! bench_shape {
             }
             let mut g = c.benchmark_group($group);
             g.throughput(Throughput::Bytes(input.len() as u64));
+            g.bench_function("identity", |b| {
+                b.iter(|| {
+                    black_box(
+                        <$owned>::decode_from_slice(black_box(&input))
+                            .unwrap()
+                            .encode_to_vec(),
+                    )
+                })
+            });
             g.bench_function("owned/owned", |b| {
                 b.iter(|| black_box(p::owned_owned(black_box(&input))))
-            });
-            g.bench_function("view/owned", |b| {
-                b.iter(|| black_box(p::view_owned(black_box(&input))))
-            });
-            g.bench_function("owned/view", |b| {
-                b.iter(|| black_box(p::owned_view(black_box(&input))))
-            });
-            g.bench_function("view/view", |b| {
-                b.iter(|| black_box(p::view_view(black_box(&input))))
-            });
-            g.finish();
-        }
-    };
-}
-
-/// Clone-baseline variant: same four-way but the owned/owned path **clones**
-/// instead of moving (models building a response from `Arc<AppState>`).
-macro_rules! bench_shape_clone {
-    ($fn_name:ident, $group:literal, $owned:ty, $paths:path) => {
-        fn $fn_name(c: &mut Criterion) {
-            use $paths as p;
-            let input = p::payload().encode_to_vec();
-            let mut g = c.benchmark_group($group);
-            g.throughput(Throughput::Bytes(input.len() as u64));
-            g.bench_function("owned/owned", |b| {
-                b.iter(|| black_box(p::owned_owned_clone(black_box(&input))))
             });
             g.bench_function("view/owned", |b| {
                 b.iter(|| black_box(p::view_owned(black_box(&input))))
@@ -411,8 +398,10 @@ mod many_small_strings {
         .encode_to_vec()
     }
 
-    pub fn owned_owned_clone(input: &[u8]) -> Vec<u8> {
-        let r = BloatEcho::decode_from_slice(input).unwrap();
+    /// Build+encode one response by **cloning** every field of an
+    /// already-decoded owned source. Forced-clone path: the source can be
+    /// fanned out to N readers without consuming it.
+    pub fn clone_from(r: &BloatEcho) -> Vec<u8> {
         BloatEcho {
             tenant_id: r.tenant_id.clone(),
             trace_id: r.trace_id.clone(),
@@ -461,8 +450,10 @@ mod many_small_strings {
         .encode_to_vec()
     }
 
-    pub fn owned_view(input: &[u8]) -> Vec<u8> {
-        let r = BloatEcho::decode_from_slice(input).unwrap();
+    /// Build+encode one response as a `BloatEchoView` **borrowing** from an
+    /// already-decoded owned source. ViewEncode-only fanout: owned app
+    /// state, N borrowed responses.
+    pub fn borrow_from(r: &BloatEcho) -> Vec<u8> {
         BloatEchoView {
             tenant_id: &r.tenant_id,
             trace_id: &r.trace_id,
@@ -498,8 +489,14 @@ mod many_small_strings {
         .encode_to_vec()
     }
 
-    pub fn view_view(input: &[u8]) -> Vec<u8> {
-        let r = BloatEchoView::decode_view(input).unwrap();
+    pub fn owned_view(input: &[u8]) -> Vec<u8> {
+        borrow_from(&BloatEcho::decode_from_slice(input).unwrap())
+    }
+
+    /// Build+encode one response as a `BloatEchoView` whose `&'a str` fields
+    /// flow straight through from an already-decoded source view. Full
+    /// view→view fanout: zero string allocs per response.
+    pub fn reborrow_from<'a>(r: &BloatEchoView<'a>) -> Vec<u8> {
         BloatEchoView {
             tenant_id: r.tenant_id,
             trace_id: r.trace_id,
@@ -529,6 +526,10 @@ mod many_small_strings {
             ..Default::default()
         }
         .encode_to_vec()
+    }
+
+    pub fn view_view(input: &[u8]) -> Vec<u8> {
+        reborrow_from(&BloatEchoView::decode_view(input).unwrap())
     }
 }
 
@@ -779,17 +780,6 @@ mod map_dominated {
         .encode_to_vec()
     }
 
-    pub fn owned_owned_clone(input: &[u8]) -> Vec<u8> {
-        let r = MapDominated::decode_from_slice(input).unwrap();
-        MapDominated {
-            id: r.id.clone(),
-            kind: r.kind.clone(),
-            labels: r.labels.clone(),
-            ..Default::default()
-        }
-        .encode_to_vec()
-    }
-
     pub fn view_owned(input: &[u8]) -> Vec<u8> {
         let r = MapDominatedView::decode_view(input).unwrap();
         MapDominated {
@@ -858,18 +848,53 @@ bench_shape!(
     map_dominated
 );
 
-bench_shape_clone!(
-    bench_many_small_strings_clone,
-    "many_small_strings_clone",
-    BloatEcho,
-    many_small_strings
-);
-bench_shape_clone!(
-    bench_map_dominated_clone,
-    "map_dominated_clone",
-    MapDominated,
-    map_dominated
-);
+/// Fanout: decode the source ONCE, then build+encode N responses borrowing
+/// from it. Models a switchboard-style 1-source → N-reader stream where the
+/// owned baseline is forced to clone (can't move into N places). Throughput
+/// is N×payload bytes so per-iter time scales with N but per-byte rate is
+/// comparable across N.
+fn bench_fanout(c: &mut Criterion) {
+    use many_small_strings as p;
+    let input = p::payload().encode_to_vec();
+    // Wire-equivalence guard: each per-response builder round-trips.
+    let baseline = BloatEcho::decode_from_slice(&p::owned_owned(&input)).unwrap();
+    for out in [
+        p::clone_from(&BloatEcho::decode_from_slice(&input).unwrap()),
+        p::borrow_from(&BloatEcho::decode_from_slice(&input).unwrap()),
+        p::reborrow_from(&BloatEchoView::decode_view(&input).unwrap()),
+    ] {
+        assert_eq!(BloatEcho::decode_from_slice(&out).unwrap(), baseline);
+    }
+    let mut g = c.benchmark_group("fanout");
+    for &n in &[1usize, 4, 16, 64] {
+        g.throughput(Throughput::Bytes(input.len() as u64 * n as u64));
+        g.bench_with_input(BenchmarkId::new("owned/owned", n), &n, |b, &n| {
+            b.iter(|| {
+                let src = BloatEcho::decode_from_slice(black_box(&input)).unwrap();
+                for _ in 0..n {
+                    black_box(p::clone_from(black_box(&src)));
+                }
+            })
+        });
+        g.bench_with_input(BenchmarkId::new("owned/view", n), &n, |b, &n| {
+            b.iter(|| {
+                let src = BloatEcho::decode_from_slice(black_box(&input)).unwrap();
+                for _ in 0..n {
+                    black_box(p::borrow_from(black_box(&src)));
+                }
+            })
+        });
+        g.bench_with_input(BenchmarkId::new("view/view", n), &n, |b, &n| {
+            b.iter(|| {
+                let src = BloatEchoView::decode_view(black_box(&input)).unwrap();
+                for _ in 0..n {
+                    black_box(p::reborrow_from(black_box(&src)));
+                }
+            })
+        });
+    }
+    g.finish();
+}
 
 criterion_group!(
     benches,
@@ -878,7 +903,6 @@ criterion_group!(
     bench_many_small_strings,
     bench_deep_nested,
     bench_map_dominated,
-    bench_many_small_strings_clone,
-    bench_map_dominated_clone,
+    bench_fanout,
 );
 criterion_main!(benches);
