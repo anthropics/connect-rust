@@ -33,7 +33,7 @@ use connectrpc_conformance::Header;
 use connectrpc_conformance::Protocol;
 use connectrpc_conformance::StreamType;
 use connectrpc_conformance::init_type_registry;
-use connectrpc_conformance::proto::connectrpc::conformance::v1::{
+use connectrpc_conformance::proto::connectrpc::conformance::v1::__buffa::view::{
     BidiStreamResponseView, ClientStreamResponseView, IdempotentUnaryResponseView,
     ServerStreamResponseView, UnaryResponseView,
 };
@@ -290,7 +290,7 @@ async fn execute_request(req: &ClientCompatRequest) -> ExecResult {
 
     // Validate cancel timing
     let cancel_before_close_send = if req.cancel.is_set() {
-        use connectrpc_conformance::client_compat_request::cancel::CancelTiming;
+        use connectrpc_conformance::__buffa::oneof::client_compat_request::cancel::CancelTiming;
         let cancel = &*req.cancel;
         match &cancel.cancel_timing {
             Some(CancelTiming::AfterCloseSendMs(_)) => false,
@@ -335,14 +335,14 @@ async fn execute_request(req: &ClientCompatRequest) -> ExecResult {
 
     // Extract cancel timing info
     let cancel_after_ms = req.cancel.as_option().and_then(|c| {
-        use connectrpc_conformance::client_compat_request::cancel::CancelTiming;
+        use connectrpc_conformance::__buffa::oneof::client_compat_request::cancel::CancelTiming;
         match &c.cancel_timing {
             Some(CancelTiming::AfterCloseSendMs(ms)) => Some(*ms),
             _ => None,
         }
     });
     let cancel_after_responses = req.cancel.as_option().and_then(|c| {
-        use connectrpc_conformance::client_compat_request::cancel::CancelTiming;
+        use connectrpc_conformance::__buffa::oneof::client_compat_request::cancel::CancelTiming;
         match &c.cancel_timing {
             Some(CancelTiming::AfterNumResponses(n)) => Some(*n),
             _ => None,
@@ -518,7 +518,7 @@ async fn do_unary_call(
     let proto_bytes = req
         .request_messages
         .first()
-        .map(|m| m.value.as_slice())
+        .map(|m| &m.value[..])
         .unwrap_or(&[]);
 
     // Dispatch based on method to get correct types. Use GET if the request
@@ -730,7 +730,7 @@ async fn do_server_stream_call(
     let proto_bytes = req
         .request_messages
         .first()
-        .map(|m| m.value.as_slice())
+        .map(|m| &m.value[..])
         .unwrap_or(&[]);
 
     use connectrpc_conformance::ServerStreamRequest;
@@ -1034,7 +1034,7 @@ async fn do_client_stream_call(
         .request_messages
         .iter()
         .map(|m| {
-            ClientStreamRequest::decode_from_slice(m.value.as_slice())
+            ClientStreamRequest::decode_from_slice(&m.value[..])
                 .map_err(|e| anyhow::anyhow!("decode request: {e}"))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1199,7 +1199,7 @@ async fn do_bidi_stream_call(
         .request_messages
         .iter()
         .map(|m| {
-            BidiStreamRequest::decode_from_slice(m.value.as_slice())
+            BidiStreamRequest::decode_from_slice(&m.value[..])
                 .map_err(|e| anyhow::anyhow!("decode request: {e}"))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1613,7 +1613,7 @@ fn connect_error_to_conformance(err: &ConnectError) -> connectrpc_conformance::E
             };
             Any {
                 type_url,
-                value,
+                value: value.into(),
                 ..Default::default()
             }
         })

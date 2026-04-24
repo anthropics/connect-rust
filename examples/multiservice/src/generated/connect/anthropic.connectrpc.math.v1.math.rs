@@ -1,21 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-use ::connectrpc::{
-    Context, ConnectError, Router, Dispatcher, view_handler_fn,
-    view_streaming_handler_fn, view_client_streaming_handler_fn,
-    view_bidi_streaming_handler_fn,
-};
-use ::connectrpc::dispatcher::codegen as __crpc_codegen;
-use ::connectrpc::CodecFormat as __CodecFormat;
-use buffa::bytes::Bytes as __Bytes;
-use ::connectrpc::client::{
-    ClientConfig, ClientTransport, CallOptions, call_unary, call_server_stream,
-    call_client_stream, call_bidi_stream,
-};
-use futures::Stream;
-use buffa::Message;
-use buffa::view::OwnedView;
 /// Full service name for this service.
 pub const MATH_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.math.v1.MathService";
 /// MathService provides basic math operations.
@@ -35,14 +17,19 @@ pub trait MathService: Send + Sync + 'static {
     /// Add returns the sum of two numbers.
     fn add(
         &self,
-        ctx: Context,
-        request: OwnedView<
-            crate::proto::anthropic::connectrpc::math::v1::AddRequestView<'static>,
+        ctx: ::connectrpc::Context,
+        request: ::buffa::view::OwnedView<
+            crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView<
+                'static,
+            >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
-            (crate::proto::anthropic::connectrpc::math::v1::AddResponse, Context),
-            ConnectError,
+            (
+                crate::proto::anthropic::connectrpc::math::v1::AddResponse,
+                ::connectrpc::Context,
+            ),
+            ::connectrpc::ConnectError,
         >,
     > + Send;
 }
@@ -63,18 +50,24 @@ pub trait MathServiceExt: MathService {
     ///
     /// Takes ownership of the `Arc<Self>` and returns a new Router with
     /// this service's methods registered.
-    fn register(self: Arc<Self>, router: Router) -> Router;
+    fn register(
+        self: ::std::sync::Arc<Self>,
+        router: ::connectrpc::Router,
+    ) -> ::connectrpc::Router;
 }
 impl<S: MathService> MathServiceExt for S {
-    fn register(self: Arc<Self>, router: Router) -> Router {
+    fn register(
+        self: ::std::sync::Arc<Self>,
+        router: ::connectrpc::Router,
+    ) -> ::connectrpc::Router {
         router
             .route_view(
                 MATH_SERVICE_SERVICE_NAME,
                 "Add",
                 {
-                    let svc = Arc::clone(&self);
-                    view_handler_fn(move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                    let svc = ::std::sync::Arc::clone(&self);
+                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.add(ctx, req).await }
                     })
                 },
@@ -95,107 +88,117 @@ impl<S: MathService> MathServiceExt for S {
 /// // hand `service` to axum/hyper as a fallback_service
 /// ```
 pub struct MathServiceServer<T> {
-    inner: Arc<T>,
+    inner: ::std::sync::Arc<T>,
 }
 impl<T: MathService> MathServiceServer<T> {
     /// Wrap a service implementation in a monomorphic dispatcher.
     pub fn new(service: T) -> Self {
-        Self { inner: Arc::new(service) }
+        Self {
+            inner: ::std::sync::Arc::new(service),
+        }
     }
     /// Wrap an already-`Arc`'d service implementation.
-    pub fn from_arc(inner: Arc<T>) -> Self {
+    pub fn from_arc(inner: ::std::sync::Arc<T>) -> Self {
         Self { inner }
     }
 }
 impl<T> Clone for MathServiceServer<T> {
     fn clone(&self) -> Self {
         Self {
-            inner: Arc::clone(&self.inner),
+            inner: ::std::sync::Arc::clone(&self.inner),
         }
     }
 }
-impl<T: MathService> Dispatcher for MathServiceServer<T> {
+impl<T: MathService> ::connectrpc::Dispatcher for MathServiceServer<T> {
     #[inline]
-    fn lookup(&self, path: &str) -> Option<__crpc_codegen::MethodDescriptor> {
+    fn lookup(
+        &self,
+        path: &str,
+    ) -> Option<::connectrpc::dispatcher::codegen::MethodDescriptor> {
         let method = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")?;
         match method {
-            "Add" => Some(__crpc_codegen::MethodDescriptor::unary(false)),
+            "Add" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
+            }
             _ => None,
         }
     }
     fn call_unary(
         &self,
         path: &str,
-        ctx: Context,
-        request: __Bytes,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::UnaryResult {
+        ctx: ::connectrpc::Context,
+        request: ::buffa::bytes::Bytes,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")
         else {
-            return __crpc_codegen::unimplemented_unary(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
             "Add" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req = __crpc_codegen::decode_request_view::<
-                        crate::proto::anthropic::connectrpc::math::v1::AddRequestView,
+                    let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
+                        crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView,
                     >(request, format)?;
                     let (res, ctx) = svc.add(ctx, req).await?;
-                    let bytes = __crpc_codegen::encode_response(&res, format)?;
+                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
+                        &res,
+                        format,
+                    )?;
                     Ok((bytes, ctx))
                 })
             }
-            _ => __crpc_codegen::unimplemented_unary(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
         }
     }
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        request: __Bytes,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::StreamingResult {
+        ctx: ::connectrpc::Context,
+        request: ::buffa::bytes::Bytes,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")
         else {
-            return __crpc_codegen::unimplemented_streaming(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
-            _ => __crpc_codegen::unimplemented_streaming(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
         }
     }
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        requests: __crpc_codegen::RequestStream,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::UnaryResult {
+        ctx: ::connectrpc::Context,
+        requests: ::connectrpc::dispatcher::codegen::RequestStream,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")
         else {
-            return __crpc_codegen::unimplemented_unary(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &requests, &format);
         match method {
-            _ => __crpc_codegen::unimplemented_unary(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
         }
     }
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        requests: __crpc_codegen::RequestStream,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::StreamingResult {
+        ctx: ::connectrpc::Context,
+        requests: ::connectrpc::dispatcher::codegen::RequestStream,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")
         else {
-            return __crpc_codegen::unimplemented_streaming(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &requests, &format);
         match method {
-            _ => __crpc_codegen::unimplemented_streaming(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
         }
     }
 }
@@ -251,23 +254,23 @@ impl<T: MathService> Dispatcher for MathServiceServer<T> {
 #[derive(Clone)]
 pub struct MathServiceClient<T> {
     transport: T,
-    config: ClientConfig,
+    config: ::connectrpc::client::ClientConfig,
 }
 impl<T> MathServiceClient<T>
 where
-    T: ClientTransport,
-    <T::ResponseBody as http_body::Body>::Error: std::fmt::Display,
+    T: ::connectrpc::client::ClientTransport,
+    <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
 {
     /// Create a new client with the given transport and configuration.
-    pub fn new(transport: T, config: ClientConfig) -> Self {
+    pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
         Self { transport, config }
     }
     /// Get the client configuration.
-    pub fn config(&self) -> &ClientConfig {
+    pub fn config(&self) -> &::connectrpc::client::ClientConfig {
         &self.config
     }
     /// Get a mutable reference to the client configuration.
-    pub fn config_mut(&mut self) -> &mut ClientConfig {
+    pub fn config_mut(&mut self) -> &mut ::connectrpc::client::ClientConfig {
         &mut self.config
     }
     /// Call the Add RPC. Sends a request to /anthropic.connectrpc.math.v1.MathService/Add.
@@ -276,31 +279,36 @@ where
         request: crate::proto::anthropic::connectrpc::math::v1::AddRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::anthropic::connectrpc::math::v1::AddResponseView<'static>,
+            ::buffa::view::OwnedView<
+                crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<
+                    'static,
+                >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.add_with_options(request, CallOptions::default()).await
+        self.add_with_options(request, ::connectrpc::client::CallOptions::default())
+            .await
     }
-    /// Call the Add RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the Add RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn add_with_options(
         &self,
         request: crate::proto::anthropic::connectrpc::math::v1::AddRequest,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::anthropic::connectrpc::math::v1::AddResponseView<'static>,
+            ::buffa::view::OwnedView<
+                crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<
+                    'static,
+                >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_unary(
+        ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                "anthropic.connectrpc.math.v1.MathService",
+                MATH_SERVICE_SERVICE_NAME,
                 "Add",
                 request,
                 options,

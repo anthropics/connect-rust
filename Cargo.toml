@@ -84,6 +84,12 @@ prettyplease = "0.2"
 tempfile = "3"
 rcgen = "0.14"
 
+[patch.crates-io]
+buffa = { git = "https://github.com/anthropics/buffa", rev = "3f80d56" }
+buffa-types = { git = "https://github.com/anthropics/buffa", rev = "3f80d56" }
+buffa-codegen = { git = "https://github.com/anthropics/buffa", rev = "3f80d56" }
+buffa-descriptor = { git = "https://github.com/anthropics/buffa", rev = "3f80d56" }
+
 [workspace.lints.rust]
 dead_code = "warn"
 explicit_outlives_requirements = "warn"

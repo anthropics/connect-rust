@@ -259,30 +259,23 @@ impl Config {
         // 3. Generate.
         let generated = codegen::generate_files(&fds.file, &files_to_generate, &self.options)?;
 
-        // 4. Write per-file outputs and collect (name, package) pairs.
+        // 4. Write per-file outputs and collect (name, package) pairs for
+        //    PackageMod files only — the per-package stitcher `include!`s
+        //    the five content files itself, so the module tree only wires
+        //    stitchers.
         std::fs::create_dir_all(&out_dir)
             .with_context(|| format!("failed to create out_dir '{}'", out_dir.display()))?;
 
-        // Pre-build a lookup from generated filename → proto package.
-        let name_to_package: std::collections::HashMap<String, String> = fds
-            .file
-            .iter()
-            .filter_map(|fd| {
-                let proto_name = fd.name.as_deref()?;
-                let rs_name = buffa_codegen::proto_path_to_rust_module(proto_name);
-                Some((rs_name, fd.package.clone().unwrap_or_default()))
-            })
-            .collect();
-
-        let mut entries: Vec<(String, String)> = Vec::with_capacity(generated.len());
+        let mut entries: Vec<(String, String)> = Vec::new();
         for file in &generated {
             let path = out_dir.join(&file.name);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
             write_if_changed(&path, file.content.as_bytes())?;
-            let pkg = name_to_package.get(&file.name).cloned().unwrap_or_default();
-            entries.push((file.name.clone(), pkg));
+            if file.kind == codegen::GeneratedFileKind::PackageMod {
+                entries.push((file.name.clone(), file.package.clone()));
+            }
         }
 
         // 5. Optionally emit the module-tree include file.
@@ -644,14 +637,19 @@ mod tests {
             "service code should not emit top-level use statements"
         );
 
-        // Include file nests under test.echo.v1. Because out_dir() was set
-        // explicitly (not defaulted from $OUT_DIR), includes are sibling-
-        // relative.
+        // Include file nests under test.echo.v1 and wires only the
+        // per-package stitcher (the stitcher itself include!s the
+        // per-proto content files). Because out_dir() was set explicitly
+        // (not defaulted from $OUT_DIR), includes are sibling-relative.
         let inc = std::fs::read_to_string(out.path().join("_inc.rs")).unwrap();
         assert!(inc.contains("pub mod test {"));
         assert!(inc.contains("pub mod echo {"));
         assert!(inc.contains("pub mod v1 {"));
-        assert!(inc.contains(r#"include!("echo.rs");"#));
+        assert!(inc.contains(r#"include!("test.echo.v1.mod.rs");"#));
+        // Stitcher pulls in the content files including the view tree.
+        let stitcher = std::fs::read_to_string(out.path().join("test.echo.v1.mod.rs")).unwrap();
+        assert!(stitcher.contains(r#"include!("echo.rs");"#));
+        assert!(stitcher.contains("pub mod __buffa"));
     }
 
     #[test]

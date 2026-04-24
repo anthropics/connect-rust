@@ -12,6 +12,14 @@ increment the patch version.
 
 ### Breaking
 
+- **buffa 0.4**: adapted to buffa's per-package stitcher layout
+  ([buffa#62]) and `ViewEncode` ([buffa#55]). Generated view types
+  now live under `<pkg>::__buffa::view::FooView` (was `<pkg>::FooView`);
+  oneof enums under `<pkg>::__buffa::oneof::<msg>::Kind` and
+  `<pkg>::__buffa::view::oneof::<msg>::Kind`. Service stubs are
+  appended to buffa's `<stem>.rs` content file in the unified path,
+  and emit their own `<pkg>.mod.rs` stitcher in the split path.
+  `buffa_types::Any.value` is now `bytes::Bytes` (was `Vec<u8>`).
 - **`connectrpc-codegen`**: `Options` now embeds the buffa
   `CodeGenConfig` directly as `Options::buffa` instead of mirroring
   individual fields ([#34]). The previous per-field shims
@@ -37,6 +45,8 @@ increment the patch version.
 
 [#34]: https://github.com/anthropics/connect-rust/issues/34
 [#61]: https://github.com/anthropics/connect-rust/issues/61
+[buffa#55]: https://github.com/anthropics/buffa/pull/55
+[buffa#62]: https://github.com/anthropics/buffa/pull/62
 
 ## [0.3.3] - 2026-04-17
 

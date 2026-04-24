@@ -15,17 +15,17 @@ use std::time::SystemTime;
 use axum::Router;
 use axum::routing::get;
 use buffa::view::OwnedView;
+use buffa_types::google::protobuf::__buffa::oneof::value;
 use buffa_types::google::protobuf::Duration;
 use buffa_types::google::protobuf::Struct;
 use buffa_types::google::protobuf::Timestamp;
 use buffa_types::google::protobuf::Value;
-use buffa_types::google::protobuf::value;
 use connectrpc::ConnectError;
 use connectrpc::Context;
 use connectrpc::Router as ConnectRouter;
-use multiservice_example::proto::anthropic::connectrpc::greet::v1::GreetRequestView;
-use multiservice_example::proto::anthropic::connectrpc::math::v1::AddRequestView;
-use multiservice_example::proto::anthropic::connectrpc::wkt::v1::{
+use multiservice_example::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView;
+use multiservice_example::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView;
+use multiservice_example::proto::anthropic::connectrpc::wkt::v1::__buffa::view::{
     CalculateDurationRequestView, CreateEventRequestView, ProcessMetadataRequestView,
 };
 use multiservice_example::*;
