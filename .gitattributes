@@ -1,4 +1,5 @@
 # Mark generated code so it is collapsed in diffs by default
+benches/rpc/src/generated/** linguist-generated=true
 conformance/src/generated/** linguist-generated=true
 examples/eliza/src/generated/** linguist-generated=true
 examples/multiservice/src/generated/** linguist-generated=true
