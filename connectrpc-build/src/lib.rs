@@ -140,6 +140,10 @@ impl Config {
     /// way. The convenience builders above remain available for the common
     /// cases. `generate_views` is forced to `true` regardless (service
     /// stubs require view types); see [`Options::buffa`].
+    ///
+    /// Calls to the convenience builders above made *before* this method
+    /// are discarded; calls made *after* override individual fields in the
+    /// supplied config.
     #[must_use]
     pub fn buffa_config(mut self, config: CodeGenConfig) -> Self {
         self.options.buffa = config;

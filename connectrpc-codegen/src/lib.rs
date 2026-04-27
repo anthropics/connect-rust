@@ -38,3 +38,5 @@
 
 pub mod codegen;
 pub mod plugin;
+
+pub use codegen::CodeGenConfig;

@@ -37,7 +37,9 @@ use crate::plugin::CodeGeneratorResponseFile;
 /// These control both the underlying buffa message generation and the
 /// ConnectRPC service binding generation.
 ///
-/// Construct via `Options { field: value, ..Options::default() }`.
+/// Construct via `Options::default()` then set fields on `buffa` directly
+/// (the struct is `#[non_exhaustive]`, so struct-update syntax is
+/// unavailable from outside this crate).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Options {
