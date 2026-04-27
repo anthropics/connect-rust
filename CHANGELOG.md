@@ -10,6 +10,20 @@ increment the patch version.
 
 ## [Unreleased]
 
+### Breaking
+
+- **`connectrpc-codegen`**: `Options` now embeds the buffa
+  `CodeGenConfig` directly as `Options::buffa` instead of mirroring
+  individual fields ([#34]). The previous per-field shims
+  (`strict_utf8_mapping`, `generate_json`, `extern_paths`,
+  `emit_register_fn`) are gone; set `options.buffa.<field>` instead.
+  `CodeGenConfig` is re-exported from `connectrpc_codegen::codegen` and
+  `connectrpc_build`. `connectrpc_build::Config` keeps its existing
+  builder methods as thin shims and gains `.buffa_config(cfg)` for
+  wholesale replacement. `generate_views = true` is still enforced.
+
+[#34]: https://github.com/anthropics/connect-rust/issues/34
+
 ## [0.3.3] - 2026-04-17
 
 ### Fixed

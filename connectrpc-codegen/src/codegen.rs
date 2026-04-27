@@ -25,8 +25,8 @@ use buffa_codegen::generated::descriptor::method_options::IdempotencyLevel;
 use buffa_codegen::idents::make_field_ident;
 use buffa_codegen::idents::rust_path_to_tokens;
 
-pub use buffa_codegen::GeneratedFile;
 pub use buffa_codegen::generated::descriptor;
+pub use buffa_codegen::{CodeGenConfig, GeneratedFile};
 
 use crate::plugin::CodeGeneratorRequest;
 use crate::plugin::CodeGeneratorResponse;
@@ -41,56 +41,36 @@ use crate::plugin::CodeGeneratorResponseFile;
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Options {
-    /// Emit `Vec<u8>`/`&[u8]` for proto string fields with
-    /// `utf8_validation = NONE` instead of `String`/`&str`. See
-    /// `buffa_codegen::CodeGenConfig::strict_utf8_mapping`.
-    pub strict_utf8_mapping: bool,
-    /// Emit `serde::Serialize` / `serde::Deserialize` derives and the proto3
-    /// JSON mapping helpers on generated message types. Required for the
-    /// Connect protocol's JSON codec; disable only if you're targeting
-    /// binary-only clients.
-    pub generate_json: bool,
-    /// Map protobuf package prefixes to Rust module paths for message types.
+    /// The underlying buffa-codegen configuration. Set any
+    /// [`CodeGenConfig`] field directly here; connectrpc passes it through
+    /// verbatim except for [`CodeGenConfig::generate_views`], which is
+    /// forced to `true` (service stubs require view types).
     ///
-    /// Each entry is `(proto_prefix, rust_path)`, e.g.
-    /// `(".", "crate::proto")` routes every type through `crate::proto::...`.
-    /// More-specific prefixes win via longest-prefix-match, and the WKT
-    /// mapping (`.google.protobuf` -> `::buffa_types::...`) is auto-injected.
+    /// [`Options::default()`] starts from buffa's defaults but enables
+    /// `generate_json` (the Connect protocol's JSON codec needs it; buffa's
+    /// own default is `false`).
     ///
-    /// Used by [`generate_services`] to bake absolute paths into service
-    /// stubs so they compile independently of co-generated message types.
-    /// Unused by [`generate_files`] (the unified `super::`-relative path).
-    pub extern_paths: Vec<(String, String)>,
-    /// Emit the per-file `register_types(&mut TypeRegistry)` function that
-    /// aggregates every message in the file. Default `true`. See
-    /// `buffa_codegen::CodeGenConfig::emit_register_fn`.
-    ///
-    /// Set to `false` when multiple generated files are `include!`d into
-    /// the same module — the identically-named `register_types` fns would
-    /// otherwise collide. The per-message `__*_JSON_ANY` consts are still
-    /// emitted; only the aggregating function is suppressed.
-    pub emit_register_fn: bool,
+    /// `buffa.extern_paths` is used by [`generate_services`] to bake
+    /// absolute paths into service stubs (set a `(".", "crate::proto")`
+    /// catch-all so every type resolves); it is ignored by
+    /// [`generate_files`] (the unified `super::`-relative path).
+    pub buffa: CodeGenConfig,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self {
-            strict_utf8_mapping: false,
-            generate_json: true,
-            extern_paths: Vec::new(),
-            emit_register_fn: true,
-        }
+        let mut buffa = CodeGenConfig::default();
+        buffa.generate_json = true;
+        Self { buffa }
     }
 }
 
 impl Options {
-    fn to_buffa_config(&self) -> buffa_codegen::CodeGenConfig {
-        let mut config = buffa_codegen::CodeGenConfig::default();
+    /// Clone the embedded buffa config and apply connectrpc's invariants
+    /// (`generate_views = true` — service stubs reference view types).
+    fn to_buffa_config(&self) -> CodeGenConfig {
+        let mut config = self.buffa.clone();
         config.generate_views = true;
-        config.generate_json = self.generate_json;
-        config.strict_utf8_mapping = self.strict_utf8_mapping;
-        config.extern_paths.clone_from(&self.extern_paths);
-        config.emit_register_fn = self.emit_register_fn;
         config
     }
 }
@@ -131,7 +111,7 @@ fn emit_service_files(
 ///
 /// This is the **unified** path: service stubs reference message types via
 /// `super::`-relative paths, so both must live in the same module tree.
-/// [`Options::extern_paths`] is ignored.
+/// [`CodeGenConfig::extern_paths`] is ignored.
 ///
 /// # Errors
 ///
@@ -168,7 +148,7 @@ pub fn generate_files(
 /// declares at least one `service`. No message types, no `mod.rs`.
 ///
 /// This is the **split** path: service stubs reference message types via
-/// absolute Rust paths derived from [`Options::extern_paths`]. Callers must
+/// absolute Rust paths derived from [`CodeGenConfig::extern_paths`]. Callers must
 /// set at least a `.` catch-all entry (e.g. `(".", "crate::proto")`) so
 /// every type resolves; the auto-injected WKT mapping still takes priority
 /// via longest-prefix-match. The generated code compiles standalone as long
@@ -204,13 +184,13 @@ pub fn generate_services(
 ///   to a Rust module path. Repeatable; longest-prefix-match wins.
 ///   `extern_path=.=<path>` is the catch-all (equivalent to `buffa_module`).
 ///   At least one catch-all mapping is required so every type resolves.
-/// - `strict_utf8_mapping` — see [`Options::strict_utf8_mapping`].
+/// - `strict_utf8_mapping` — see [`CodeGenConfig::strict_utf8_mapping`].
 /// - `no_json` — disable `serde` derives on generated message types.
 ///   Ignored in this plugin (no message types emitted); accepted for
 ///   compatibility with the unified path.
 /// - `no_register_fn` — suppress the per-file
 ///   `register_types(&mut TypeRegistry)` aggregator. See
-///   [`Options::emit_register_fn`]. Ignored in this plugin (no message
+///   [`CodeGenConfig::emit_register_fn`]. Ignored in this plugin (no message
 ///   types emitted); accepted for compatibility with the unified path.
 pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse> {
     let mut options = Options::default();
@@ -225,7 +205,10 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                          e.g. buffa_module=crate::proto"
                     );
                 }
-                options.extern_paths.push((".".into(), rust.to_string()));
+                options
+                    .buffa
+                    .extern_paths
+                    .push((".".into(), rust.to_string()));
             } else if let Some(value) = opt.strip_prefix("extern_path=") {
                 // value is "<proto_path>=<rust_path>"
                 let (proto, rust) = value.split_once('=').ok_or_else(|| {
@@ -246,12 +229,12 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                 if !proto.starts_with('.') {
                     proto.insert(0, '.');
                 }
-                options.extern_paths.push((proto, rust.to_string()));
+                options.buffa.extern_paths.push((proto, rust.to_string()));
             } else {
                 match opt {
-                    "strict_utf8_mapping" => options.strict_utf8_mapping = true,
-                    "no_json" => options.generate_json = false,
-                    "no_register_fn" => options.emit_register_fn = false,
+                    "strict_utf8_mapping" => options.buffa.strict_utf8_mapping = true,
+                    "no_json" => options.buffa.generate_json = false,
+                    "no_register_fn" => options.buffa.emit_register_fn = false,
                     _ => {
                         return Err(anyhow::anyhow!(
                             "unknown plugin option: {opt:?}. Supported: \
@@ -1731,21 +1714,22 @@ mod tests {
     }
 
     #[test]
-    fn options_default_emits_register_fn() {
-        let opts = Options::default();
-        assert!(opts.emit_register_fn);
-        let cfg = opts.to_buffa_config();
+    fn options_default_buffa_config() {
+        let cfg = Options::default().to_buffa_config();
+        assert!(cfg.generate_json, "connectrpc enables JSON by default");
+        assert!(cfg.generate_views);
         assert!(cfg.emit_register_fn);
+        assert!(!cfg.strict_utf8_mapping);
     }
 
     #[test]
-    fn options_emit_register_fn_false_disables_buffa_register_fn() {
-        let opts = Options {
-            emit_register_fn: false,
-            ..Options::default()
-        };
+    fn options_buffa_passthrough_forces_views() {
+        let mut opts = Options::default();
+        opts.buffa.emit_register_fn = false;
+        opts.buffa.generate_views = false;
         let cfg = opts.to_buffa_config();
         assert!(!cfg.emit_register_fn);
+        assert!(cfg.generate_views, "generate_views must be forced on");
     }
 
     #[test]
@@ -1775,15 +1759,10 @@ mod tests {
             with_fn[0].content
         );
 
-        let without_fn = generate_files(
-            std::slice::from_ref(&file),
-            &["ping.proto".into()],
-            &Options {
-                emit_register_fn: false,
-                ..Options::default()
-            },
-        )
-        .unwrap();
+        let mut opts = Options::default();
+        opts.buffa.emit_register_fn = false;
+        let without_fn =
+            generate_files(std::slice::from_ref(&file), &["ping.proto".into()], &opts).unwrap();
         assert_eq!(without_fn.len(), 1);
         assert!(
             !without_fn[0].content.contains("fn register_types"),
