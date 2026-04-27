@@ -214,11 +214,36 @@ pub struct ConnectError {
     #[serde(skip)]
     http_status_override: Option<StatusCode>,
     /// Response headers to include in error response (not serialized).
+    ///
+    /// Boxed to keep `ConnectError` small enough to pass by value in
+    /// `Result` without tripping `clippy::result_large_err`. `None` means
+    /// no extra headers. Prefer the [`ConnectError::response_headers`] /
+    /// [`ConnectError::response_headers_mut`] /
+    /// [`ConnectError::set_response_headers`] accessors over touching this
+    /// field directly.
     #[serde(skip)]
-    pub response_headers: http::HeaderMap,
+    pub response_headers: Option<Box<http::HeaderMap>>,
     /// Response trailers to include in error response (not serialized).
+    ///
+    /// Boxed for the same reason as `response_headers`. `None` means no
+    /// extra trailers. Prefer the [`ConnectError::trailers`] /
+    /// [`ConnectError::trailers_mut`] / [`ConnectError::set_trailers`]
+    /// accessors.
     #[serde(skip)]
-    pub trailers: http::HeaderMap,
+    pub trailers: Option<Box<http::HeaderMap>>,
+}
+
+/// Shared empty `HeaderMap` for the `None` arm of the read accessors, so
+/// callers can iterate / `.get()` unconditionally.
+static EMPTY_HEADERS: std::sync::LazyLock<http::HeaderMap> =
+    std::sync::LazyLock::new(http::HeaderMap::new);
+
+fn box_headers(h: http::HeaderMap) -> Option<Box<http::HeaderMap>> {
+    if h.is_empty() {
+        None
+    } else {
+        Some(Box::new(h))
+    }
 }
 
 impl ConnectError {
@@ -229,23 +254,55 @@ impl ConnectError {
             message: Some(message.into()),
             details: Vec::new(),
             http_status_override: None,
-            response_headers: http::HeaderMap::new(),
-            trailers: http::HeaderMap::new(),
+            response_headers: None,
+            trailers: None,
         }
     }
 
     /// Add response headers to be included in the error response.
     #[must_use]
     pub fn with_headers(mut self, headers: http::HeaderMap) -> Self {
-        self.response_headers = headers;
+        self.response_headers = box_headers(headers);
         self
     }
 
     /// Add response trailers to be included in the error response.
     #[must_use]
     pub fn with_trailers(mut self, trailers: http::HeaderMap) -> Self {
-        self.trailers = trailers;
+        self.trailers = box_headers(trailers);
         self
+    }
+
+    /// Borrow the response headers. Returns an empty map if none were set.
+    pub fn response_headers(&self) -> &http::HeaderMap {
+        self.response_headers.as_deref().unwrap_or(&EMPTY_HEADERS)
+    }
+
+    /// Borrow the response trailers. Returns an empty map if none were set.
+    pub fn trailers(&self) -> &http::HeaderMap {
+        self.trailers.as_deref().unwrap_or(&EMPTY_HEADERS)
+    }
+
+    /// Mutably borrow the response headers, allocating an empty map if
+    /// none were set.
+    pub fn response_headers_mut(&mut self) -> &mut http::HeaderMap {
+        self.response_headers.get_or_insert_default()
+    }
+
+    /// Mutably borrow the response trailers, allocating an empty map if
+    /// none were set.
+    pub fn trailers_mut(&mut self) -> &mut http::HeaderMap {
+        self.trailers.get_or_insert_default()
+    }
+
+    /// Replace the response headers. An empty map is stored as `None`.
+    pub fn set_response_headers(&mut self, headers: http::HeaderMap) {
+        self.response_headers = box_headers(headers);
+    }
+
+    /// Replace the response trailers. An empty map is stored as `None`.
+    pub fn set_trailers(&mut self, trailers: http::HeaderMap) {
+        self.trailers = box_headers(trailers);
     }
 
     /// Set an HTTP status override for this error.
@@ -449,5 +506,38 @@ mod tests {
     fn test_from_grpc_code_unknown_returns_none() {
         assert_eq!(ErrorCode::from_grpc_code(17), None);
         assert_eq!(ErrorCode::from_grpc_code(999), None);
+    }
+
+    #[test]
+    fn connect_error_stays_under_result_large_err_threshold() {
+        // clippy::result_large_err fires at 128 bytes. Keep some headroom so
+        // adding a small field doesn't immediately re-trip the lint.
+        const THRESHOLD: usize = 96;
+        let size = std::mem::size_of::<ConnectError>();
+        assert!(
+            size <= THRESHOLD,
+            "ConnectError is {size} bytes (threshold {THRESHOLD}); \
+             box large fields to keep Result<_, ConnectError> cheap to move"
+        );
+    }
+
+    #[test]
+    fn header_accessors() {
+        let mut e = ConnectError::internal("x");
+        assert!(e.response_headers().is_empty());
+        assert!(e.trailers().is_empty());
+
+        // Setting an empty map stays None.
+        e.set_response_headers(http::HeaderMap::new());
+        assert!(e.response_headers.is_none());
+
+        e.trailers_mut()
+            .insert("x-t", http::HeaderValue::from_static("v"));
+        assert_eq!(e.trailers().get("x-t").unwrap(), "v");
+
+        let mut h = http::HeaderMap::new();
+        h.insert("x-h", http::HeaderValue::from_static("w"));
+        let e = e.with_headers(h);
+        assert_eq!(e.response_headers().get("x-h").unwrap(), "w");
     }
 }

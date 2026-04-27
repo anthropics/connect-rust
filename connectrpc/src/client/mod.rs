@@ -1240,8 +1240,8 @@ where
         let body = collect_body_bounded(response.into_body(), max_err_body_size)
             .await
             .map_err(|mut e| {
-                e.response_headers = headers.clone();
-                e.trailers = trailers.clone();
+                e.set_response_headers(headers.clone());
+                e.set_trailers(trailers.clone());
                 e
             })?;
 
@@ -1263,8 +1263,8 @@ where
                             http_status_to_error_code(status),
                             format!("HTTP error {}", status.as_u16()),
                         );
-                        err.response_headers = headers;
-                        err.trailers = trailers;
+                        err.set_response_headers(headers);
+                        err.set_trailers(trailers);
                         return Err(err);
                     }
                 }
@@ -1280,8 +1280,8 @@ where
                 .unwrap_or_else(|| http_status_to_error_code(status));
             let mut err = ConnectError::new(code, error.message.unwrap_or_default());
             err.details = error.details;
-            err.response_headers = headers;
-            err.trailers = trailers;
+            err.set_response_headers(headers);
+            err.set_trailers(trailers);
             return Err(err);
         }
 
@@ -1294,8 +1294,8 @@ where
                 String::from_utf8_lossy(&body)
             ),
         );
-        err.response_headers = headers;
-        err.trailers = trailers;
+        err.set_response_headers(headers);
+        err.set_trailers(trailers);
         return Err(err);
     }
 
@@ -1397,7 +1397,7 @@ where
     if !status.is_success() {
         let code = http_status_to_error_code(status);
         let mut err = ConnectError::new(code, format!("HTTP error {}", status.as_u16()));
-        err.response_headers = resp_headers;
+        err.set_response_headers(resp_headers);
         return Err(err);
     }
 
@@ -1409,7 +1409,7 @@ where
                 ErrorCode::Unknown,
                 format!("unexpected content-type: {ct_str}"),
             );
-            err.response_headers = resp_headers;
+            err.set_response_headers(resp_headers);
             return Err(err);
         }
     }
@@ -1425,7 +1425,7 @@ where
         && !config.compression.supports(enc)
     {
         let mut err = ConnectError::internal(format!("unsupported response compression: {enc}"));
-        err.response_headers = resp_headers;
+        err.set_response_headers(resp_headers);
         return Err(err);
     }
 
@@ -1542,14 +1542,14 @@ where
     };
 
     if let Some(mut err) = parse_grpc_error_from_trailers(effective_trailers) {
-        err.response_headers = resp_headers;
+        err.set_response_headers(resp_headers);
         return Err(err);
     }
 
     // Validate message count for unary/client-stream (expect exactly 1)
     if message_count > 1 {
         let mut err = ConnectError::unimplemented("received multiple messages for unary response");
-        err.response_headers = resp_headers;
+        err.set_response_headers(resp_headers);
         return Err(err);
     }
 
@@ -1564,7 +1564,7 @@ where
         } else {
             ConnectError::internal("gRPC response missing grpc-status trailer")
         };
-        err.response_headers = resp_headers;
+        err.set_response_headers(resp_headers);
         return Err(err);
     }
 
@@ -1573,7 +1573,7 @@ where
         None => {
             // No message data — this is an error for unary/client-stream RPCs.
             let mut err = ConnectError::unimplemented("gRPC response contained no message data");
-            err.response_headers = resp_headers;
+            err.set_response_headers(resp_headers);
             return Err(err);
         }
     };
@@ -2076,7 +2076,7 @@ where
     if matches!(protocol, Protocol::Grpc | Protocol::GrpcWeb)
         && let Some(mut err) = parse_grpc_error_from_trailers(&response_headers)
     {
-        err.response_headers = response_headers;
+        err.set_response_headers(response_headers);
         return Err(err);
     }
 
@@ -2120,14 +2120,14 @@ where
                     .unwrap_or_else(|| http_status_to_error_code(status));
                 let mut err = ConnectError::new(code, error.message.unwrap_or_default());
                 err.details = error.details;
-                err.response_headers = response_headers;
+                err.set_response_headers(response_headers);
                 return Err(err);
             }
         }
 
         let code = http_status_to_error_code(status);
         let mut err = ConnectError::new(code, format!("HTTP error {}", status.as_u16()));
-        err.response_headers = response_headers;
+        err.set_response_headers(response_headers);
         return Err(err);
     }
 
@@ -2707,13 +2707,13 @@ where
                 .unwrap_or_else(|| http_status_to_error_code(status));
             let mut err = ConnectError::new(code, error.message.unwrap_or_default());
             err.details = error.details;
-            err.response_headers = response_headers;
+            err.set_response_headers(response_headers);
             return Err(err);
         }
 
         let code = http_status_to_error_code(status);
         let mut err = ConnectError::new(code, format!("HTTP error {}", status.as_u16()));
-        err.response_headers = response_headers;
+        err.set_response_headers(response_headers);
         return Err(err);
     }
 
@@ -2785,8 +2785,8 @@ where
                     err.message.unwrap_or_default(),
                 );
                 connect_error.details = err.details;
-                connect_error.response_headers = resp_headers;
-                connect_error.trailers = trailers;
+                connect_error.set_response_headers(resp_headers);
+                connect_error.set_trailers(trailers);
                 return Err(connect_error);
             }
         } else {
@@ -3101,7 +3101,7 @@ fn parse_grpc_error_from_trailers(trailers: &http::HeaderMap) -> Option<ConnectE
     for (key, value) in trailers.iter() {
         let name = key.as_str();
         if name != "grpc-status" && name != "grpc-message" && name != "grpc-status-details-bin" {
-            err.trailers.append(key, value.clone());
+            err.trailers_mut().append(key, value.clone());
         }
     }
 
@@ -3507,7 +3507,7 @@ mod tests {
         let err = parse_grpc_error_from_trailers(&trailers).unwrap();
         assert_eq!(err.code, ErrorCode::Internal);
         assert_eq!(
-            err.trailers.get("x-custom").unwrap().to_str().unwrap(),
+            err.trailers().get("x-custom").unwrap().to_str().unwrap(),
             "value"
         );
     }

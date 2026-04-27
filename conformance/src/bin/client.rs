@@ -1538,8 +1538,8 @@ fn headers_to_conformance(headers: &http::HeaderMap) -> Vec<Header> {
 /// Convert a ConnectError to a conformance ClientResponseResult.
 fn connect_error_to_result(err: &ConnectError) -> ClientResponseResult {
     // Extract headers/trailers from the error
-    let response_headers = headers_to_conformance(&err.response_headers);
-    let response_trailers = headers_to_conformance(&err.trailers);
+    let response_headers = headers_to_conformance(err.response_headers());
+    let response_trailers = headers_to_conformance(err.trailers());
 
     ClientResponseResult {
         response_headers,

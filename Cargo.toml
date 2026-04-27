@@ -93,6 +93,3 @@ unused_lifetimes = "warn"
 [workspace.lints.clippy]
 dbg_macro = "warn"
 uninlined_format_args = "warn"
-# ConnectError carries HeaderMaps for response metadata which makes it large.
-# Error handling is not on the hot path; carrying metadata in errors is worth the size.
-result_large_err = "allow"
