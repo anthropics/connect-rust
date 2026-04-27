@@ -217,20 +217,15 @@ pub struct ConnectError {
     ///
     /// Boxed to keep `ConnectError` small enough to pass by value in
     /// `Result` without tripping `clippy::result_large_err`. `None` means
-    /// no extra headers. Prefer the [`ConnectError::response_headers`] /
-    /// [`ConnectError::response_headers_mut`] /
-    /// [`ConnectError::set_response_headers`] accessors over touching this
-    /// field directly.
+    /// no extra headers.
     #[serde(skip)]
-    pub response_headers: Option<Box<http::HeaderMap>>,
+    pub(crate) response_headers: Option<Box<http::HeaderMap>>,
     /// Response trailers to include in error response (not serialized).
     ///
     /// Boxed for the same reason as `response_headers`. `None` means no
-    /// extra trailers. Prefer the [`ConnectError::trailers`] /
-    /// [`ConnectError::trailers_mut`] / [`ConnectError::set_trailers`]
-    /// accessors.
+    /// extra trailers.
     #[serde(skip)]
-    pub trailers: Option<Box<http::HeaderMap>>,
+    pub(crate) trailers: Option<Box<http::HeaderMap>>,
 }
 
 /// Shared empty `HeaderMap` for the `None` arm of the read accessors, so
@@ -530,6 +525,12 @@ mod tests {
         // Setting an empty map stays None.
         e.set_response_headers(http::HeaderMap::new());
         assert!(e.response_headers.is_none());
+        assert!(
+            ConnectError::new(ErrorCode::Internal, "x")
+                .with_headers(http::HeaderMap::new())
+                .response_headers
+                .is_none()
+        );
 
         e.trailers_mut()
             .insert("x-t", http::HeaderValue::from_static("v"));

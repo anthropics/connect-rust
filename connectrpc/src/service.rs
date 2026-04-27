@@ -532,9 +532,10 @@ impl EndStreamResponse {
     /// the metadata and the handler-context trailers are skipped to avoid
     /// duplication. Otherwise the handler's context trailers are used.
     fn error(err: &ConnectError, context_trailers: &http::HeaderMap) -> Self {
-        let trailers_source = match err.trailers.as_deref() {
-            Some(t) if !t.is_empty() => t,
-            _ => context_trailers,
+        let trailers_source = if err.trailers().is_empty() {
+            context_trailers
+        } else {
+            err.trailers()
         };
         let metadata = Self::metadata_from_trailers(trailers_source);
         Self {

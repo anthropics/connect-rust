@@ -22,14 +22,18 @@ increment the patch version.
   builder methods as thin shims and gains `.buffa_config(cfg)` for
   wholesale replacement. `generate_views = true` is still enforced.
 - **`ConnectError` shrunk from 248 to 72 bytes** ([#61]). The
-  `response_headers` and `trailers` fields are now
-  `Option<Box<http::HeaderMap>>` (was `http::HeaderMap`), so
+  `response_headers` and `trailers` fields are now crate-private
+  `Option<Box<http::HeaderMap>>` (was `pub http::HeaderMap`), so
   `Result<_, ConnectError>` no longer trips
-  `clippy::result_large_err`. New accessors hide the boxing:
-  `response_headers()` / `trailers()` (borrow, empty map if `None`),
-  `response_headers_mut()` / `trailers_mut()`, and
+  `clippy::result_large_err`. New accessors replace direct field
+  access: `response_headers()` / `trailers()` (borrow, empty map if
+  unset), `response_headers_mut()` / `trailers_mut()`, and
   `set_response_headers()` / `set_trailers()`. The `with_headers()` /
-  `with_trailers()` builders are unchanged.
+  `with_trailers()` builders keep their signatures. Behaviour notes:
+  `with_headers` / `with_trailers` / `set_*` now normalize an empty
+  `HeaderMap` to "unset" (observationally identical via the
+  accessors), and the `Debug` output for an unset map now shows
+  `None` instead of `{}`.
 
 [#34]: https://github.com/anthropics/connect-rust/issues/34
 [#61]: https://github.com/anthropics/connect-rust/issues/61

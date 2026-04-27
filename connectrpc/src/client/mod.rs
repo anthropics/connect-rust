@@ -3098,10 +3098,11 @@ fn parse_grpc_error_from_trailers(trailers: &http::HeaderMap) -> Option<ConnectE
     }
 
     // Include other trailers as error metadata
+    let out = err.trailers_mut();
     for (key, value) in trailers.iter() {
         let name = key.as_str();
         if name != "grpc-status" && name != "grpc-message" && name != "grpc-status-details-bin" {
-            err.trailers_mut().append(key, value.clone());
+            out.append(key, value.clone());
         }
     }
 
