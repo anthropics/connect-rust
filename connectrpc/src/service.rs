@@ -788,8 +788,12 @@ impl StreamingResponseBody {
     /// only for lifetime association — dropping the response body detaches the
     /// task (does NOT abort it), allowing the drain to complete. See the
     /// `_reader_task` field comment for the rationale.
-    fn with_reader_task(mut self, task: tokio::task::JoinHandle<()>) -> Self {
-        self._reader_task = Some(task);
+    ///
+    /// On `wasm32-unknown-unknown` there is no tokio runtime; the reader is spawned
+    /// via `wasm_bindgen_futures::spawn_local`, which doesn't return a join handle,
+    /// so callers pass `None`.
+    fn with_reader_task(mut self, task: Option<tokio::task::JoinHandle<()>>) -> Self {
+        self._reader_task = task;
         self
     }
 }
@@ -2307,7 +2311,7 @@ fn spawn_body_reader<B>(
     compression: Arc<CompressionRegistry>,
 ) -> (
     BoxStream<Result<Bytes, ConnectError>>,
-    tokio::task::JoinHandle<()>,
+    Option<tokio::task::JoinHandle<()>>,
 )
 where
     B: Body<Data = Bytes> + Send + 'static,
@@ -2315,7 +2319,7 @@ where
 {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, ConnectError>>(1);
 
-    let reader_task = tokio::spawn(async move {
+    let reader_future = async move {
         use tokio_util::codec::Decoder as _;
 
         let mut body = std::pin::pin!(body);
@@ -2394,7 +2398,20 @@ where
                 }
             }
         }
-    });
+    };
+
+    // The reader runs detached — it has to outlive the response stream so it
+    // can finish draining the request body. On native we spawn it onto tokio
+    // and keep the handle for lifetime association; on wasm32 there's no
+    // tokio runtime, so we spawn it onto wasm-bindgen-futures, which doesn't
+    // return a join handle.
+    #[cfg(not(target_arch = "wasm32"))]
+    let reader_task = Some(tokio::spawn(reader_future));
+    #[cfg(target_arch = "wasm32")]
+    let reader_task: Option<tokio::task::JoinHandle<()>> = {
+        wasm_bindgen_futures::spawn_local(reader_future);
+        None
+    };
 
     let request_stream: BoxStream<Result<Bytes, ConnectError>> =
         Box::pin(futures::stream::unfold(rx, |mut rx| async {
