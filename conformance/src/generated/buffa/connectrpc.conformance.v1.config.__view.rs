@@ -31,8 +31,6 @@ pub struct ConfigView<'a> {
         super::super::__buffa::view::ConfigCaseView<'a>,
     >,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> ConfigView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -159,6 +157,7 @@ impl<'a> ::buffa::MessageView<'a> for ConfigView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::Config {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -191,35 +190,44 @@ impl<'a> ::buffa::MessageView<'a> for ConfigView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for ConfigView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.features.is_set() {
-            let inner_size = self.features.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.features.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.include_cases {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.exclude_cases {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.features.is_set() {
@@ -228,8 +236,8 @@ impl<'a> ::buffa::ViewEncode<'a> for ConfigView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.features.cached_size() as u64, buf);
-            self.features.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.features.write_to(__cache, buf);
         }
         for v in &self.include_cases {
             ::buffa::encoding::Tag::new(
@@ -237,8 +245,8 @@ impl<'a> ::buffa::ViewEncode<'a> for ConfigView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         for v in &self.exclude_cases {
             ::buffa::encoding::Tag::new(
@@ -246,23 +254,23 @@ impl<'a> ::buffa::ViewEncode<'a> for ConfigView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for ConfigView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for ConfigView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<ConfigView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <ConfigView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for ConfigView<'a> {
-    type Static = ConfigView<'static>;
 }
 /// Features define the feature set that a client or server supports. They are
 /// used to determine the server configurations and test cases that
@@ -349,8 +357,6 @@ pub struct FeaturesView<'a> {
     /// Field 12: `supports_message_receive_limit`
     pub supports_message_receive_limit: ::core::option::Option<bool>,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> FeaturesView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -628,6 +634,7 @@ impl<'a> ::buffa::MessageView<'a> for FeaturesView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::Features {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -655,8 +662,8 @@ impl<'a> ::buffa::MessageView<'a> for FeaturesView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for FeaturesView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -727,11 +734,14 @@ impl<'a> ::buffa::ViewEncode<'a> for FeaturesView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(payload as u64) as u32 + payload;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if let Some(v) = self.supports_h2c {
@@ -851,18 +861,18 @@ impl<'a> ::buffa::ViewEncode<'a> for FeaturesView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for FeaturesView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for FeaturesView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<FeaturesView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <FeaturesView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for FeaturesView<'a> {
-    type Static = FeaturesView<'static>;
 }
 /// ConfigCase represents a single resolved configuration case. When tests are
 /// run, the Config and the supported features therein are used to compute all
@@ -912,8 +922,6 @@ pub struct ConfigCaseView<'a> {
     /// Field 8: `use_message_receive_limit`
     pub use_message_receive_limit: ::core::option::Option<bool>,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> ConfigCaseView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -1070,6 +1078,7 @@ impl<'a> ::buffa::MessageView<'a> for ConfigCaseView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ConfigCase {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -1092,8 +1101,8 @@ impl<'a> ::buffa::MessageView<'a> for ConfigCaseView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for ConfigCaseView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -1137,11 +1146,14 @@ impl<'a> ::buffa::ViewEncode<'a> for ConfigCaseView<'a> {
             size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         {
@@ -1201,18 +1213,18 @@ impl<'a> ::buffa::ViewEncode<'a> for ConfigCaseView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for ConfigCaseView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for ConfigCaseView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<ConfigCaseView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <ConfigCaseView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for ConfigCaseView<'a> {
-    type Static = ConfigCaseView<'static>;
 }
 /// TLSCreds represents credentials for TLS. It includes both a
 /// certificate and corresponding private key. Both are encoded
@@ -1224,8 +1236,6 @@ pub struct TLSCredsView<'a> {
     /// Field 2: `key`
     pub key: &'a [u8],
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> TLSCredsView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -1308,6 +1318,7 @@ impl<'a> ::buffa::MessageView<'a> for TLSCredsView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::TLSCreds {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -1324,8 +1335,8 @@ impl<'a> ::buffa::MessageView<'a> for TLSCredsView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for TLSCredsView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -1336,11 +1347,14 @@ impl<'a> ::buffa::ViewEncode<'a> for TLSCredsView<'a> {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.key) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.cert.is_empty() {
@@ -1361,16 +1375,16 @@ impl<'a> ::buffa::ViewEncode<'a> for TLSCredsView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for TLSCredsView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for TLSCredsView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<TLSCredsView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <TLSCredsView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for TLSCredsView<'a> {
-    type Static = TLSCredsView<'static>;
 }

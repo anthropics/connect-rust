@@ -51,13 +51,12 @@ pub struct UnaryResponseDefinition {
     )]
     pub raw_response: ::buffa::MessageField<RawHTTPResponse>,
     #[serde(flatten)]
-    pub response: Option<__buffa::oneof::unary_response_definition::Response>,
+    pub response: ::core::option::Option<
+        __buffa::oneof::unary_response_definition::Response,
+    >,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for UnaryResponseDefinition {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -77,7 +76,7 @@ impl UnaryResponseDefinition {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.UnaryResponseDefinition";
 }
-unsafe impl ::buffa::DefaultInstance for UnaryResponseDefinition {
+impl ::buffa::DefaultInstance for UnaryResponseDefinition {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<UnaryResponseDefinition> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -89,7 +88,8 @@ impl ::buffa::Message for UnaryResponseDefinition {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -99,19 +99,25 @@ impl ::buffa::Message for UnaryResponseDefinition {
                     + ::buffa::types::uint32_encoded_len(self.response_delay_ms) as u32;
         }
         if self.raw_response.is_set() {
-            let inner_size = self.raw_response.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.raw_response.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.response_headers {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.response_trailers {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -122,7 +128,9 @@ impl ::buffa::Message for UnaryResponseDefinition {
                     size += 1u32 + ::buffa::types::bytes_encoded_len(x) as u32;
                 }
                 __buffa::oneof::unary_response_definition::Response::Error(x) => {
-                    let inner = x.compute_size();
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
                     size
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
@@ -130,10 +138,13 @@ impl ::buffa::Message for UnaryResponseDefinition {
             }
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.response_delay_ms != 0u32 {
@@ -147,11 +158,8 @@ impl ::buffa::Message for UnaryResponseDefinition {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.raw_response.cached_size() as u64,
-                buf,
-            );
-            self.raw_response.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.raw_response.write_to(__cache, buf);
         }
         for v in &self.response_headers {
             ::buffa::encoding::Tag::new(
@@ -159,8 +167,8 @@ impl ::buffa::Message for UnaryResponseDefinition {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         for v in &self.response_trailers {
             ::buffa::encoding::Tag::new(
@@ -168,8 +176,8 @@ impl ::buffa::Message for UnaryResponseDefinition {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         if let ::core::option::Option::Some(ref v) = self.response {
             match v {
@@ -187,8 +195,8 @@ impl ::buffa::Message for UnaryResponseDefinition {
                             ::buffa::encoding::WireType::LengthDelimited,
                         )
                         .encode(buf);
-                    ::buffa::encoding::encode_varint(x.cached_size() as u64, buf);
-                    x.write_to(buf);
+                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    x.write_to(__cache, buf);
                 }
             }
         }
@@ -303,9 +311,6 @@ impl ::buffa::Message for UnaryResponseDefinition {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.response_delay_ms = 0u32;
         self.raw_response = ::buffa::MessageField::none();
@@ -313,7 +318,6 @@ impl ::buffa::Message for UnaryResponseDefinition {
         self.response_trailers.clear();
         self.response = ::core::option::Option::None;
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for UnaryResponseDefinition {
@@ -589,9 +593,6 @@ pub struct StreamResponseDefinition {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for StreamResponseDefinition {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -612,7 +613,7 @@ impl StreamResponseDefinition {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.StreamResponseDefinition";
 }
-unsafe impl ::buffa::DefaultInstance for StreamResponseDefinition {
+impl ::buffa::DefaultInstance for StreamResponseDefinition {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<StreamResponseDefinition> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -624,7 +625,8 @@ impl ::buffa::Message for StreamResponseDefinition {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -634,19 +636,25 @@ impl ::buffa::Message for StreamResponseDefinition {
                     + ::buffa::types::uint32_encoded_len(self.response_delay_ms) as u32;
         }
         if self.error.is_set() {
-            let inner_size = self.error.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.error.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         if self.raw_response.is_set() {
-            let inner_size = self.raw_response.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.raw_response.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.response_headers {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -655,16 +663,21 @@ impl ::buffa::Message for StreamResponseDefinition {
             size += 1u32 + ::buffa::types::bytes_encoded_len(v) as u32;
         }
         for v in &self.response_trailers {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.response_delay_ms != 0u32 {
@@ -678,8 +691,8 @@ impl ::buffa::Message for StreamResponseDefinition {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.error.cached_size() as u64, buf);
-            self.error.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.error.write_to(__cache, buf);
         }
         if self.raw_response.is_set() {
             ::buffa::encoding::Tag::new(
@@ -687,11 +700,8 @@ impl ::buffa::Message for StreamResponseDefinition {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.raw_response.cached_size() as u64,
-                buf,
-            );
-            self.raw_response.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.raw_response.write_to(__cache, buf);
         }
         for v in &self.response_headers {
             ::buffa::encoding::Tag::new(
@@ -699,8 +709,8 @@ impl ::buffa::Message for StreamResponseDefinition {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         for v in &self.response_data {
             ::buffa::encoding::Tag::new(
@@ -716,8 +726,8 @@ impl ::buffa::Message for StreamResponseDefinition {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -811,9 +821,6 @@ impl ::buffa::Message for StreamResponseDefinition {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.response_delay_ms = 0u32;
         self.error = ::buffa::MessageField::none();
@@ -822,7 +829,6 @@ impl ::buffa::Message for StreamResponseDefinition {
         self.response_data.clear();
         self.response_trailers.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for StreamResponseDefinition {
@@ -880,9 +886,6 @@ pub struct UnaryRequest {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for UnaryRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -899,7 +902,7 @@ impl UnaryRequest {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.UnaryRequest";
 }
-unsafe impl ::buffa::DefaultInstance for UnaryRequest {
+impl ::buffa::DefaultInstance for UnaryRequest {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<UnaryRequest> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -911,12 +914,15 @@ impl ::buffa::Message for UnaryRequest {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.response_definition.is_set() {
-            let inner_size = self.response_definition.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.response_definition.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -925,10 +931,13 @@ impl ::buffa::Message for UnaryRequest {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.request_data) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.response_definition.is_set() {
@@ -937,11 +946,8 @@ impl ::buffa::Message for UnaryRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.response_definition.cached_size() as u64,
-                buf,
-            );
-            self.response_definition.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.response_definition.write_to(__cache, buf);
         }
         if !self.request_data.is_empty() {
             ::buffa::encoding::Tag::new(
@@ -995,14 +1001,10 @@ impl ::buffa::Message for UnaryRequest {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.response_definition = ::buffa::MessageField::none();
         self.request_data.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for UnaryRequest {
@@ -1049,9 +1051,6 @@ pub struct UnaryResponse {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for UnaryResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1065,7 +1064,7 @@ impl UnaryResponse {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.UnaryResponse";
 }
-unsafe impl ::buffa::DefaultInstance for UnaryResponse {
+impl ::buffa::DefaultInstance for UnaryResponse {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<UnaryResponse> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -1077,21 +1076,27 @@ impl ::buffa::Message for UnaryResponse {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.payload.is_set() {
-            let inner_size = self.payload.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.payload.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.payload.is_set() {
@@ -1100,8 +1105,8 @@ impl ::buffa::Message for UnaryResponse {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.payload.cached_size() as u64, buf);
-            self.payload.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.payload.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -1137,13 +1142,9 @@ impl ::buffa::Message for UnaryResponse {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.payload = ::buffa::MessageField::none();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for UnaryResponse {
@@ -1201,9 +1202,6 @@ pub struct IdempotentUnaryRequest {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for IdempotentUnaryRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1220,7 +1218,7 @@ impl IdempotentUnaryRequest {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.IdempotentUnaryRequest";
 }
-unsafe impl ::buffa::DefaultInstance for IdempotentUnaryRequest {
+impl ::buffa::DefaultInstance for IdempotentUnaryRequest {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<IdempotentUnaryRequest> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -1232,12 +1230,15 @@ impl ::buffa::Message for IdempotentUnaryRequest {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.response_definition.is_set() {
-            let inner_size = self.response_definition.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.response_definition.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -1246,10 +1247,13 @@ impl ::buffa::Message for IdempotentUnaryRequest {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.request_data) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.response_definition.is_set() {
@@ -1258,11 +1262,8 @@ impl ::buffa::Message for IdempotentUnaryRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.response_definition.cached_size() as u64,
-                buf,
-            );
-            self.response_definition.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.response_definition.write_to(__cache, buf);
         }
         if !self.request_data.is_empty() {
             ::buffa::encoding::Tag::new(
@@ -1316,14 +1317,10 @@ impl ::buffa::Message for IdempotentUnaryRequest {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.response_definition = ::buffa::MessageField::none();
         self.request_data.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for IdempotentUnaryRequest {
@@ -1370,9 +1367,6 @@ pub struct IdempotentUnaryResponse {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for IdempotentUnaryResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1388,7 +1382,7 @@ impl IdempotentUnaryResponse {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.IdempotentUnaryResponse";
 }
-unsafe impl ::buffa::DefaultInstance for IdempotentUnaryResponse {
+impl ::buffa::DefaultInstance for IdempotentUnaryResponse {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<IdempotentUnaryResponse> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -1400,21 +1394,27 @@ impl ::buffa::Message for IdempotentUnaryResponse {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.payload.is_set() {
-            let inner_size = self.payload.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.payload.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.payload.is_set() {
@@ -1423,8 +1423,8 @@ impl ::buffa::Message for IdempotentUnaryResponse {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.payload.cached_size() as u64, buf);
-            self.payload.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.payload.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -1460,13 +1460,9 @@ impl ::buffa::Message for IdempotentUnaryResponse {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.payload = ::buffa::MessageField::none();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for IdempotentUnaryResponse {
@@ -1524,9 +1520,6 @@ pub struct ServerStreamRequest {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for ServerStreamRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1543,7 +1536,7 @@ impl ServerStreamRequest {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ServerStreamRequest";
 }
-unsafe impl ::buffa::DefaultInstance for ServerStreamRequest {
+impl ::buffa::DefaultInstance for ServerStreamRequest {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<ServerStreamRequest> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -1555,12 +1548,15 @@ impl ::buffa::Message for ServerStreamRequest {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.response_definition.is_set() {
-            let inner_size = self.response_definition.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.response_definition.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -1569,10 +1565,13 @@ impl ::buffa::Message for ServerStreamRequest {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.request_data) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.response_definition.is_set() {
@@ -1581,11 +1580,8 @@ impl ::buffa::Message for ServerStreamRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.response_definition.cached_size() as u64,
-                buf,
-            );
-            self.response_definition.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.response_definition.write_to(__cache, buf);
         }
         if !self.request_data.is_empty() {
             ::buffa::encoding::Tag::new(
@@ -1639,14 +1635,10 @@ impl ::buffa::Message for ServerStreamRequest {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.response_definition = ::buffa::MessageField::none();
         self.request_data.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for ServerStreamRequest {
@@ -1693,9 +1685,6 @@ pub struct ServerStreamResponse {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for ServerStreamResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1709,7 +1698,7 @@ impl ServerStreamResponse {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ServerStreamResponse";
 }
-unsafe impl ::buffa::DefaultInstance for ServerStreamResponse {
+impl ::buffa::DefaultInstance for ServerStreamResponse {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<ServerStreamResponse> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -1721,21 +1710,27 @@ impl ::buffa::Message for ServerStreamResponse {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.payload.is_set() {
-            let inner_size = self.payload.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.payload.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.payload.is_set() {
@@ -1744,8 +1739,8 @@ impl ::buffa::Message for ServerStreamResponse {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.payload.cached_size() as u64, buf);
-            self.payload.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.payload.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -1781,13 +1776,9 @@ impl ::buffa::Message for ServerStreamResponse {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.payload = ::buffa::MessageField::none();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for ServerStreamResponse {
@@ -1848,9 +1839,6 @@ pub struct ClientStreamRequest {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for ClientStreamRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1867,7 +1855,7 @@ impl ClientStreamRequest {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ClientStreamRequest";
 }
-unsafe impl ::buffa::DefaultInstance for ClientStreamRequest {
+impl ::buffa::DefaultInstance for ClientStreamRequest {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<ClientStreamRequest> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -1879,12 +1867,15 @@ impl ::buffa::Message for ClientStreamRequest {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.response_definition.is_set() {
-            let inner_size = self.response_definition.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.response_definition.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -1893,10 +1884,13 @@ impl ::buffa::Message for ClientStreamRequest {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.request_data) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.response_definition.is_set() {
@@ -1905,11 +1899,8 @@ impl ::buffa::Message for ClientStreamRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.response_definition.cached_size() as u64,
-                buf,
-            );
-            self.response_definition.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.response_definition.write_to(__cache, buf);
         }
         if !self.request_data.is_empty() {
             ::buffa::encoding::Tag::new(
@@ -1963,14 +1954,10 @@ impl ::buffa::Message for ClientStreamRequest {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.response_definition = ::buffa::MessageField::none();
         self.request_data.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for ClientStreamRequest {
@@ -2017,9 +2004,6 @@ pub struct ClientStreamResponse {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for ClientStreamResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -2033,7 +2017,7 @@ impl ClientStreamResponse {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ClientStreamResponse";
 }
-unsafe impl ::buffa::DefaultInstance for ClientStreamResponse {
+impl ::buffa::DefaultInstance for ClientStreamResponse {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<ClientStreamResponse> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -2045,21 +2029,27 @@ impl ::buffa::Message for ClientStreamResponse {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.payload.is_set() {
-            let inner_size = self.payload.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.payload.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.payload.is_set() {
@@ -2068,8 +2058,8 @@ impl ::buffa::Message for ClientStreamResponse {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.payload.cached_size() as u64, buf);
-            self.payload.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.payload.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -2105,13 +2095,9 @@ impl ::buffa::Message for ClientStreamResponse {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.payload = ::buffa::MessageField::none();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for ClientStreamResponse {
@@ -2193,9 +2179,6 @@ pub struct BidiStreamRequest {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for BidiStreamRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -2213,7 +2196,7 @@ impl BidiStreamRequest {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.BidiStreamRequest";
 }
-unsafe impl ::buffa::DefaultInstance for BidiStreamRequest {
+impl ::buffa::DefaultInstance for BidiStreamRequest {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<BidiStreamRequest> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -2225,12 +2208,15 @@ impl ::buffa::Message for BidiStreamRequest {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.response_definition.is_set() {
-            let inner_size = self.response_definition.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.response_definition.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -2242,10 +2228,13 @@ impl ::buffa::Message for BidiStreamRequest {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.request_data) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.response_definition.is_set() {
@@ -2254,11 +2243,8 @@ impl ::buffa::Message for BidiStreamRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.response_definition.cached_size() as u64,
-                buf,
-            );
-            self.response_definition.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.response_definition.write_to(__cache, buf);
         }
         if self.full_duplex {
             ::buffa::encoding::Tag::new(2u32, ::buffa::encoding::WireType::Varint)
@@ -2327,15 +2313,11 @@ impl ::buffa::Message for BidiStreamRequest {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.response_definition = ::buffa::MessageField::none();
         self.full_duplex = false;
         self.request_data.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for BidiStreamRequest {
@@ -2382,9 +2364,6 @@ pub struct BidiStreamResponse {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for BidiStreamResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -2398,7 +2377,7 @@ impl BidiStreamResponse {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.BidiStreamResponse";
 }
-unsafe impl ::buffa::DefaultInstance for BidiStreamResponse {
+impl ::buffa::DefaultInstance for BidiStreamResponse {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<BidiStreamResponse> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -2410,21 +2389,27 @@ impl ::buffa::Message for BidiStreamResponse {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.payload.is_set() {
-            let inner_size = self.payload.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.payload.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.payload.is_set() {
@@ -2433,8 +2418,8 @@ impl ::buffa::Message for BidiStreamResponse {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.payload.cached_size() as u64, buf);
-            self.payload.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.payload.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -2470,13 +2455,9 @@ impl ::buffa::Message for BidiStreamResponse {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.payload = ::buffa::MessageField::none();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for BidiStreamResponse {
@@ -2515,9 +2496,6 @@ pub struct UnimplementedRequest {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for UnimplementedRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -2531,7 +2509,7 @@ impl UnimplementedRequest {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.UnimplementedRequest";
 }
-unsafe impl ::buffa::DefaultInstance for UnimplementedRequest {
+impl ::buffa::DefaultInstance for UnimplementedRequest {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<UnimplementedRequest> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -2543,15 +2521,19 @@ impl ::buffa::Message for UnimplementedRequest {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         self.__buffa_unknown_fields.write_to(buf);
@@ -2574,12 +2556,8 @@ impl ::buffa::Message for UnimplementedRequest {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for UnimplementedRequest {
@@ -2618,9 +2596,6 @@ pub struct UnimplementedResponse {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for UnimplementedResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -2634,7 +2609,7 @@ impl UnimplementedResponse {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.UnimplementedResponse";
 }
-unsafe impl ::buffa::DefaultInstance for UnimplementedResponse {
+impl ::buffa::DefaultInstance for UnimplementedResponse {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<UnimplementedResponse> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -2646,15 +2621,19 @@ impl ::buffa::Message for UnimplementedResponse {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         self.__buffa_unknown_fields.write_to(buf);
@@ -2677,12 +2656,8 @@ impl ::buffa::Message for UnimplementedResponse {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for UnimplementedResponse {
@@ -2740,9 +2715,6 @@ pub struct ConformancePayload {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for ConformancePayload {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -2759,7 +2731,7 @@ impl ConformancePayload {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ConformancePayload";
 }
-unsafe impl ::buffa::DefaultInstance for ConformancePayload {
+impl ::buffa::DefaultInstance for ConformancePayload {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<ConformancePayload> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -2771,7 +2743,8 @@ impl ::buffa::Message for ConformancePayload {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -2779,16 +2752,21 @@ impl ::buffa::Message for ConformancePayload {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.data) as u32;
         }
         if self.request_info.is_set() {
-            let inner_size = self.request_info.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.request_info.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.data.is_empty() {
@@ -2805,11 +2783,8 @@ impl ::buffa::Message for ConformancePayload {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.request_info.cached_size() as u64,
-                buf,
-            );
-            self.request_info.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.request_info.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -2855,14 +2830,10 @@ impl ::buffa::Message for ConformancePayload {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.data.clear();
         self.request_info = ::buffa::MessageField::none();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for ConformancePayload {
@@ -2922,7 +2893,7 @@ pub mod conformance_payload {
             with = "::buffa::json_helpers::opt_int64",
             skip_serializing_if = "::core::option::Option::is_none"
         )]
-        pub timeout_ms: Option<i64>,
+        pub timeout_ms: ::core::option::Option<i64>,
         /// The server should echo back all requests received.
         /// For unary and server-streaming requests, this should always contain a single request
         /// For client-streaming and half-duplex bidi-streaming, this should contain
@@ -2956,9 +2927,6 @@ pub mod conformance_payload {
         #[serde(skip)]
         #[doc(hidden)]
         pub __buffa_unknown_fields: ::buffa::UnknownFields,
-        #[doc(hidden)]
-        #[serde(skip)]
-        pub __buffa_cached_size: ::buffa::__private::CachedSize,
     }
     impl ::core::fmt::Debug for RequestInfo {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -2977,7 +2945,7 @@ pub mod conformance_payload {
         /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
         pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ConformancePayload.RequestInfo";
     }
-    unsafe impl ::buffa::DefaultInstance for RequestInfo {
+    impl ::buffa::DefaultInstance for RequestInfo {
         fn default_instance() -> &'static Self {
             static VALUE: ::buffa::__private::OnceBox<RequestInfo> = ::buffa::__private::OnceBox::new();
             VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -2989,7 +2957,8 @@ pub mod conformance_payload {
         /// The result is a `u32`; the protobuf specification requires all
         /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
         /// compliant message will never overflow this type.
-        fn compute_size(&self) -> u32 {
+        #[allow(clippy::let_and_return)]
+        fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             let mut size = 0u32;
@@ -2997,28 +2966,37 @@ pub mod conformance_payload {
                 size += 1u32 + ::buffa::types::int64_encoded_len(v) as u32;
             }
             if self.connect_get_info.is_set() {
-                let inner_size = self.connect_get_info.compute_size();
+                let __slot = __cache.reserve();
+                let inner_size = self.connect_get_info.compute_size(__cache);
+                __cache.set(__slot, inner_size);
                 size
                     += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                         + inner_size;
             }
             for v in &self.request_headers {
-                let inner_size = v.compute_size();
+                let __slot = __cache.reserve();
+                let inner_size = v.compute_size(__cache);
+                __cache.set(__slot, inner_size);
                 size
                     += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                         + inner_size;
             }
             for v in &self.requests {
-                let inner_size = v.compute_size();
+                let __slot = __cache.reserve();
+                let inner_size = v.compute_size(__cache);
+                __cache.set(__slot, inner_size);
                 size
                     += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                         + inner_size;
             }
             size += self.__buffa_unknown_fields.encoded_len() as u32;
-            self.__buffa_cached_size.set(size);
             size
         }
-        fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+        fn write_to(
+            &self,
+            __cache: &mut ::buffa::SizeCache,
+            buf: &mut impl ::buffa::bytes::BufMut,
+        ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if let Some(v) = self.timeout_ms {
@@ -3032,11 +3010,8 @@ pub mod conformance_payload {
                         ::buffa::encoding::WireType::LengthDelimited,
                     )
                     .encode(buf);
-                ::buffa::encoding::encode_varint(
-                    self.connect_get_info.cached_size() as u64,
-                    buf,
-                );
-                self.connect_get_info.write_to(buf);
+                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                self.connect_get_info.write_to(__cache, buf);
             }
             for v in &self.request_headers {
                 ::buffa::encoding::Tag::new(
@@ -3044,8 +3019,8 @@ pub mod conformance_payload {
                         ::buffa::encoding::WireType::LengthDelimited,
                     )
                     .encode(buf);
-                ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-                v.write_to(buf);
+                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                v.write_to(__cache, buf);
             }
             for v in &self.requests {
                 ::buffa::encoding::Tag::new(
@@ -3053,8 +3028,8 @@ pub mod conformance_payload {
                         ::buffa::encoding::WireType::LengthDelimited,
                     )
                     .encode(buf);
-                ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-                v.write_to(buf);
+                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                v.write_to(__cache, buf);
             }
             self.__buffa_unknown_fields.write_to(buf);
         }
@@ -3126,16 +3101,12 @@ pub mod conformance_payload {
             }
             ::core::result::Result::Ok(())
         }
-        fn cached_size(&self) -> u32 {
-            self.__buffa_cached_size.get()
-        }
         fn clear(&mut self) {
             self.timeout_ms = ::core::option::Option::None;
             self.connect_get_info = ::buffa::MessageField::none();
             self.request_headers.clear();
             self.requests.clear();
             self.__buffa_unknown_fields.clear();
-            self.__buffa_cached_size.set(0);
         }
     }
     impl ::buffa::ExtensionSet for RequestInfo {
@@ -3184,9 +3155,6 @@ pub mod conformance_payload {
         #[serde(skip)]
         #[doc(hidden)]
         pub __buffa_unknown_fields: ::buffa::UnknownFields,
-        #[doc(hidden)]
-        #[serde(skip)]
-        pub __buffa_cached_size: ::buffa::__private::CachedSize,
     }
     impl ::core::fmt::Debug for ConnectGetInfo {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -3202,7 +3170,7 @@ pub mod conformance_payload {
         /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
         pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ConformancePayload.ConnectGetInfo";
     }
-    unsafe impl ::buffa::DefaultInstance for ConnectGetInfo {
+    impl ::buffa::DefaultInstance for ConnectGetInfo {
         fn default_instance() -> &'static Self {
             static VALUE: ::buffa::__private::OnceBox<ConnectGetInfo> = ::buffa::__private::OnceBox::new();
             VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -3214,21 +3182,27 @@ pub mod conformance_payload {
         /// The result is a `u32`; the protobuf specification requires all
         /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
         /// compliant message will never overflow this type.
-        fn compute_size(&self) -> u32 {
+        #[allow(clippy::let_and_return)]
+        fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             let mut size = 0u32;
             for v in &self.query_params {
-                let inner_size = v.compute_size();
+                let __slot = __cache.reserve();
+                let inner_size = v.compute_size(__cache);
+                __cache.set(__slot, inner_size);
                 size
                     += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                         + inner_size;
             }
             size += self.__buffa_unknown_fields.encoded_len() as u32;
-            self.__buffa_cached_size.set(size);
             size
         }
-        fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+        fn write_to(
+            &self,
+            __cache: &mut ::buffa::SizeCache,
+            buf: &mut impl ::buffa::bytes::BufMut,
+        ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             for v in &self.query_params {
@@ -3237,8 +3211,8 @@ pub mod conformance_payload {
                         ::buffa::encoding::WireType::LengthDelimited,
                     )
                     .encode(buf);
-                ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-                v.write_to(buf);
+                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                v.write_to(__cache, buf);
             }
             self.__buffa_unknown_fields.write_to(buf);
         }
@@ -3272,13 +3246,9 @@ pub mod conformance_payload {
             }
             ::core::result::Result::Ok(())
         }
-        fn cached_size(&self) -> u32 {
-            self.__buffa_cached_size.get()
-        }
         fn clear(&mut self) {
             self.query_params.clear();
             self.__buffa_unknown_fields.clear();
-            self.__buffa_cached_size.set(0);
         }
     }
     impl ::buffa::ExtensionSet for ConnectGetInfo {
@@ -3333,7 +3303,7 @@ pub struct Error {
     ///
     /// Field 2: `message`
     #[serde(rename = "message", skip_serializing_if = "::core::option::Option::is_none")]
-    pub message: Option<::buffa::alloc::string::String>,
+    pub message: ::core::option::Option<::buffa::alloc::string::String>,
     /// Errors in Connect and gRPC protocols can have arbitrary messages
     /// attached to them, which are known as error details.
     ///
@@ -3347,9 +3317,6 @@ pub struct Error {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for Error {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -3367,7 +3334,7 @@ impl Error {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.Error";
 }
-unsafe impl ::buffa::DefaultInstance for Error {
+impl ::buffa::DefaultInstance for Error {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<Error> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -3379,7 +3346,8 @@ impl ::buffa::Message for Error {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -3393,16 +3361,21 @@ impl ::buffa::Message for Error {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
         for v in &self.details {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         {
@@ -3427,8 +3400,8 @@ impl ::buffa::Message for Error {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -3485,15 +3458,11 @@ impl ::buffa::Message for Error {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.code = ::buffa::EnumValue::from(0);
         self.message = ::core::option::Option::None;
         self.details.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for Error {
@@ -3553,9 +3522,6 @@ pub struct Header {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for Header {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -3572,7 +3538,7 @@ impl Header {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.Header";
 }
-unsafe impl ::buffa::DefaultInstance for Header {
+impl ::buffa::DefaultInstance for Header {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<Header> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -3584,7 +3550,8 @@ impl ::buffa::Message for Header {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -3595,10 +3562,13 @@ impl ::buffa::Message for Header {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.name.is_empty() {
@@ -3657,14 +3627,10 @@ impl ::buffa::Message for Header {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.name.clear();
         self.value.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for Header {
@@ -3755,13 +3721,10 @@ pub struct RawHTTPRequest {
         raw_http_request::EncodedQueryParam,
     >,
     #[serde(flatten)]
-    pub body: Option<__buffa::oneof::raw_http_request::Body>,
+    pub body: ::core::option::Option<__buffa::oneof::raw_http_request::Body>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for RawHTTPRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -3782,7 +3745,7 @@ impl RawHTTPRequest {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.RawHTTPRequest";
 }
-unsafe impl ::buffa::DefaultInstance for RawHTTPRequest {
+impl ::buffa::DefaultInstance for RawHTTPRequest {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<RawHTTPRequest> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -3794,7 +3757,8 @@ impl ::buffa::Message for RawHTTPRequest {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -3805,19 +3769,25 @@ impl ::buffa::Message for RawHTTPRequest {
             size += 1u32 + ::buffa::types::string_encoded_len(&self.uri) as u32;
         }
         for v in &self.headers {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.raw_query_params {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.encoded_query_params {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -3825,13 +3795,17 @@ impl ::buffa::Message for RawHTTPRequest {
         if let ::core::option::Option::Some(ref v) = self.body {
             match v {
                 __buffa::oneof::raw_http_request::Body::Unary(x) => {
-                    let inner = x.compute_size();
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
                     size
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
                 __buffa::oneof::raw_http_request::Body::Stream(x) => {
-                    let inner = x.compute_size();
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
                     size
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
@@ -3839,10 +3813,13 @@ impl ::buffa::Message for RawHTTPRequest {
             }
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.verb.is_empty() {
@@ -3867,8 +3844,8 @@ impl ::buffa::Message for RawHTTPRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         for v in &self.raw_query_params {
             ::buffa::encoding::Tag::new(
@@ -3876,8 +3853,8 @@ impl ::buffa::Message for RawHTTPRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         for v in &self.encoded_query_params {
             ::buffa::encoding::Tag::new(
@@ -3885,8 +3862,8 @@ impl ::buffa::Message for RawHTTPRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         if let ::core::option::Option::Some(ref v) = self.body {
             match v {
@@ -3896,8 +3873,8 @@ impl ::buffa::Message for RawHTTPRequest {
                             ::buffa::encoding::WireType::LengthDelimited,
                         )
                         .encode(buf);
-                    ::buffa::encoding::encode_varint(x.cached_size() as u64, buf);
-                    x.write_to(buf);
+                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    x.write_to(__cache, buf);
                 }
                 __buffa::oneof::raw_http_request::Body::Stream(x) => {
                     ::buffa::encoding::Tag::new(
@@ -3905,8 +3882,8 @@ impl ::buffa::Message for RawHTTPRequest {
                             ::buffa::encoding::WireType::LengthDelimited,
                         )
                         .encode(buf);
-                    ::buffa::encoding::encode_varint(x.cached_size() as u64, buf);
-                    x.write_to(buf);
+                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    x.write_to(__cache, buf);
                 }
             }
         }
@@ -4040,9 +4017,6 @@ impl ::buffa::Message for RawHTTPRequest {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.verb.clear();
         self.uri.clear();
@@ -4051,7 +4025,6 @@ impl ::buffa::Message for RawHTTPRequest {
         self.encoded_query_params.clear();
         self.body = ::core::option::Option::None;
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for RawHTTPRequest {
@@ -4326,9 +4299,6 @@ pub mod raw_http_request {
         #[serde(skip)]
         #[doc(hidden)]
         pub __buffa_unknown_fields: ::buffa::UnknownFields,
-        #[doc(hidden)]
-        #[serde(skip)]
-        pub __buffa_cached_size: ::buffa::__private::CachedSize,
     }
     impl ::core::fmt::Debug for EncodedQueryParam {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -4346,7 +4316,7 @@ pub mod raw_http_request {
         /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
         pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.RawHTTPRequest.EncodedQueryParam";
     }
-    unsafe impl ::buffa::DefaultInstance for EncodedQueryParam {
+    impl ::buffa::DefaultInstance for EncodedQueryParam {
         fn default_instance() -> &'static Self {
             static VALUE: ::buffa::__private::OnceBox<EncodedQueryParam> = ::buffa::__private::OnceBox::new();
             VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -4358,7 +4328,8 @@ pub mod raw_http_request {
         /// The result is a `u32`; the protobuf specification requires all
         /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
         /// compliant message will never overflow this type.
-        fn compute_size(&self) -> u32 {
+        #[allow(clippy::let_and_return)]
+        fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             let mut size = 0u32;
@@ -4366,7 +4337,9 @@ pub mod raw_http_request {
                 size += 1u32 + ::buffa::types::string_encoded_len(&self.name) as u32;
             }
             if self.value.is_set() {
-                let inner_size = self.value.compute_size();
+                let __slot = __cache.reserve();
+                let inner_size = self.value.compute_size(__cache);
+                __cache.set(__slot, inner_size);
                 size
                     += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                         + inner_size;
@@ -4375,10 +4348,13 @@ pub mod raw_http_request {
                 size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
             }
             size += self.__buffa_unknown_fields.encoded_len() as u32;
-            self.__buffa_cached_size.set(size);
             size
         }
-        fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+        fn write_to(
+            &self,
+            __cache: &mut ::buffa::SizeCache,
+            buf: &mut impl ::buffa::bytes::BufMut,
+        ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if !self.name.is_empty() {
@@ -4395,8 +4371,8 @@ pub mod raw_http_request {
                         ::buffa::encoding::WireType::LengthDelimited,
                     )
                     .encode(buf);
-                ::buffa::encoding::encode_varint(self.value.cached_size() as u64, buf);
-                self.value.write_to(buf);
+                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                self.value.write_to(__cache, buf);
             }
             if self.base64_encode {
                 ::buffa::encoding::Tag::new(3u32, ::buffa::encoding::WireType::Varint)
@@ -4457,15 +4433,11 @@ pub mod raw_http_request {
             }
             ::core::result::Result::Ok(())
         }
-        fn cached_size(&self) -> u32 {
-            self.__buffa_cached_size.get()
-        }
         fn clear(&mut self) {
             self.name.clear();
             self.value = ::buffa::MessageField::none();
             self.base64_encode = false;
             self.__buffa_unknown_fields.clear();
-            self.__buffa_cached_size.set(0);
         }
     }
     impl ::buffa::ExtensionSet for EncodedQueryParam {
@@ -4514,13 +4486,10 @@ pub struct MessageContents {
     )]
     pub compression: ::buffa::EnumValue<Compression>,
     #[serde(flatten)]
-    pub data: Option<__buffa::oneof::message_contents::Data>,
+    pub data: ::core::option::Option<__buffa::oneof::message_contents::Data>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for MessageContents {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -4537,7 +4506,7 @@ impl MessageContents {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.MessageContents";
 }
-unsafe impl ::buffa::DefaultInstance for MessageContents {
+impl ::buffa::DefaultInstance for MessageContents {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<MessageContents> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -4549,7 +4518,8 @@ impl ::buffa::Message for MessageContents {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -4568,7 +4538,9 @@ impl ::buffa::Message for MessageContents {
                     size += 1u32 + ::buffa::types::string_encoded_len(x) as u32;
                 }
                 __buffa::oneof::message_contents::Data::BinaryMessage(x) => {
-                    let inner = x.compute_size();
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
                     size
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
@@ -4576,10 +4548,13 @@ impl ::buffa::Message for MessageContents {
             }
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         {
@@ -4614,8 +4589,8 @@ impl ::buffa::Message for MessageContents {
                             ::buffa::encoding::WireType::LengthDelimited,
                         )
                         .encode(buf);
-                    ::buffa::encoding::encode_varint(x.cached_size() as u64, buf);
-                    x.write_to(buf);
+                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    x.write_to(__cache, buf);
                 }
             }
         }
@@ -4708,14 +4683,10 @@ impl ::buffa::Message for MessageContents {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.compression = ::buffa::EnumValue::from(0);
         self.data = ::core::option::Option::None;
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for MessageContents {
@@ -4904,9 +4875,6 @@ pub struct StreamContents {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for StreamContents {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -4920,7 +4888,7 @@ impl StreamContents {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.StreamContents";
 }
-unsafe impl ::buffa::DefaultInstance for StreamContents {
+impl ::buffa::DefaultInstance for StreamContents {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<StreamContents> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -4932,21 +4900,27 @@ impl ::buffa::Message for StreamContents {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         for v in &self.items {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         for v in &self.items {
@@ -4955,8 +4929,8 @@ impl ::buffa::Message for StreamContents {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -4990,13 +4964,9 @@ impl ::buffa::Message for StreamContents {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.items.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for StreamContents {
@@ -5052,7 +5022,7 @@ pub mod stream_contents {
             with = "::buffa::json_helpers::opt_uint32",
             skip_serializing_if = "::core::option::Option::is_none"
         )]
-        pub length: Option<u32>,
+        pub length: ::core::option::Option<u32>,
         /// Field 3: `payload`
         #[serde(
             rename = "payload",
@@ -5062,9 +5032,6 @@ pub mod stream_contents {
         #[serde(skip)]
         #[doc(hidden)]
         pub __buffa_unknown_fields: ::buffa::UnknownFields,
-        #[doc(hidden)]
-        #[serde(skip)]
-        pub __buffa_cached_size: ::buffa::__private::CachedSize,
     }
     impl ::core::fmt::Debug for StreamItem {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -5082,7 +5049,7 @@ pub mod stream_contents {
         /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
         pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.StreamContents.StreamItem";
     }
-    unsafe impl ::buffa::DefaultInstance for StreamItem {
+    impl ::buffa::DefaultInstance for StreamItem {
         fn default_instance() -> &'static Self {
             static VALUE: ::buffa::__private::OnceBox<StreamItem> = ::buffa::__private::OnceBox::new();
             VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -5094,7 +5061,8 @@ pub mod stream_contents {
         /// The result is a `u32`; the protobuf specification requires all
         /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
         /// compliant message will never overflow this type.
-        fn compute_size(&self) -> u32 {
+        #[allow(clippy::let_and_return)]
+        fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             let mut size = 0u32;
@@ -5105,16 +5073,21 @@ pub mod stream_contents {
                 size += 1u32 + ::buffa::types::uint32_encoded_len(v) as u32;
             }
             if self.payload.is_set() {
-                let inner_size = self.payload.compute_size();
+                let __slot = __cache.reserve();
+                let inner_size = self.payload.compute_size(__cache);
+                __cache.set(__slot, inner_size);
                 size
                     += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                         + inner_size;
             }
             size += self.__buffa_unknown_fields.encoded_len() as u32;
-            self.__buffa_cached_size.set(size);
             size
         }
-        fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+        fn write_to(
+            &self,
+            __cache: &mut ::buffa::SizeCache,
+            buf: &mut impl ::buffa::bytes::BufMut,
+        ) {
             #[allow(unused_imports)]
             use ::buffa::Enumeration as _;
             if self.flags != 0u32 {
@@ -5133,8 +5106,8 @@ pub mod stream_contents {
                         ::buffa::encoding::WireType::LengthDelimited,
                     )
                     .encode(buf);
-                ::buffa::encoding::encode_varint(self.payload.cached_size() as u64, buf);
-                self.payload.write_to(buf);
+                ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                self.payload.write_to(__cache, buf);
             }
             self.__buffa_unknown_fields.write_to(buf);
         }
@@ -5192,15 +5165,11 @@ pub mod stream_contents {
             }
             ::core::result::Result::Ok(())
         }
-        fn cached_size(&self) -> u32 {
-            self.__buffa_cached_size.get()
-        }
         fn clear(&mut self) {
             self.flags = 0u32;
             self.length = ::core::option::Option::None;
             self.payload = ::buffa::MessageField::none();
             self.__buffa_unknown_fields.clear();
-            self.__buffa_cached_size.set(0);
         }
     }
     impl ::buffa::ExtensionSet for StreamItem {
@@ -5269,13 +5238,10 @@ pub struct RawHTTPResponse {
     )]
     pub trailers: ::buffa::alloc::vec::Vec<Header>,
     #[serde(flatten)]
-    pub body: Option<__buffa::oneof::raw_http_response::Body>,
+    pub body: ::core::option::Option<__buffa::oneof::raw_http_response::Body>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for RawHTTPResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -5294,7 +5260,7 @@ impl RawHTTPResponse {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.RawHTTPResponse";
 }
-unsafe impl ::buffa::DefaultInstance for RawHTTPResponse {
+impl ::buffa::DefaultInstance for RawHTTPResponse {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<RawHTTPResponse> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -5306,7 +5272,8 @@ impl ::buffa::Message for RawHTTPResponse {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -5314,13 +5281,17 @@ impl ::buffa::Message for RawHTTPResponse {
             size += 1u32 + ::buffa::types::uint32_encoded_len(self.status_code) as u32;
         }
         for v in &self.headers {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.trailers {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -5328,13 +5299,17 @@ impl ::buffa::Message for RawHTTPResponse {
         if let ::core::option::Option::Some(ref v) = self.body {
             match v {
                 __buffa::oneof::raw_http_response::Body::Unary(x) => {
-                    let inner = x.compute_size();
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
                     size
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
                 }
                 __buffa::oneof::raw_http_response::Body::Stream(x) => {
-                    let inner = x.compute_size();
+                    let __slot = __cache.reserve();
+                    let inner = x.compute_size(__cache);
+                    __cache.set(__slot, inner);
                     size
                         += 1u32 + ::buffa::encoding::varint_len(inner as u64) as u32
                             + inner;
@@ -5342,10 +5317,13 @@ impl ::buffa::Message for RawHTTPResponse {
             }
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.status_code != 0u32 {
@@ -5359,8 +5337,8 @@ impl ::buffa::Message for RawHTTPResponse {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         for v in &self.trailers {
             ::buffa::encoding::Tag::new(
@@ -5368,8 +5346,8 @@ impl ::buffa::Message for RawHTTPResponse {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         if let ::core::option::Option::Some(ref v) = self.body {
             match v {
@@ -5379,8 +5357,8 @@ impl ::buffa::Message for RawHTTPResponse {
                             ::buffa::encoding::WireType::LengthDelimited,
                         )
                         .encode(buf);
-                    ::buffa::encoding::encode_varint(x.cached_size() as u64, buf);
-                    x.write_to(buf);
+                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    x.write_to(__cache, buf);
                 }
                 __buffa::oneof::raw_http_response::Body::Stream(x) => {
                     ::buffa::encoding::Tag::new(
@@ -5388,8 +5366,8 @@ impl ::buffa::Message for RawHTTPResponse {
                             ::buffa::encoding::WireType::LengthDelimited,
                         )
                         .encode(buf);
-                    ::buffa::encoding::encode_varint(x.cached_size() as u64, buf);
-                    x.write_to(buf);
+                    ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+                    x.write_to(__cache, buf);
                 }
             }
         }
@@ -5501,16 +5479,12 @@ impl ::buffa::Message for RawHTTPResponse {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.status_code = 0u32;
         self.headers.clear();
         self.trailers.clear();
         self.body = ::core::option::Option::None;
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for RawHTTPResponse {

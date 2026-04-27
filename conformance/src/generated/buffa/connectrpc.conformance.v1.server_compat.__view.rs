@@ -78,8 +78,6 @@ pub struct ServerCompatRequestView<'a> {
         super::super::__buffa::view::TLSCredsView<'a>,
     >,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> ServerCompatRequestView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -222,6 +220,7 @@ impl<'a> ::buffa::MessageView<'a> for ServerCompatRequestView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ServerCompatRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -249,8 +248,8 @@ impl<'a> ::buffa::MessageView<'a> for ServerCompatRequestView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for ServerCompatRequestView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -281,17 +280,22 @@ impl<'a> ::buffa::ViewEncode<'a> for ServerCompatRequestView<'a> {
                         as u32;
         }
         if self.server_creds.is_set() {
-            let inner_size = self.server_creds.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.server_creds.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         {
@@ -334,26 +338,23 @@ impl<'a> ::buffa::ViewEncode<'a> for ServerCompatRequestView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.server_creds.cached_size() as u64,
-                buf,
-            );
-            self.server_creds.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.server_creds.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for ServerCompatRequestView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for ServerCompatRequestView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<ServerCompatRequestView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <ServerCompatRequestView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for ServerCompatRequestView<'a> {
-    type Static = ServerCompatRequestView<'static>;
 }
 /// The outcome of one ServerCompatRequest.
 #[derive(Clone, Debug, Default)]
@@ -375,8 +376,6 @@ pub struct ServerCompatResponseView<'a> {
     /// Field 3: `pem_cert`
     pub pem_cert: &'a [u8],
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> ServerCompatResponseView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -469,6 +468,7 @@ impl<'a> ::buffa::MessageView<'a> for ServerCompatResponseView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ServerCompatResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -486,8 +486,8 @@ impl<'a> ::buffa::MessageView<'a> for ServerCompatResponseView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for ServerCompatResponseView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -501,11 +501,14 @@ impl<'a> ::buffa::ViewEncode<'a> for ServerCompatResponseView<'a> {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.pem_cert) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.host.is_empty() {
@@ -531,16 +534,16 @@ impl<'a> ::buffa::ViewEncode<'a> for ServerCompatResponseView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for ServerCompatResponseView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for ServerCompatResponseView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<ServerCompatResponseView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <ServerCompatResponseView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for ServerCompatResponseView<'a> {
-    type Static = ServerCompatResponseView<'static>;
 }

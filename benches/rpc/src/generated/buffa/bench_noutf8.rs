@@ -15,9 +15,6 @@ pub struct LogRequest {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for LogRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -31,7 +28,7 @@ impl LogRequest {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/bench.noutf8.v1.LogRequest";
 }
-unsafe impl ::buffa::DefaultInstance for LogRequest {
+impl ::buffa::DefaultInstance for LogRequest {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<LogRequest> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -43,21 +40,27 @@ impl ::buffa::Message for LogRequest {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         for v in &self.records {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         for v in &self.records {
@@ -66,8 +69,8 @@ impl ::buffa::Message for LogRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -101,13 +104,9 @@ impl ::buffa::Message for LogRequest {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.records.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for LogRequest {
@@ -150,7 +149,7 @@ pub struct LogRecord {
         with = "::buffa::json_helpers::opt_int64",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub timestamp_nanos: Option<i64>,
+    pub timestamp_nanos: ::core::option::Option<i64>,
     /// Field 2: `service_name`
     #[serde(
         rename = "serviceName",
@@ -158,7 +157,7 @@ pub struct LogRecord {
         with = "::buffa::json_helpers::opt_bytes",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub service_name: Option<::buffa::alloc::vec::Vec<u8>>,
+    pub service_name: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
     /// Field 3: `instance_id`
     #[serde(
         rename = "instanceId",
@@ -166,21 +165,21 @@ pub struct LogRecord {
         with = "::buffa::json_helpers::opt_bytes",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub instance_id: Option<::buffa::alloc::vec::Vec<u8>>,
+    pub instance_id: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
     /// Field 4: `severity`
     #[serde(
         rename = "severity",
         with = "::buffa::json_helpers::opt_enum",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub severity: Option<::buffa::EnumValue<log_record::Severity>>,
+    pub severity: ::core::option::Option<::buffa::EnumValue<log_record::Severity>>,
     /// Field 5: `message`
     #[serde(
         rename = "message",
         with = "::buffa::json_helpers::opt_bytes",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub message: Option<::buffa::alloc::vec::Vec<u8>>,
+    pub message: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
     /// Field 6: `labels`
     #[serde(
         rename = "labels",
@@ -198,7 +197,7 @@ pub struct LogRecord {
         with = "::buffa::json_helpers::opt_bytes",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub trace_id: Option<::buffa::alloc::vec::Vec<u8>>,
+    pub trace_id: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
     /// Field 8: `span_id`
     #[serde(
         rename = "spanId",
@@ -206,7 +205,7 @@ pub struct LogRecord {
         with = "::buffa::json_helpers::opt_bytes",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub span_id: Option<::buffa::alloc::vec::Vec<u8>>,
+    pub span_id: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
     /// Field 9: `source`
     #[serde(
         rename = "source",
@@ -216,9 +215,6 @@ pub struct LogRecord {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for LogRecord {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -242,7 +238,7 @@ impl LogRecord {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/bench.noutf8.v1.LogRecord";
 }
-unsafe impl ::buffa::DefaultInstance for LogRecord {
+impl ::buffa::DefaultInstance for LogRecord {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<LogRecord> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -254,7 +250,8 @@ impl ::buffa::Message for LogRecord {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -280,11 +277,14 @@ impl ::buffa::Message for LogRecord {
             size += 1u32 + ::buffa::types::bytes_encoded_len(v) as u32;
         }
         if self.source.is_set() {
-            let inner_size = self.source.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.source.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
+        #[allow(clippy::for_kv_map)]
         for (k, v) in &self.labels {
             let entry_size: u32 = 1u32 + ::buffa::types::bytes_encoded_len(k) as u32
                 + 1u32 + ::buffa::types::bytes_encoded_len(v) as u32;
@@ -293,10 +293,13 @@ impl ::buffa::Message for LogRecord {
                     + entry_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if let Some(v) = self.timestamp_nanos {
@@ -355,8 +358,8 @@ impl ::buffa::Message for LogRecord {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.source.cached_size() as u64, buf);
-            self.source.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.source.write_to(__cache, buf);
         }
         for (k, v) in &self.labels {
             let entry_size: u32 = 1u32 + ::buffa::types::bytes_encoded_len(k) as u32
@@ -566,9 +569,6 @@ impl ::buffa::Message for LogRecord {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.timestamp_nanos = ::core::option::Option::None;
         self.service_name = ::core::option::Option::None;
@@ -580,7 +580,6 @@ impl ::buffa::Message for LogRecord {
         self.source = ::buffa::MessageField::none();
         self.labels.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for LogRecord {
@@ -771,27 +770,24 @@ pub struct LogSource {
         with = "::buffa::json_helpers::opt_bytes",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub file: Option<::buffa::alloc::vec::Vec<u8>>,
+    pub file: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
     /// Field 2: `line`
     #[serde(
         rename = "line",
         with = "::buffa::json_helpers::opt_int32",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub line: Option<i32>,
+    pub line: ::core::option::Option<i32>,
     /// Field 3: `function`
     #[serde(
         rename = "function",
         with = "::buffa::json_helpers::opt_bytes",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub function: Option<::buffa::alloc::vec::Vec<u8>>,
+    pub function: ::core::option::Option<::buffa::alloc::vec::Vec<u8>>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for LogSource {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -809,7 +805,7 @@ impl LogSource {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/bench.noutf8.v1.LogSource";
 }
-unsafe impl ::buffa::DefaultInstance for LogSource {
+impl ::buffa::DefaultInstance for LogSource {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<LogSource> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -821,7 +817,8 @@ impl ::buffa::Message for LogSource {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -835,10 +832,13 @@ impl ::buffa::Message for LogSource {
             size += 1u32 + ::buffa::types::bytes_encoded_len(v) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if let Some(ref v) = self.file {
@@ -920,15 +920,11 @@ impl ::buffa::Message for LogSource {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.file = ::core::option::Option::None;
         self.line = ::core::option::Option::None;
         self.function = ::core::option::Option::None;
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for LogSource {
@@ -970,7 +966,7 @@ pub struct LogIngestResponse {
         with = "::buffa::json_helpers::opt_int32",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub count: Option<i32>,
+    pub count: ::core::option::Option<i32>,
     /// Field 2: `total_message_bytes`
     #[serde(
         rename = "totalMessageBytes",
@@ -978,7 +974,7 @@ pub struct LogIngestResponse {
         with = "::buffa::json_helpers::opt_int64",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub total_message_bytes: Option<i64>,
+    pub total_message_bytes: ::core::option::Option<i64>,
     /// Field 3: `total_label_bytes`
     #[serde(
         rename = "totalLabelBytes",
@@ -986,7 +982,7 @@ pub struct LogIngestResponse {
         with = "::buffa::json_helpers::opt_int64",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub total_label_bytes: Option<i64>,
+    pub total_label_bytes: ::core::option::Option<i64>,
     /// Field 4: `max_severity`
     #[serde(
         rename = "maxSeverity",
@@ -994,13 +990,10 @@ pub struct LogIngestResponse {
         with = "::buffa::json_helpers::opt_int32",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub max_severity: Option<i32>,
+    pub max_severity: ::core::option::Option<i32>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for LogIngestResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1019,7 +1012,7 @@ impl LogIngestResponse {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/bench.noutf8.v1.LogIngestResponse";
 }
-unsafe impl ::buffa::DefaultInstance for LogIngestResponse {
+impl ::buffa::DefaultInstance for LogIngestResponse {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<LogIngestResponse> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -1031,7 +1024,8 @@ impl ::buffa::Message for LogIngestResponse {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -1048,10 +1042,13 @@ impl ::buffa::Message for LogIngestResponse {
             size += 1u32 + ::buffa::types::int32_encoded_len(v) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if let Some(v) = self.count {
@@ -1142,16 +1139,12 @@ impl ::buffa::Message for LogIngestResponse {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.count = ::core::option::Option::None;
         self.total_message_bytes = ::core::option::Option::None;
         self.total_label_bytes = ::core::option::Option::None;
         self.max_severity = ::core::option::Option::None;
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for LogIngestResponse {

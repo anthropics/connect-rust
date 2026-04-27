@@ -1004,9 +1004,6 @@ pub struct Config {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for Config {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1024,7 +1021,7 @@ impl Config {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.Config";
 }
-unsafe impl ::buffa::DefaultInstance for Config {
+impl ::buffa::DefaultInstance for Config {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<Config> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -1036,33 +1033,43 @@ impl ::buffa::Message for Config {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.features.is_set() {
-            let inner_size = self.features.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.features.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.include_cases {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         for v in &self.exclude_cases {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.features.is_set() {
@@ -1071,8 +1078,8 @@ impl ::buffa::Message for Config {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.features.cached_size() as u64, buf);
-            self.features.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.features.write_to(__cache, buf);
         }
         for v in &self.include_cases {
             ::buffa::encoding::Tag::new(
@@ -1080,8 +1087,8 @@ impl ::buffa::Message for Config {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         for v in &self.exclude_cases {
             ::buffa::encoding::Tag::new(
@@ -1089,8 +1096,8 @@ impl ::buffa::Message for Config {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -1150,15 +1157,11 @@ impl ::buffa::Message for Config {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.features = ::buffa::MessageField::none();
         self.include_cases.clear();
         self.exclude_cases.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for Config {
@@ -1266,7 +1269,7 @@ pub struct Features {
         alias = "supports_h2c",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub supports_h2c: Option<bool>,
+    pub supports_h2c: ::core::option::Option<bool>,
     /// Whether TLS is supported.
     /// If absent, true is assumed.
     ///
@@ -1276,7 +1279,7 @@ pub struct Features {
         alias = "supports_tls",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub supports_tls: Option<bool>,
+    pub supports_tls: ::core::option::Option<bool>,
     /// Whether the client supports TLS certificates.
     /// If absent, false is assumed. This should not be set if
     /// supports_tls is false.
@@ -1287,7 +1290,7 @@ pub struct Features {
         alias = "supports_tls_client_certs",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub supports_tls_client_certs: Option<bool>,
+    pub supports_tls_client_certs: ::core::option::Option<bool>,
     /// Whether trailers are supported.
     /// If absent, true is assumed. If false, implies that gRPC protocol is not allowed.
     ///
@@ -1297,7 +1300,7 @@ pub struct Features {
         alias = "supports_trailers",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub supports_trailers: Option<bool>,
+    pub supports_trailers: ::core::option::Option<bool>,
     /// Whether half duplex bidi streams are supported over HTTP/1.1.
     /// If absent, false is assumed.
     ///
@@ -1307,7 +1310,7 @@ pub struct Features {
         alias = "supports_half_duplex_bidi_over_http1",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub supports_half_duplex_bidi_over_http1: Option<bool>,
+    pub supports_half_duplex_bidi_over_http1: ::core::option::Option<bool>,
     /// Whether Connect via GET is supported.
     /// If absent, true is assumed.
     ///
@@ -1317,7 +1320,7 @@ pub struct Features {
         alias = "supports_connect_get",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub supports_connect_get: Option<bool>,
+    pub supports_connect_get: ::core::option::Option<bool>,
     /// Whether a message receive limit is supported.
     /// If absent, true is assumed.
     ///
@@ -1327,13 +1330,10 @@ pub struct Features {
         alias = "supports_message_receive_limit",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub supports_message_receive_limit: Option<bool>,
+    pub supports_message_receive_limit: ::core::option::Option<bool>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for Features {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -1366,7 +1366,7 @@ impl Features {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.Features";
 }
-unsafe impl ::buffa::DefaultInstance for Features {
+impl ::buffa::DefaultInstance for Features {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<Features> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -1378,7 +1378,8 @@ impl ::buffa::Message for Features {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -1449,10 +1450,13 @@ impl ::buffa::Message for Features {
                 += 1u32 + ::buffa::encoding::varint_len(payload as u64) as u32 + payload;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if let Some(v) = self.supports_h2c {
@@ -1859,9 +1863,6 @@ impl ::buffa::Message for Features {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.supports_h2c = ::core::option::Option::None;
         self.supports_tls = ::core::option::Option::None;
@@ -1876,7 +1877,6 @@ impl ::buffa::Message for Features {
         self.compressions.clear();
         self.stream_types.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for Features {
@@ -1976,7 +1976,7 @@ pub struct ConfigCase {
         alias = "use_tls",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub use_tls: Option<bool>,
+    pub use_tls: ::core::option::Option<bool>,
     /// If absent, indicates cases without client certs but also cases
     /// that use client certs if features indicate they are supported.
     ///
@@ -1986,7 +1986,7 @@ pub struct ConfigCase {
         alias = "use_tls_client_certs",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub use_tls_client_certs: Option<bool>,
+    pub use_tls_client_certs: ::core::option::Option<bool>,
     /// If absent, indicates cases that do not test message receive
     /// limits but also cases that do test message receive limits if
     /// features indicate they are supported.
@@ -1997,13 +1997,10 @@ pub struct ConfigCase {
         alias = "use_message_receive_limit",
         skip_serializing_if = "::core::option::Option::is_none"
     )]
-    pub use_message_receive_limit: Option<bool>,
+    pub use_message_receive_limit: ::core::option::Option<bool>,
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for ConfigCase {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -2026,7 +2023,7 @@ impl ConfigCase {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ConfigCase";
 }
-unsafe impl ::buffa::DefaultInstance for ConfigCase {
+impl ::buffa::DefaultInstance for ConfigCase {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<ConfigCase> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -2038,7 +2035,8 @@ impl ::buffa::Message for ConfigCase {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -2082,10 +2080,13 @@ impl ::buffa::Message for ConfigCase {
             size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         {
@@ -2259,9 +2260,6 @@ impl ::buffa::Message for ConfigCase {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.version = ::buffa::EnumValue::from(0);
         self.protocol = ::buffa::EnumValue::from(0);
@@ -2272,7 +2270,6 @@ impl ::buffa::Message for ConfigCase {
         self.use_tls_client_certs = ::core::option::Option::None;
         self.use_message_receive_limit = ::core::option::Option::None;
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for ConfigCase {
@@ -2328,9 +2325,6 @@ pub struct TLSCreds {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for TLSCreds {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -2347,7 +2341,7 @@ impl TLSCreds {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.TLSCreds";
 }
-unsafe impl ::buffa::DefaultInstance for TLSCreds {
+impl ::buffa::DefaultInstance for TLSCreds {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<TLSCreds> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -2359,7 +2353,8 @@ impl ::buffa::Message for TLSCreds {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -2370,10 +2365,13 @@ impl ::buffa::Message for TLSCreds {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.key) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.cert.is_empty() {
@@ -2432,14 +2430,10 @@ impl ::buffa::Message for TLSCreds {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.cert.clear();
         self.key.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for TLSCreds {

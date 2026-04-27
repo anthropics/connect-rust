@@ -201,7 +201,7 @@ fn bench_unary_large_grpc(c: &mut Criterion) {
     let req = large_request();
     let payload_size = {
         use buffa::Message;
-        req.compute_size() as u64
+        req.encoded_len() as u64
     };
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -317,7 +317,7 @@ fn bench_unary_logs_grpc(c: &mut Criterion) {
     let req = log_request(50);
     let payload_size = {
         use buffa::Message;
-        req.compute_size() as u64
+        req.encoded_len() as u64
     };
 
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -348,7 +348,7 @@ fn bench_unary_logs_connect(c: &mut Criterion) {
     let req = log_request(50);
     let payload_size = {
         use buffa::Message;
-        req.compute_size() as u64
+        req.encoded_len() as u64
     };
 
     let rt = tokio::runtime::Runtime::new().unwrap();

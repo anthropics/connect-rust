@@ -114,9 +114,6 @@ pub struct ServerCompatRequest {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for ServerCompatRequest {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -137,7 +134,7 @@ impl ServerCompatRequest {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ServerCompatRequest";
 }
-unsafe impl ::buffa::DefaultInstance for ServerCompatRequest {
+impl ::buffa::DefaultInstance for ServerCompatRequest {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<ServerCompatRequest> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -149,7 +146,8 @@ impl ::buffa::Message for ServerCompatRequest {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -180,16 +178,21 @@ impl ::buffa::Message for ServerCompatRequest {
                         as u32;
         }
         if self.server_creds.is_set() {
-            let inner_size = self.server_creds.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.server_creds.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         {
@@ -232,11 +235,8 @@ impl ::buffa::Message for ServerCompatRequest {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(
-                self.server_creds.cached_size() as u64,
-                buf,
-            );
-            self.server_creds.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.server_creds.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -326,9 +326,6 @@ impl ::buffa::Message for ServerCompatRequest {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.protocol = ::buffa::EnumValue::from(0);
         self.http_version = ::buffa::EnumValue::from(0);
@@ -337,7 +334,6 @@ impl ::buffa::Message for ServerCompatRequest {
         self.message_receive_limit = 0u32;
         self.server_creds = ::buffa::MessageField::none();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for ServerCompatRequest {
@@ -409,9 +405,6 @@ pub struct ServerCompatResponse {
     #[serde(skip)]
     #[doc(hidden)]
     pub __buffa_unknown_fields: ::buffa::UnknownFields,
-    #[doc(hidden)]
-    #[serde(skip)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl ::core::fmt::Debug for ServerCompatResponse {
     fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
@@ -429,7 +422,7 @@ impl ServerCompatResponse {
     /// Format: `type.googleapis.com/<fully.qualified.TypeName>`
     pub const TYPE_URL: &'static str = "type.googleapis.com/connectrpc.conformance.v1.ServerCompatResponse";
 }
-unsafe impl ::buffa::DefaultInstance for ServerCompatResponse {
+impl ::buffa::DefaultInstance for ServerCompatResponse {
     fn default_instance() -> &'static Self {
         static VALUE: ::buffa::__private::OnceBox<ServerCompatResponse> = ::buffa::__private::OnceBox::new();
         VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
@@ -441,7 +434,8 @@ impl ::buffa::Message for ServerCompatResponse {
     /// The result is a `u32`; the protobuf specification requires all
     /// messages to fit within 2 GiB (2,147,483,647 bytes), so a
     /// compliant message will never overflow this type.
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -455,10 +449,13 @@ impl ::buffa::Message for ServerCompatResponse {
             size += 1u32 + ::buffa::types::bytes_encoded_len(&self.pem_cert) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.host.is_empty() {
@@ -532,15 +529,11 @@ impl ::buffa::Message for ServerCompatResponse {
         }
         ::core::result::Result::Ok(())
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
     fn clear(&mut self) {
         self.host.clear();
         self.port = 0u32;
         self.pem_cert.clear();
         self.__buffa_unknown_fields.clear();
-        self.__buffa_cached_size.set(0);
     }
 }
 impl ::buffa::ExtensionSet for ServerCompatResponse {

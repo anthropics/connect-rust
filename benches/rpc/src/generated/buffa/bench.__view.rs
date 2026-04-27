@@ -6,8 +6,6 @@ pub struct EchoRequestView<'a> {
     /// Field 1: `message`
     pub message: &'a str,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> EchoRequestView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -80,6 +78,7 @@ impl<'a> ::buffa::MessageView<'a> for EchoRequestView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::EchoRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -95,8 +94,8 @@ impl<'a> ::buffa::MessageView<'a> for EchoRequestView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for EchoRequestView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -104,11 +103,14 @@ impl<'a> ::buffa::ViewEncode<'a> for EchoRequestView<'a> {
             size += 1u32 + ::buffa::types::string_encoded_len(&self.message) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.message.is_empty() {
@@ -121,26 +123,24 @@ impl<'a> ::buffa::ViewEncode<'a> for EchoRequestView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for EchoRequestView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for EchoRequestView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<EchoRequestView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <EchoRequestView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for EchoRequestView<'a> {
-    type Static = EchoRequestView<'static>;
 }
 #[derive(Clone, Debug, Default)]
 pub struct EchoResponseView<'a> {
     /// Field 1: `message`
     pub message: &'a str,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> EchoResponseView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -213,6 +213,7 @@ impl<'a> ::buffa::MessageView<'a> for EchoResponseView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::EchoResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -228,8 +229,8 @@ impl<'a> ::buffa::MessageView<'a> for EchoResponseView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for EchoResponseView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -237,11 +238,14 @@ impl<'a> ::buffa::ViewEncode<'a> for EchoResponseView<'a> {
             size += 1u32 + ::buffa::types::string_encoded_len(&self.message) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.message.is_empty() {
@@ -254,18 +258,18 @@ impl<'a> ::buffa::ViewEncode<'a> for EchoResponseView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for EchoResponseView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for EchoResponseView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<EchoResponseView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <EchoResponseView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for EchoResponseView<'a> {
-    type Static = EchoResponseView<'static>;
 }
 /// Request with a realistic mix of field types.
 #[derive(Clone, Debug, Default)]
@@ -281,8 +285,6 @@ pub struct BenchRequestView<'a> {
     /// Field 2: `payload`
     pub payload: ::buffa::MessageFieldView<super::super::__buffa::view::PayloadView<'a>>,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> BenchRequestView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -379,6 +381,7 @@ impl<'a> ::buffa::MessageView<'a> for BenchRequestView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::BenchRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -402,8 +405,8 @@ impl<'a> ::buffa::MessageView<'a> for BenchRequestView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for BenchRequestView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -411,17 +414,22 @@ impl<'a> ::buffa::ViewEncode<'a> for BenchRequestView<'a> {
             size += 1u32 + ::buffa::types::int32_encoded_len(self.response_count) as u32;
         }
         if self.payload.is_set() {
-            let inner_size = self.payload.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.payload.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.response_count != 0i32 {
@@ -435,31 +443,29 @@ impl<'a> ::buffa::ViewEncode<'a> for BenchRequestView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.payload.cached_size() as u64, buf);
-            self.payload.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.payload.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for BenchRequestView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for BenchRequestView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<BenchRequestView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <BenchRequestView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for BenchRequestView<'a> {
-    type Static = BenchRequestView<'static>;
 }
 #[derive(Clone, Debug, Default)]
 pub struct BenchResponseView<'a> {
     /// Field 1: `payload`
     pub payload: ::buffa::MessageFieldView<super::super::__buffa::view::PayloadView<'a>>,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> BenchResponseView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -546,6 +552,7 @@ impl<'a> ::buffa::MessageView<'a> for BenchResponseView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::BenchResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -568,23 +575,28 @@ impl<'a> ::buffa::MessageView<'a> for BenchResponseView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for BenchResponseView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         if self.payload.is_set() {
-            let inner_size = self.payload.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.payload.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.payload.is_set() {
@@ -593,23 +605,23 @@ impl<'a> ::buffa::ViewEncode<'a> for BenchResponseView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.payload.cached_size() as u64, buf);
-            self.payload.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.payload.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for BenchResponseView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for BenchResponseView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<BenchResponseView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <BenchResponseView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for BenchResponseView<'a> {
-    type Static = BenchResponseView<'static>;
 }
 /// Exercises all major protobuf encoding paths.
 #[derive(Clone, Debug, Default)]
@@ -663,8 +675,6 @@ pub struct PayloadView<'a> {
     /// Field 15: `attributes` (map)
     pub attributes: ::buffa::MapView<'a, &'a str, &'a str>,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> PayloadView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -940,6 +950,7 @@ impl<'a> ::buffa::MessageView<'a> for PayloadView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::Payload {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -980,8 +991,8 @@ impl<'a> ::buffa::MessageView<'a> for PayloadView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for PayloadView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -1023,7 +1034,9 @@ impl<'a> ::buffa::ViewEncode<'a> for PayloadView<'a> {
             }
         }
         if self.metadata.is_set() {
-            let inner_size = self.metadata.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.metadata.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
@@ -1040,6 +1053,7 @@ impl<'a> ::buffa::ViewEncode<'a> for PayloadView<'a> {
         for v in &self.tags {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
+        #[allow(clippy::for_kv_map)]
         for (k, v) in &self.attributes {
             let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
                 + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
@@ -1048,11 +1062,14 @@ impl<'a> ::buffa::ViewEncode<'a> for PayloadView<'a> {
                     + entry_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.id != 0i32 {
@@ -1131,8 +1148,8 @@ impl<'a> ::buffa::ViewEncode<'a> for PayloadView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.metadata.cached_size() as u64, buf);
-            self.metadata.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.metadata.write_to(__cache, buf);
         }
         if !self.scores.is_empty() {
             let payload: u32 = self
@@ -1182,18 +1199,18 @@ impl<'a> ::buffa::ViewEncode<'a> for PayloadView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for PayloadView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for PayloadView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<PayloadView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <PayloadView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for PayloadView<'a> {
-    type Static = PayloadView<'static>;
 }
 #[derive(Clone, Debug, Default)]
 pub struct MetadataView<'a> {
@@ -1206,8 +1223,6 @@ pub struct MetadataView<'a> {
     /// Field 4: `headers` (map)
     pub headers: ::buffa::MapView<'a, &'a str, &'a str>,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> MetadataView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -1350,6 +1365,7 @@ impl<'a> ::buffa::MessageView<'a> for MetadataView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::Metadata {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -1372,8 +1388,8 @@ impl<'a> ::buffa::MessageView<'a> for MetadataView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for MetadataView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -1386,6 +1402,7 @@ impl<'a> ::buffa::ViewEncode<'a> for MetadataView<'a> {
         if self.created_at != 0i64 {
             size += 1u32 + ::buffa::types::int64_encoded_len(self.created_at) as u32;
         }
+        #[allow(clippy::for_kv_map)]
         for (k, v) in &self.headers {
             let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
                 + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
@@ -1394,11 +1411,14 @@ impl<'a> ::buffa::ViewEncode<'a> for MetadataView<'a> {
                     + entry_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.request_id.is_empty() {
@@ -1446,18 +1466,18 @@ impl<'a> ::buffa::ViewEncode<'a> for MetadataView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for MetadataView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for MetadataView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<MetadataView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <MetadataView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for MetadataView<'a> {
-    type Static = MetadataView<'static>;
 }
 /// String-heavy message modeled after structured log records.
 /// Many small-to-medium string fields and a map of labels — each one
@@ -1471,8 +1491,6 @@ pub struct LogRequestView<'a> {
         super::super::__buffa::view::LogRecordView<'a>,
     >,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> LogRequestView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -1555,6 +1573,7 @@ impl<'a> ::buffa::MessageView<'a> for LogRequestView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::LogRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -1570,23 +1589,28 @@ impl<'a> ::buffa::MessageView<'a> for LogRequestView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for LogRequestView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
         for v in &self.records {
-            let inner_size = v.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         for v in &self.records {
@@ -1595,31 +1619,29 @@ impl<'a> ::buffa::ViewEncode<'a> for LogRequestView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(v.cached_size() as u64, buf);
-            v.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for LogRequestView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for LogRequestView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<LogRequestView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <LogRequestView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for LogRequestView<'a> {
-    type Static = LogRequestView<'static>;
 }
 #[derive(Clone, Debug, Default)]
 pub struct LogResponseView<'a> {
     /// Field 1: `count`
     pub count: i32,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> LogResponseView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -1692,6 +1714,7 @@ impl<'a> ::buffa::MessageView<'a> for LogResponseView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::LogResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -1707,8 +1730,8 @@ impl<'a> ::buffa::MessageView<'a> for LogResponseView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for LogResponseView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -1716,11 +1739,14 @@ impl<'a> ::buffa::ViewEncode<'a> for LogResponseView<'a> {
             size += 1u32 + ::buffa::types::int32_encoded_len(self.count) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.count != 0i32 {
@@ -1730,18 +1756,18 @@ impl<'a> ::buffa::ViewEncode<'a> for LogResponseView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for LogResponseView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for LogResponseView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<LogResponseView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <LogResponseView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for LogResponseView<'a> {
-    type Static = LogResponseView<'static>;
 }
 #[derive(Clone, Debug, Default)]
 pub struct LogRecordView<'a> {
@@ -1766,8 +1792,6 @@ pub struct LogRecordView<'a> {
         super::super::__buffa::view::LogSourceView<'a>,
     >,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> LogRecordView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -1976,6 +2000,7 @@ impl<'a> ::buffa::MessageView<'a> for LogRecordView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::LogRecord {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -2010,8 +2035,8 @@ impl<'a> ::buffa::MessageView<'a> for LogRecordView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for LogRecordView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, __cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -2041,11 +2066,14 @@ impl<'a> ::buffa::ViewEncode<'a> for LogRecordView<'a> {
             size += 1u32 + ::buffa::types::string_encoded_len(&self.span_id) as u32;
         }
         if self.source.is_set() {
-            let inner_size = self.source.compute_size();
+            let __slot = __cache.reserve();
+            let inner_size = self.source.compute_size(__cache);
+            __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
+        #[allow(clippy::for_kv_map)]
         for (k, v) in &self.labels {
             let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
                 + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
@@ -2054,11 +2082,14 @@ impl<'a> ::buffa::ViewEncode<'a> for LogRecordView<'a> {
                     + entry_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        __cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.timestamp_nanos != 0i64 {
@@ -2120,8 +2151,8 @@ impl<'a> ::buffa::ViewEncode<'a> for LogRecordView<'a> {
                     ::buffa::encoding::WireType::LengthDelimited,
                 )
                 .encode(buf);
-            ::buffa::encoding::encode_varint(self.source.cached_size() as u64, buf);
-            self.source.write_to(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.source.write_to(__cache, buf);
         }
         for (k, v) in &self.labels {
             let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
@@ -2147,18 +2178,18 @@ impl<'a> ::buffa::ViewEncode<'a> for LogRecordView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for LogRecordView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for LogRecordView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<LogRecordView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <LogRecordView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for LogRecordView<'a> {
-    type Static = LogRecordView<'static>;
 }
 #[derive(Clone, Debug, Default)]
 pub struct LogSourceView<'a> {
@@ -2169,8 +2200,6 @@ pub struct LogSourceView<'a> {
     /// Field 3: `function`
     pub function: &'a str,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> LogSourceView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -2263,6 +2292,7 @@ impl<'a> ::buffa::MessageView<'a> for LogSourceView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::LogSource {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -2280,8 +2310,8 @@ impl<'a> ::buffa::MessageView<'a> for LogSourceView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for LogSourceView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -2295,11 +2325,14 @@ impl<'a> ::buffa::ViewEncode<'a> for LogSourceView<'a> {
             size += 1u32 + ::buffa::types::string_encoded_len(&self.function) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if !self.file.is_empty() {
@@ -2325,18 +2358,18 @@ impl<'a> ::buffa::ViewEncode<'a> for LogSourceView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for LogSourceView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for LogSourceView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<LogSourceView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <LogSourceView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for LogSourceView<'a> {
-    type Static = LogSourceView<'static>;
 }
 #[derive(Clone, Debug, Default)]
 pub struct LogIngestResponseView<'a> {
@@ -2358,8 +2391,6 @@ pub struct LogIngestResponseView<'a> {
     /// Field 4: `max_severity`
     pub max_severity: i32,
     pub __buffa_unknown_fields: ::buffa::UnknownFieldsView<'a>,
-    #[doc(hidden)]
-    pub __buffa_cached_size: ::buffa::__private::CachedSize,
 }
 impl<'a> LogIngestResponseView<'a> {
     /// Decode from `buf`, enforcing a recursion depth limit for nested messages.
@@ -2462,6 +2493,7 @@ impl<'a> ::buffa::MessageView<'a> for LogIngestResponseView<'a> {
     }
     /// Convert this view to the owned message type.
     #[allow(clippy::redundant_closure, clippy::useless_conversion)]
+    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::LogIngestResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
@@ -2480,8 +2512,8 @@ impl<'a> ::buffa::MessageView<'a> for LogIngestResponseView<'a> {
     }
 }
 impl<'a> ::buffa::ViewEncode<'a> for LogIngestResponseView<'a> {
-    #[allow(clippy::needless_borrow)]
-    fn compute_size(&self) -> u32 {
+    #[allow(clippy::needless_borrow, clippy::let_and_return)]
+    fn compute_size(&self, _cache: &mut ::buffa::SizeCache) -> u32 {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
@@ -2502,11 +2534,14 @@ impl<'a> ::buffa::ViewEncode<'a> for LogIngestResponseView<'a> {
             size += 1u32 + ::buffa::types::int32_encoded_len(self.max_severity) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
-        self.__buffa_cached_size.set(size);
         size
     }
     #[allow(clippy::needless_borrow)]
-    fn write_to(&self, buf: &mut impl ::buffa::bytes::BufMut) {
+    fn write_to(
+        &self,
+        _cache: &mut ::buffa::SizeCache,
+        buf: &mut impl ::buffa::bytes::BufMut,
+    ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         if self.count != 0i32 {
@@ -2531,16 +2566,16 @@ impl<'a> ::buffa::ViewEncode<'a> for LogIngestResponseView<'a> {
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
-    fn cached_size(&self) -> u32 {
-        self.__buffa_cached_size.get()
-    }
 }
-unsafe impl ::buffa::DefaultViewInstance for LogIngestResponseView<'static> {
-    fn default_view_instance() -> &'static Self {
+impl<'v> ::buffa::DefaultViewInstance for LogIngestResponseView<'v> {
+    fn default_view_instance<'a>() -> &'a Self
+    where
+        Self: 'a,
+    {
         static VALUE: ::buffa::__private::OnceBox<LogIngestResponseView<'static>> = ::buffa::__private::OnceBox::new();
-        VALUE.get_or_init(|| ::buffa::alloc::boxed::Box::new(Self::default()))
+        VALUE
+            .get_or_init(|| ::buffa::alloc::boxed::Box::new(
+                <LogIngestResponseView<'static>>::default(),
+            ))
     }
-}
-unsafe impl<'a> ::buffa::HasDefaultViewInstance for LogIngestResponseView<'a> {
-    type Static = LogIngestResponseView<'static>;
 }

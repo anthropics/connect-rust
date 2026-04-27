@@ -20,6 +20,12 @@ increment the patch version.
   appended to buffa's `<stem>.rs` content file in the unified path,
   and emit their own `<pkg>.mod.rs` stitcher in the split path.
   `buffa_types::Any.value` is now `bytes::Bytes` (was `Vec<u8>`).
+  buffa's size cache is now externalized ([buffa#22]): generated
+  structs no longer carry `__buffa_cached_size`, and
+  `Message::compute_size`/`write_to` take `&mut SizeCache`. The
+  provided `encode_to_bytes()` / `encoded_len()` are unchanged;
+  connectrpc itself only uses those, but direct callers of
+  `compute_size()` should switch to `encoded_len()`.
 - **`connectrpc-codegen`**: `Options` now embeds the buffa
   `CodeGenConfig` directly as `Options::buffa` instead of mirroring
   individual fields ([#34]). The previous per-field shims
@@ -45,6 +51,7 @@ increment the patch version.
 
 [#34]: https://github.com/anthropics/connect-rust/issues/34
 [#61]: https://github.com/anthropics/connect-rust/issues/61
+[buffa#22]: https://github.com/anthropics/buffa/pull/22
 [buffa#55]: https://github.com/anthropics/buffa/pull/55
 [buffa#62]: https://github.com/anthropics/buffa/pull/62
 
