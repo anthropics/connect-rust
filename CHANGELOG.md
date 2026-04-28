@@ -59,9 +59,7 @@ increment the patch version.
   return `ServiceResult<ServiceStream<Out>>`. `Response::ok(body)` is
   the bare-body happy-path shorthand; for streaming bodies use
   `Response::stream_ok(s)`. `Encodable<M>` is the new "encodes as
-  M" bound on response bodies — the owned `M` and the
-  `MaybeBorrowed` view wrapper both implement it. The old
-  `Context` type is removed.
+  M" bound on response bodies. The old `Context` type is removed.
 
   ```rust
   // before
@@ -73,6 +71,19 @@ increment the patch version.
       Response::ok(SayResponse { ... })
   }
   ```
+- **View response bodies** ([#7]): unary and client-stream trait
+  methods are now `<'a>(&'a self, ...) -> ServiceResult<impl
+  Encodable<Out> + use<'a, Self>>`, so a handler can return a body
+  that borrows from `&self`. Codegen emits `impl Encodable<Out> for
+  OutView<'_>` and for `OwnedView<OutView<'static>>` per RPC output
+  type (proto via `ViewEncode`; JSON returns an `internal` error
+  since view types lack `Serialize`). The new
+  `MaybeBorrowed<M, V>` enum lets a handler return either: see
+  `benches/rpc/benches/filter_handler.rs` for a redaction example
+  (1.67x at the codec layer when no modification is needed).
+  `ViewHandler`/`ViewClientStreamingHandler` now take `CodecFormat`
+  and return the response already encoded, dropping the `Res` type
+  param.
 
 ### Added
 
