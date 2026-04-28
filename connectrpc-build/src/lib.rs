@@ -39,6 +39,8 @@ use buffa::Message;
 use buffa_codegen::generated::descriptor::FileDescriptorSet;
 use connectrpc_codegen::codegen::{self, Options};
 
+pub use connectrpc_codegen::codegen::CodeGenConfig;
+
 /// How to acquire a `FileDescriptorSet` from `.proto` files.
 #[derive(Debug, Clone, Default)]
 enum DescriptorSource {
@@ -103,20 +105,20 @@ impl Config {
     }
 
     /// Honor `features.utf8_validation = NONE` by emitting `Vec<u8>`/`&[u8]`
-    /// for such string fields. See [`Options::strict_utf8_mapping`].
+    /// for such string fields. See [`CodeGenConfig::strict_utf8_mapping`].
     #[must_use]
     pub fn strict_utf8_mapping(mut self, enabled: bool) -> Self {
-        self.options.strict_utf8_mapping = enabled;
+        self.options.buffa.strict_utf8_mapping = enabled;
         self
     }
 
     /// Emit `serde` derives and proto3 JSON helpers (default: true).
     ///
     /// Disable only for binary-only clients; the Connect protocol's JSON
-    /// codec requires this. See [`Options::generate_json`].
+    /// codec requires this. See [`CodeGenConfig::generate_json`].
     #[must_use]
     pub fn generate_json(mut self, enabled: bool) -> Self {
-        self.options.generate_json = enabled;
+        self.options.buffa.generate_json = enabled;
         self
     }
 
@@ -125,10 +127,26 @@ impl Config {
     ///
     /// Set to `false` when the generated files are `include!`d into the
     /// same module — the identically-named functions would otherwise
-    /// collide. See [`Options::emit_register_fn`].
+    /// collide. See [`CodeGenConfig::emit_register_fn`].
     #[must_use]
     pub fn emit_register_fn(mut self, enabled: bool) -> Self {
-        self.options.emit_register_fn = enabled;
+        self.options.buffa.emit_register_fn = enabled;
+        self
+    }
+
+    /// Replace the underlying buffa [`CodeGenConfig`] wholesale.
+    ///
+    /// Any buffa knob not surfaced as a builder method here can be set this
+    /// way. The convenience builders above remain available for the common
+    /// cases. `generate_views` is forced to `true` regardless (service
+    /// stubs require view types); see [`Options::buffa`].
+    ///
+    /// Calls to the convenience builders above made *before* this method
+    /// are discarded; calls made *after* override individual fields in the
+    /// supplied config.
+    #[must_use]
+    pub fn buffa_config(mut self, config: CodeGenConfig) -> Self {
+        self.options.buffa = config;
         self
     }
 
@@ -552,19 +570,27 @@ mod tests {
             .include_file("_inc.rs");
         assert_eq!(cfg.files.len(), 2);
         assert_eq!(cfg.includes.len(), 1);
-        assert!(cfg.options.strict_utf8_mapping);
-        assert!(!cfg.options.generate_json);
-        assert!(!cfg.options.emit_register_fn);
+        assert!(cfg.options.buffa.strict_utf8_mapping);
+        assert!(!cfg.options.buffa.generate_json);
+        assert!(!cfg.options.buffa.emit_register_fn);
         assert_eq!(cfg.include_file.as_deref(), Some("_inc.rs"));
     }
 
     #[test]
     fn config_default_options() {
         let cfg = Config::new();
-        assert!(!cfg.options.strict_utf8_mapping);
-        assert!(cfg.options.generate_json);
-        assert!(cfg.options.emit_register_fn);
+        assert!(!cfg.options.buffa.strict_utf8_mapping);
+        assert!(cfg.options.buffa.generate_json);
+        assert!(cfg.options.buffa.emit_register_fn);
         assert!(matches!(cfg.descriptor_source, DescriptorSource::Protoc));
+    }
+
+    #[test]
+    fn config_buffa_config_wholesale() {
+        let mut buffa = CodeGenConfig::default();
+        buffa.generate_text = true;
+        let cfg = Config::new().buffa_config(buffa);
+        assert!(cfg.options.buffa.generate_text);
     }
 
     #[test]

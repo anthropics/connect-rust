@@ -18,8 +18,8 @@
 //! `super::`-relative type paths. Used by `connectrpc-build`.
 //!
 //! [`codegen::generate_services`] - **service stubs only**. Message types
-//! are referenced via absolute paths configured with
-//! [`codegen::Options::extern_paths`], so the output compiles standalone
+//! are referenced via absolute paths configured via
+//! [`codegen::CodeGenConfig::extern_paths`], so the output compiles standalone
 //! against a separately-generated buffa module or crate. Used by the
 //! `protoc-gen-connect-rust` plugin.
 //!
@@ -28,10 +28,8 @@
 //! ```rust,ignore
 //! use connectrpc_codegen::codegen::{generate_services, Options};
 //!
-//! let options = Options {
-//!     extern_paths: vec![(".".into(), "crate::proto".into())],
-//!     ..Options::default()
-//! };
+//! let mut options = Options::default();
+//! options.buffa.extern_paths.push((".".into(), "crate::proto".into()));
 //! let files = generate_services(&descriptors, &files_to_generate, &options)?;
 //! for f in files {
 //!     std::fs::write(out_dir.join(&f.name), f.content)?;
@@ -40,3 +38,5 @@
 
 pub mod codegen;
 pub mod plugin;
+
+pub use codegen::CodeGenConfig;
