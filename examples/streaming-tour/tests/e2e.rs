@@ -1,13 +1,12 @@
 //! End-to-end test: spin up the NumberService in-process, exercise all
 //! four RPC types over a real TCP socket, assert expected results.
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use buffa::view::OwnedView;
 use connectrpc::client::{ClientConfig, HttpClient};
-use connectrpc::{ConnectError, RequestContext, Response, Router, ServiceResult, ServiceStream};
-use futures::{Stream, StreamExt};
+use connectrpc::{RequestContext, Response, Router, ServiceResult, ServiceStream};
+use futures::StreamExt;
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
@@ -16,10 +15,8 @@ pub mod proto {
 use proto::anthropic::connectrpc::tour::v1::__buffa::view::*;
 use proto::anthropic::connectrpc::tour::v1::*;
 
-// Local type aliases that flatten the streaming-handler signatures.
-// See src/server.rs for the rationale.
-type ResponseStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> + Send>>;
-type RequestStream<V> = Pin<Box<dyn Stream<Item = Result<OwnedView<V>, ConnectError>> + Send>>;
+// Local alias that flattens client/bidi-stream request parameters.
+type RequestStream<V> = ServiceStream<OwnedView<V>>;
 
 struct NumberServiceImpl;
 
