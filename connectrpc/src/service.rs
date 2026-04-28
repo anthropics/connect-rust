@@ -532,10 +532,10 @@ impl EndStreamResponse {
     /// the metadata and the handler-context trailers are skipped to avoid
     /// duplication. Otherwise the handler's context trailers are used.
     fn error(err: &ConnectError, context_trailers: &http::HeaderMap) -> Self {
-        let trailers_source = if err.trailers.is_empty() {
+        let trailers_source = if err.trailers().is_empty() {
             context_trailers
         } else {
-            &err.trailers
+            err.trailers()
         };
         let metadata = Self::metadata_from_trailers(trailers_source);
         Self {
@@ -592,7 +592,7 @@ fn connect_streaming_error_response(
 ) -> Response<StreamingResponseBody> {
     use futures::stream::StreamExt as _;
 
-    let end_stream = EndStreamResponse::error(err, &err.trailers);
+    let end_stream = EndStreamResponse::error(err, err.trailers());
     let mut encoder = crate::envelope::EnvelopeEncoder::uncompressed();
     let mut buf = bytes::BytesMut::new();
     // encode_end_stream is infallible for uncompressed data
@@ -616,7 +616,7 @@ fn connect_streaming_error_response(
         Protocol::Connect.response_content_type(codec_format, true),
     );
 
-    for (key, value) in err.response_headers.iter() {
+    for (key, value) in err.response_headers() {
         response = response.header(key, value);
     }
 
@@ -638,7 +638,7 @@ fn grpc_error_response(
     protocol: Protocol,
     codec_format: CodecFormat,
 ) -> Response<StreamingResponseBody> {
-    let grpc_trailers = build_grpc_trailers(Some(err), &err.trailers);
+    let grpc_trailers = build_grpc_trailers(Some(err), err.trailers());
 
     let body_stream: Pin<Box<dyn Stream<Item = Result<Frame<Bytes>, Infallible>> + Send>> =
         match protocol {
@@ -681,7 +681,7 @@ fn grpc_error_response(
         }
     }
 
-    for (key, value) in err.response_headers.iter() {
+    for (key, value) in err.response_headers() {
         response = response.header(key, value);
     }
 
@@ -1657,7 +1657,7 @@ where
 {
     // Helper to build a gRPC trailers-only error response using GrpcUnaryBody.
     let grpc_unary_error = |err: &ConnectError| -> Response<GrpcUnaryBody> {
-        let grpc_trailers = build_grpc_trailers(Some(err), &err.trailers);
+        let grpc_trailers = build_grpc_trailers(Some(err), err.trailers());
         let trailers = match protocol {
             Protocol::Grpc => GrpcUnaryTrailers::Http2(grpc_trailers),
             Protocol::GrpcWeb => {
@@ -1680,7 +1680,7 @@ where
                 response = response.header(&GRPC_MESSAGE, val);
             }
         }
-        for (key, value) in err.response_headers.iter() {
+        for (key, value) in err.response_headers() {
             response = response.header(key, value);
         }
         let body = GrpcUnaryBody {
@@ -2592,7 +2592,7 @@ fn build_grpc_trailers(
                 }
             }
             // Include error-level trailers
-            for (key, value) in err.trailers.iter() {
+            for (key, value) in err.trailers() {
                 trailers.append(key, value.clone());
             }
         }
@@ -2604,7 +2604,7 @@ fn build_grpc_trailers(
     // Include custom trailing metadata from the handler context.
     // If the error already carries its own trailers (via .with_trailers()),
     // skip adding context trailers to avoid duplication.
-    let error_has_own_trailers = error.is_some_and(|e| !e.trailers.is_empty());
+    let error_has_own_trailers = error.is_some_and(|e| !e.trailers().is_empty());
     if !error_has_own_trailers {
         for (key, value) in custom_trailers.iter() {
             trailers.append(key, value.clone());
@@ -2643,12 +2643,12 @@ fn error_response(err: ConnectError) -> Response<Full<Bytes>> {
         .header(header::CONTENT_TYPE, content_type::JSON);
 
     // Add response headers from the error
-    for (key, value) in err.response_headers.iter() {
+    for (key, value) in err.response_headers() {
         response = response.header(key, value);
     }
 
     // Add trailers as trailer- prefixed headers
-    let response = add_trailers(response, &err.trailers);
+    let response = add_trailers(response, err.trailers());
 
     response.body(Full::new(body)).unwrap_or_else(|_| {
         Response::builder()
@@ -3104,7 +3104,7 @@ mod tests {
     fn test_build_grpc_trailers_dedup_error_trailers() {
         // When error has its own trailers, context trailers should be skipped
         let mut err = ConnectError::internal("error");
-        err.trailers
+        err.trailers_mut()
             .insert("x-trailer", http::HeaderValue::from_static("from-error"));
         let mut custom = http::HeaderMap::new();
         custom.insert("x-trailer", http::HeaderValue::from_static("from-context"));

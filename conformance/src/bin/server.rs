@@ -41,7 +41,7 @@ use connectrpc_conformance::UnaryResponse;
 use connectrpc_conformance::UnaryResponseDefinition;
 use connectrpc_conformance::UnimplementedResponse;
 use connectrpc_conformance::init_type_registry;
-use connectrpc_conformance::proto::connectrpc::conformance::v1::{
+use connectrpc_conformance::proto::connectrpc::conformance::v1::__buffa::view::{
     BidiStreamRequestView, ClientStreamRequestView, IdempotentUnaryRequestView,
     ServerStreamRequestView, UnaryRequestView, UnimplementedRequestView,
 };
@@ -123,7 +123,7 @@ fn build_request_info(
         timeout_ms,
         requests: vec![Any {
             type_url: type_url.to_string(),
-            value: request_bytes.to_vec(),
+            value: request_bytes.to_vec().into(),
             ..Default::default()
         }],
         connect_get_info: Default::default(),
@@ -238,13 +238,13 @@ impl ConformanceService for ConformanceServiceImpl {
 
             match &def.response {
                 Some(
-                    connectrpc_conformance::unary_response_definition::Response::ResponseData(d),
+                    connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
                 ) => {
                     // Apply response headers and trailers from definition
                     let ctx = apply_response_headers_trailers(ctx, def);
                     (d.clone(), ctx)
                 }
-                Some(connectrpc_conformance::unary_response_definition::Response::Error(e)) => {
+                Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
                     // Apply response headers and trailers from definition to the error
                     let ctx = apply_response_headers_trailers(ctx, def);
 
@@ -306,12 +306,12 @@ impl ConformanceService for ConformanceServiceImpl {
 
             match &def.response {
                 Some(
-                    connectrpc_conformance::unary_response_definition::Response::ResponseData(d),
+                    connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
                 ) => {
                     let ctx = apply_response_headers_trailers(ctx, def);
                     (d.clone(), ctx)
                 }
-                Some(connectrpc_conformance::unary_response_definition::Response::Error(e)) => {
+                Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
                     // Apply response headers and trailers from definition to the error
                     let ctx = apply_response_headers_trailers(ctx, def);
 
@@ -554,7 +554,7 @@ impl ConformanceService for ConformanceServiceImpl {
                 .map(|(bytes, _)| Any {
                     type_url: "type.googleapis.com/connectrpc.conformance.v1.ClientStreamRequest"
                         .to_string(),
-                    value: bytes.clone(),
+                    value: bytes.clone().into(),
                     ..Default::default()
                 })
                 .collect(),
@@ -576,12 +576,12 @@ impl ConformanceService for ConformanceServiceImpl {
 
             match &def.response {
                 Some(
-                    connectrpc_conformance::unary_response_definition::Response::ResponseData(d),
+                    connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
                 ) => {
                     let ctx = apply_response_headers_trailers(ctx, def);
                     (d.clone(), ctx)
                 }
-                Some(connectrpc_conformance::unary_response_definition::Response::Error(e)) => {
+                Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
                     let ctx = apply_response_headers_trailers(ctx, def);
                     let code = e
                         .code
@@ -731,7 +731,7 @@ impl ConformanceService for ConformanceServiceImpl {
                     requests: vec![Any {
                         type_url: "type.googleapis.com/connectrpc.conformance.v1.BidiStreamRequest"
                             .to_string(),
-                        value: first_msg_bytes,
+                        value: first_msg_bytes.into(),
                         ..Default::default()
                     }],
                     connect_get_info: Default::default(),
@@ -848,7 +848,7 @@ impl ConformanceService for ConformanceServiceImpl {
                             timeout_ms: timeout,
                             requests: vec![Any {
                                 type_url: "type.googleapis.com/connectrpc.conformance.v1.BidiStreamRequest".to_string(),
-                                value: msg_bytes,
+                                value: msg_bytes.into(),
                                 ..Default::default()
                             }],
                             connect_get_info: Default::default(),
@@ -861,7 +861,7 @@ impl ConformanceService for ConformanceServiceImpl {
                             timeout_ms: None,
                             requests: vec![Any {
                                 type_url: "type.googleapis.com/connectrpc.conformance.v1.BidiStreamRequest".to_string(),
-                                value: msg_bytes,
+                                value: msg_bytes.into(),
                                 ..Default::default()
                             }],
                             connect_get_info: Default::default(),
@@ -933,7 +933,7 @@ impl ConformanceService for ConformanceServiceImpl {
                     .map(|(bytes, _)| Any {
                         type_url: "type.googleapis.com/connectrpc.conformance.v1.BidiStreamRequest"
                             .to_string(),
-                        value: bytes.clone(),
+                        value: bytes.clone().into(),
                         ..Default::default()
                     })
                     .collect(),

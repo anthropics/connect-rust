@@ -29,9 +29,9 @@ futures = "0.3"
 pin-project = "1"
 
 # Protobuf
-buffa = { version = "0.3", features = ["json"] }
-buffa-types = { version = "0.3", features = ["json"] }
-buffa-codegen = { version = "0.3" }
+buffa = { version = "0.4", features = ["json"] }
+buffa-types = { version = "0.4", features = ["json"] }
+buffa-codegen = { version = "0.4" }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -84,6 +84,12 @@ prettyplease = "0.2"
 tempfile = "3"
 rcgen = "0.14"
 
+[patch.crates-io]
+buffa = { git = "https://github.com/anthropics/buffa", rev = "4d2023d" }
+buffa-types = { git = "https://github.com/anthropics/buffa", rev = "4d2023d" }
+buffa-codegen = { git = "https://github.com/anthropics/buffa", rev = "4d2023d" }
+buffa-descriptor = { git = "https://github.com/anthropics/buffa", rev = "4d2023d" }
+
 [workspace.lints.rust]
 dead_code = "warn"
 explicit_outlives_requirements = "warn"
@@ -93,6 +99,3 @@ unused_lifetimes = "warn"
 [workspace.lints.clippy]
 dbg_macro = "warn"
 uninlined_format_args = "warn"
-# ConnectError carries HeaderMaps for response metadata which makes it large.
-# Error handling is not on the hot path; carrying metadata in errors is worth the size.
-result_large_err = "allow"

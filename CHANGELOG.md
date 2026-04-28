@@ -10,6 +10,51 @@ increment the patch version.
 
 ## [Unreleased]
 
+### Breaking
+
+- **buffa 0.4**: adapted to buffa's per-package stitcher layout
+  ([buffa#62]) and `ViewEncode` ([buffa#55]). Generated view types
+  now live under `<pkg>::__buffa::view::FooView` (was `<pkg>::FooView`);
+  oneof enums under `<pkg>::__buffa::oneof::<msg>::Kind` and
+  `<pkg>::__buffa::view::oneof::<msg>::Kind`. Service stubs are
+  appended to buffa's `<stem>.rs` content file in the unified path,
+  and emit their own `<pkg>.mod.rs` stitcher in the split path.
+  `buffa_types::Any.value` is now `bytes::Bytes` (was `Vec<u8>`).
+  buffa's size cache is now externalized ([buffa#22]): generated
+  structs no longer carry `__buffa_cached_size`, and
+  `Message::compute_size`/`write_to` take `&mut SizeCache`. The
+  provided `encode_to_bytes()` / `encoded_len()` are unchanged;
+  connectrpc itself only uses those, but direct callers of
+  `compute_size()` should switch to `encoded_len()`.
+- **`connectrpc-codegen`**: `Options` now embeds the buffa
+  `CodeGenConfig` directly as `Options::buffa` instead of mirroring
+  individual fields ([#34]). The previous per-field shims
+  (`strict_utf8_mapping`, `generate_json`, `extern_paths`,
+  `emit_register_fn`) are gone; set `options.buffa.<field>` instead.
+  `CodeGenConfig` is re-exported from `connectrpc_codegen::codegen` and
+  `connectrpc_build`. `connectrpc_build::Config` keeps its existing
+  builder methods as thin shims and gains `.buffa_config(cfg)` for
+  wholesale replacement. `generate_views = true` is still enforced.
+- **`ConnectError` shrunk from 248 to 72 bytes** ([#61]). The
+  `response_headers` and `trailers` fields are now crate-private
+  `Option<Box<http::HeaderMap>>` (was `pub http::HeaderMap`), so
+  `Result<_, ConnectError>` no longer trips
+  `clippy::result_large_err`. New accessors replace direct field
+  access: `response_headers()` / `trailers()` (borrow, empty map if
+  unset), `response_headers_mut()` / `trailers_mut()`, and
+  `set_response_headers()` / `set_trailers()`. The `with_headers()` /
+  `with_trailers()` builders keep their signatures. Behaviour notes:
+  `with_headers` / `with_trailers` / `set_*` now normalize an empty
+  `HeaderMap` to "unset" (observationally identical via the
+  accessors), and the `Debug` output for an unset map now shows
+  `None` instead of `{}`.
+
+[#34]: https://github.com/anthropics/connect-rust/issues/34
+[#61]: https://github.com/anthropics/connect-rust/issues/61
+[buffa#22]: https://github.com/anthropics/buffa/pull/22
+[buffa#55]: https://github.com/anthropics/buffa/pull/55
+[buffa#62]: https://github.com/anthropics/buffa/pull/62
+
 ## [0.3.3] - 2026-04-17
 
 ### Fixed

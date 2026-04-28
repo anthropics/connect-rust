@@ -9,11 +9,11 @@
 
 use std::collections::HashMap;
 
+use buffa_types::google::protobuf::__buffa::oneof::value;
 use buffa_types::google::protobuf::Duration;
 use buffa_types::google::protobuf::Struct;
 use buffa_types::google::protobuf::Timestamp;
 use buffa_types::google::protobuf::Value;
-use buffa_types::google::protobuf::value;
 use connectrpc::client::ClientConfig;
 use connectrpc::client::HttpClient;
 use multiservice_example::*;

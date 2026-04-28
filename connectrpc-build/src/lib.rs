@@ -39,6 +39,8 @@ use buffa::Message;
 use buffa_codegen::generated::descriptor::FileDescriptorSet;
 use connectrpc_codegen::codegen::{self, Options};
 
+pub use connectrpc_codegen::codegen::CodeGenConfig;
+
 /// How to acquire a `FileDescriptorSet` from `.proto` files.
 #[derive(Debug, Clone, Default)]
 enum DescriptorSource {
@@ -103,20 +105,20 @@ impl Config {
     }
 
     /// Honor `features.utf8_validation = NONE` by emitting `Vec<u8>`/`&[u8]`
-    /// for such string fields. See [`Options::strict_utf8_mapping`].
+    /// for such string fields. See [`CodeGenConfig::strict_utf8_mapping`].
     #[must_use]
     pub fn strict_utf8_mapping(mut self, enabled: bool) -> Self {
-        self.options.strict_utf8_mapping = enabled;
+        self.options.buffa.strict_utf8_mapping = enabled;
         self
     }
 
     /// Emit `serde` derives and proto3 JSON helpers (default: true).
     ///
     /// Disable only for binary-only clients; the Connect protocol's JSON
-    /// codec requires this. See [`Options::generate_json`].
+    /// codec requires this. See [`CodeGenConfig::generate_json`].
     #[must_use]
     pub fn generate_json(mut self, enabled: bool) -> Self {
-        self.options.generate_json = enabled;
+        self.options.buffa.generate_json = enabled;
         self
     }
 
@@ -125,10 +127,26 @@ impl Config {
     ///
     /// Set to `false` when the generated files are `include!`d into the
     /// same module — the identically-named functions would otherwise
-    /// collide. See [`Options::emit_register_fn`].
+    /// collide. See [`CodeGenConfig::emit_register_fn`].
     #[must_use]
     pub fn emit_register_fn(mut self, enabled: bool) -> Self {
-        self.options.emit_register_fn = enabled;
+        self.options.buffa.emit_register_fn = enabled;
+        self
+    }
+
+    /// Replace the underlying buffa [`CodeGenConfig`] wholesale.
+    ///
+    /// Any buffa knob not surfaced as a builder method here can be set this
+    /// way. The convenience builders above remain available for the common
+    /// cases. `generate_views` is forced to `true` regardless (service
+    /// stubs require view types); see [`Options::buffa`].
+    ///
+    /// Calls to the convenience builders above made *before* this method
+    /// are discarded; calls made *after* override individual fields in the
+    /// supplied config.
+    #[must_use]
+    pub fn buffa_config(mut self, config: CodeGenConfig) -> Self {
+        self.options.buffa = config;
         self
     }
 
@@ -241,30 +259,23 @@ impl Config {
         // 3. Generate.
         let generated = codegen::generate_files(&fds.file, &files_to_generate, &self.options)?;
 
-        // 4. Write per-file outputs and collect (name, package) pairs.
+        // 4. Write per-file outputs and collect (name, package) pairs for
+        //    PackageMod files only — the per-package stitcher `include!`s
+        //    the five content files itself, so the module tree only wires
+        //    stitchers.
         std::fs::create_dir_all(&out_dir)
             .with_context(|| format!("failed to create out_dir '{}'", out_dir.display()))?;
 
-        // Pre-build a lookup from generated filename → proto package.
-        let name_to_package: std::collections::HashMap<String, String> = fds
-            .file
-            .iter()
-            .filter_map(|fd| {
-                let proto_name = fd.name.as_deref()?;
-                let rs_name = buffa_codegen::proto_path_to_rust_module(proto_name);
-                Some((rs_name, fd.package.clone().unwrap_or_default()))
-            })
-            .collect();
-
-        let mut entries: Vec<(String, String)> = Vec::with_capacity(generated.len());
+        let mut entries: Vec<(String, String)> = Vec::new();
         for file in &generated {
             let path = out_dir.join(&file.name);
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
             write_if_changed(&path, file.content.as_bytes())?;
-            let pkg = name_to_package.get(&file.name).cloned().unwrap_or_default();
-            entries.push((file.name.clone(), pkg));
+            if file.kind == codegen::GeneratedFileKind::PackageMod {
+                entries.push((file.name.clone(), file.package.clone()));
+            }
         }
 
         // 5. Optionally emit the module-tree include file.
@@ -552,19 +563,27 @@ mod tests {
             .include_file("_inc.rs");
         assert_eq!(cfg.files.len(), 2);
         assert_eq!(cfg.includes.len(), 1);
-        assert!(cfg.options.strict_utf8_mapping);
-        assert!(!cfg.options.generate_json);
-        assert!(!cfg.options.emit_register_fn);
+        assert!(cfg.options.buffa.strict_utf8_mapping);
+        assert!(!cfg.options.buffa.generate_json);
+        assert!(!cfg.options.buffa.emit_register_fn);
         assert_eq!(cfg.include_file.as_deref(), Some("_inc.rs"));
     }
 
     #[test]
     fn config_default_options() {
         let cfg = Config::new();
-        assert!(!cfg.options.strict_utf8_mapping);
-        assert!(cfg.options.generate_json);
-        assert!(cfg.options.emit_register_fn);
+        assert!(!cfg.options.buffa.strict_utf8_mapping);
+        assert!(cfg.options.buffa.generate_json);
+        assert!(cfg.options.buffa.emit_register_fn);
         assert!(matches!(cfg.descriptor_source, DescriptorSource::Protoc));
+    }
+
+    #[test]
+    fn config_buffa_config_wholesale() {
+        let mut buffa = CodeGenConfig::default();
+        buffa.generate_text = true;
+        let cfg = Config::new().buffa_config(buffa);
+        assert!(cfg.options.buffa.generate_text);
     }
 
     #[test]
@@ -618,14 +637,19 @@ mod tests {
             "service code should not emit top-level use statements"
         );
 
-        // Include file nests under test.echo.v1. Because out_dir() was set
-        // explicitly (not defaulted from $OUT_DIR), includes are sibling-
-        // relative.
+        // Include file nests under test.echo.v1 and wires only the
+        // per-package stitcher (the stitcher itself include!s the
+        // per-proto content files). Because out_dir() was set explicitly
+        // (not defaulted from $OUT_DIR), includes are sibling-relative.
         let inc = std::fs::read_to_string(out.path().join("_inc.rs")).unwrap();
         assert!(inc.contains("pub mod test {"));
         assert!(inc.contains("pub mod echo {"));
         assert!(inc.contains("pub mod v1 {"));
-        assert!(inc.contains(r#"include!("echo.rs");"#));
+        assert!(inc.contains(r#"include!("test.echo.v1.mod.rs");"#));
+        // Stitcher pulls in the content files including the view tree.
+        let stitcher = std::fs::read_to_string(out.path().join("test.echo.v1.mod.rs")).unwrap();
+        assert!(stitcher.contains(r#"include!("echo.rs");"#));
+        assert!(stitcher.contains("pub mod __buffa"));
     }
 
     #[test]

@@ -64,5 +64,9 @@ harness = false
 name = "cross_impl_bench"
 harness = false
 
+[[bench]]
+name = "echo_bloat"
+harness = false
+
 [lints]
 workspace = true
