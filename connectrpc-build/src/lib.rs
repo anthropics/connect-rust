@@ -298,20 +298,22 @@ impl Config {
             write_if_changed(&include_path, include_src.as_bytes())?;
         }
 
-        // 6. Cargo re-run triggers. In Precompiled mode `self.files` holds
-        // proto-relative names (per the docs on `descriptor_set()`), not
-        // on-disk paths; emitting `rerun-if-changed` for them points cargo at
-        // missing files and forces a rebuild on every invocation. The `.pb`
-        // path is the only real input in that mode.
-        if self.emit_rerun_directives {
-            match &self.descriptor_source {
-                DescriptorSource::Precompiled(p) => {
-                    println!("cargo:rerun-if-changed={}", p.display());
-                }
-                DescriptorSource::Protoc | DescriptorSource::Buf => {
-                    for f in &self.files {
-                        println!("cargo:rerun-if-changed={}", f.display());
-                    }
+        // 6. Cargo re-run triggers. Skipped entirely for non-Cargo callers.
+        // In Precompiled mode `self.files` holds proto-relative names (per
+        // the docs on `descriptor_set()`), not on-disk paths; emitting
+        // `rerun-if-changed` for them points cargo at missing files and
+        // forces a rebuild on every invocation. The `.pb` path is the only
+        // real input in that mode.
+        if !self.emit_rerun_directives {
+            return Ok(());
+        }
+        match &self.descriptor_source {
+            DescriptorSource::Precompiled(p) => {
+                println!("cargo:rerun-if-changed={}", p.display());
+            }
+            DescriptorSource::Protoc | DescriptorSource::Buf => {
+                for f in &self.files {
+                    println!("cargo:rerun-if-changed={}", f.display());
                 }
             }
         }
