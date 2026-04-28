@@ -282,6 +282,19 @@ a custom auth layer can stamp a `UserId` into the request's
 `ctx.extensions.get::<UserId>()`. See [Tower middleware](#tower-middleware)
 for the full pattern.
 
+### What you see vs. what you write
+
+The generated trait declares unary methods with the full RPITIT bounds:
+
+    fn say(&self, ctx: RequestContext, req: ...)
+        -> impl Future<Output = ServiceResult<impl Encodable<SayResponse> + Send + 'static + use<Self>>> + Send;
+
+That is what `cargo doc` and rust-analyzer hover show. You never write
+that form in an impl - `async fn` desugars the outer `impl Future`, and
+returning `ServiceResult<SayResponse>` (the concrete owned type) refines
+the `impl Encodable<...>` bound. The short form in the examples above is
+all you need.
+
 ### The `refining_impl_trait` lint
 
 The generated trait declares unary/client-stream returns as
