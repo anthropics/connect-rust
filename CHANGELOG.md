@@ -49,6 +49,13 @@ increment the patch version.
   accessors), and the `Debug` output for an unset map now shows
   `None` instead of `{}`.
 
+### Added
+
+- **`connectrpc-build`**: `Config::emit_rerun_directives(bool)` to suppress
+  the `cargo:rerun-if-changed=` lines when running outside a Cargo
+  `build.rs` context (e.g. from a Bazel genrule or standalone host tool).
+  Default remains `true`.
+
 [#34]: https://github.com/anthropics/connect-rust/issues/34
 [#61]: https://github.com/anthropics/connect-rust/issues/61
 [buffa#22]: https://github.com/anthropics/buffa/pull/22
