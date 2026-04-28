@@ -299,9 +299,9 @@ all you need.
 
 The generated trait declares unary/client-stream returns as
 `ServiceResult<impl Encodable<M>>` so handlers can return either the
-owned `M` or a borrowing view (see the `MaybeBorrowed` type).
-Writing your impl as `-> ServiceResult<FooResponse>` *refines* that
-opaque bound to a concrete type, which triggers
+owned `M` or a borrowed view that encodes as `M` (see below). Writing
+your impl as `-> ServiceResult<FooResponse>` *refines* that opaque
+bound to a concrete type, which triggers
 `refining_impl_trait_internal` / `refining_impl_trait_reachable`. This
 is intentional - the refinement is the point. Add at your crate root:
 
@@ -310,6 +310,41 @@ is intentional - the refinement is the point. Add at your crate root:
 ```
 
 or `#[allow(refining_impl_trait)]` on the impl block.
+
+### Returning a view body
+
+For handlers that often return the request unchanged (proxies, filters,
+validators), the `Encodable<M>` bound lets you skip the owned-message
+allocation by returning the request view directly. Codegen emits
+`OwnedFooView` aliases and `impl Encodable<Foo> for OwnedFooView` per
+RPC type, and `connectrpc::MaybeBorrowed` covers the conditional case:
+
+```rust
+use connectrpc::{MaybeBorrowed, RequestContext, Response, ServiceResult};
+
+async fn redact(
+    &self,
+    _ctx: RequestContext,
+    req: OwnedRecordView,
+) -> ServiceResult<MaybeBorrowed<Record, OwnedRecordView>> {
+    if req.email.is_empty() && req.ssn.is_empty() {
+        // pass-through: re-encode straight from the request bytes
+        return Response::ok(MaybeBorrowed::Borrowed(req));
+    }
+    let mut owned = req.to_owned_message();
+    owned.email.clear();
+    owned.ssn.clear();
+    Response::ok(MaybeBorrowed::Owned(owned))
+}
+```
+
+The `'a` on the trait method also lets the body borrow from `&self`
+(e.g. cached server state). View bodies only encode for the proto
+codec - JSON clients receive `unimplemented`; see
+[`MaybeBorrowed`'s codec note](https://docs.rs/connectrpc/latest/connectrpc/enum.MaybeBorrowed.html#codec-compatibility).
+View-body impls are not emitted for output types mapped via
+`extern_path` (the impl would be an orphan); return owned for WKT or
+extern outputs.
 
 ### Returning errors
 

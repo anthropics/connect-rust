@@ -365,18 +365,23 @@ pub fn encode_view_body<'a, V: ViewEncode<'a>>(
 /// (clone to owned, mutate, return owned). The single concrete return
 /// type satisfies the `impl Encodable<M>` bound on the generated trait.
 ///
+/// This is not [`std::borrow::Cow`]: `V` is a separate
+/// [`Encodable<M>`] type (e.g. `MView<'a>` or `OwnedView<MView>`),
+/// not a `&M`, and there is no `ToOwned` relationship between the
+/// arms — each encodes independently.
+///
 /// ```rust,ignore
 /// async fn redact(&self, _ctx: RequestContext, req: OwnedRecordView)
 ///     -> ServiceResult<MaybeBorrowed<Record, OwnedRecordView>>
 /// {
 ///     if req.email.is_empty() && req.ssn.is_empty() {
 ///         // pass-through: re-encode straight from the request bytes
-///         return Response::ok(MaybeBorrowed::borrowed(req));
+///         return Response::ok(MaybeBorrowed::Borrowed(req));
 ///     }
 ///     let mut owned = req.to_owned_message();
 ///     owned.email.clear();
 ///     owned.ssn.clear();
-///     Response::ok(MaybeBorrowed::owned(owned))
+///     Response::ok(MaybeBorrowed::Owned(owned))
 /// }
 /// ```
 ///
@@ -392,18 +397,6 @@ pub enum MaybeBorrowed<M, V> {
     Owned(M),
     /// A borrowing body that encodes to the same wire bytes as `M`.
     Borrowed(V),
-}
-
-impl<M, V> MaybeBorrowed<M, V> {
-    /// Wrap an owned message.
-    pub fn owned(m: M) -> Self {
-        Self::Owned(m)
-    }
-
-    /// Wrap a borrowing body.
-    pub fn borrowed(v: V) -> Self {
-        Self::Borrowed(v)
-    }
 }
 
 impl<M, V> Encodable<M> for MaybeBorrowed<M, V>
@@ -642,8 +635,8 @@ mod tests {
     fn maybe_borrowed_dispatch() {
         use buffa_types::google::protobuf::__buffa::view::StringValueView;
         let owned: MaybeBorrowed<StringValue, V<'_>> =
-            MaybeBorrowed::owned(StringValue::from("owned"));
-        let borrowed = MaybeBorrowed::borrowed(V(StringValueView {
+            MaybeBorrowed::Owned(StringValue::from("owned"));
+        let borrowed = MaybeBorrowed::Borrowed(V(StringValueView {
             value: "view",
             ..Default::default()
         }));
@@ -665,7 +658,7 @@ mod tests {
     fn maybe_borrowed_borrowed_json_unimplemented() {
         use buffa_types::google::protobuf::__buffa::view::StringValueView;
         let borrowed: MaybeBorrowed<StringValue, V<'_>> =
-            MaybeBorrowed::borrowed(V(StringValueView::default()));
+            MaybeBorrowed::Borrowed(V(StringValueView::default()));
         let err = borrowed.encode(CodecFormat::Json).unwrap_err();
         assert_eq!(err.code, crate::ErrorCode::Unimplemented);
     }

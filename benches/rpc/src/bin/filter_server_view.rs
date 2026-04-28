@@ -16,11 +16,11 @@ impl FilterService for Impl {
         request: OwnedRecordView,
     ) -> ServiceResult<MaybeBorrowed<Record, OwnedRecordView>> {
         if !has_sensitive(&request) {
-            return Response::ok(MaybeBorrowed::borrowed(request));
+            return Response::ok(MaybeBorrowed::Borrowed(request));
         }
         let mut owned = request.to_owned_message();
         scrub(&mut owned);
-        Response::ok(MaybeBorrowed::owned(owned))
+        Response::ok(MaybeBorrowed::Owned(owned))
     }
 }
 

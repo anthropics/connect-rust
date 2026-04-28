@@ -1,10 +1,18 @@
+///Shorthand for `OwnedView<GetFortunesRequestView<'static>>`.
+pub type OwnedGetFortunesRequestView = ::buffa::view::OwnedView<
+    crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView<'static>,
+>;
+///Shorthand for `OwnedView<GetFortunesResponseView<'static>>`.
+pub type OwnedGetFortunesResponseView = ::buffa::view::OwnedView<
+    crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'static>,
+>;
 impl ::connectrpc::Encodable<crate::proto::fortune::v1::GetFortunesResponse>
 for crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'_> {
     fn encode(
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<crate::proto::fortune::v1::GetFortunesResponse>
@@ -15,7 +23,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 /// Full service name for this service.
@@ -24,23 +32,30 @@ pub const FORTUNE_SERVICE_SERVICE_NAME: &str = "fortune.v1.FortuneService";
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait FortuneService: Send + Sync + 'static {
     /// Handle the GetFortunes RPC.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn get_fortunes<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView<'static>,
-        >,
+        request: OwnedGetFortunesRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<

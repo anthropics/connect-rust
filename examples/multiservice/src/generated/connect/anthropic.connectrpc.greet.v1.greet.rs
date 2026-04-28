@@ -1,3 +1,15 @@
+///Shorthand for `OwnedView<GreetRequestView<'static>>`.
+pub type OwnedGreetRequestView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<GreetResponseView<'static>>`.
+pub type OwnedGreetResponseView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
+        'static,
+    >,
+>;
 impl ::connectrpc::Encodable<
     crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
 >
@@ -8,7 +20,7 @@ for crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponse
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -23,7 +35,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 /// Full service name for this service.
@@ -32,26 +44,31 @@ pub const GREET_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.greet.v1.Gree
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait GreetService: Send + Sync + 'static {
     /// Greet returns a greeting message for the given name.
     /// This method has no side effects and supports GET requests.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn greet<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedGreetRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<

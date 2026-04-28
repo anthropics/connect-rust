@@ -214,7 +214,13 @@ pub use response::RequestContext;
 pub use response::Response;
 pub use response::ServiceResult;
 pub use response::ServiceStream;
-pub use response::encode_view_body;
+
+/// Re-exports for generated code. Not part of the public API; subject
+/// to change without a semver bump.
+#[doc(hidden)]
+pub mod __codegen {
+    pub use crate::response::encode_view_body;
+}
 
 // Error types
 pub use error::ConnectError;

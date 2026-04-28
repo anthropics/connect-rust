@@ -6,8 +6,6 @@ pub use crate::connect::anthropic::connectrpc::filter::v1::*;
 pub use crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView;
 pub use crate::proto::anthropic::connectrpc::filter::v1::Record;
 
-pub type OwnedRecordView = buffa::view::OwnedView<RecordView<'static>>;
-
 /// True if any sensitive field is non-empty.
 pub fn has_sensitive(r: &RecordView<'_>) -> bool {
     !r.email.is_empty() || !r.ssn.is_empty() || !r.notes.is_empty()

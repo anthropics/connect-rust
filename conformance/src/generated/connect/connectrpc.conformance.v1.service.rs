@@ -1,10 +1,78 @@
+///Shorthand for `OwnedView<UnaryRequestView<'static>>`.
+pub type OwnedUnaryRequestView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryRequestView<'static>,
+>;
+///Shorthand for `OwnedView<UnaryResponseView<'static>>`.
+pub type OwnedUnaryResponseView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryResponseView<'static>,
+>;
+///Shorthand for `OwnedView<ServerStreamRequestView<'static>>`.
+pub type OwnedServerStreamRequestView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::ServerStreamRequestView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<ServerStreamResponseView<'static>>`.
+pub type OwnedServerStreamResponseView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::ServerStreamResponseView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<ClientStreamRequestView<'static>>`.
+pub type OwnedClientStreamRequestView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::ClientStreamRequestView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<ClientStreamResponseView<'static>>`.
+pub type OwnedClientStreamResponseView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::ClientStreamResponseView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<BidiStreamRequestView<'static>>`.
+pub type OwnedBidiStreamRequestView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::BidiStreamRequestView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<BidiStreamResponseView<'static>>`.
+pub type OwnedBidiStreamResponseView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::BidiStreamResponseView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<UnimplementedRequestView<'static>>`.
+pub type OwnedUnimplementedRequestView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedRequestView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<UnimplementedResponseView<'static>>`.
+pub type OwnedUnimplementedResponseView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedResponseView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<IdempotentUnaryRequestView<'static>>`.
+pub type OwnedIdempotentUnaryRequestView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryRequestView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<IdempotentUnaryResponseView<'static>>`.
+pub type OwnedIdempotentUnaryResponseView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryResponseView<
+        'static,
+    >,
+>;
 impl ::connectrpc::Encodable<crate::proto::connectrpc::conformance::v1::UnaryResponse>
 for crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryResponseView<'_> {
     fn encode(
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<crate::proto::connectrpc::conformance::v1::UnaryResponse>
@@ -15,7 +83,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -28,7 +96,7 @@ for crate::proto::connectrpc::conformance::v1::__buffa::view::ServerStreamRespon
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -43,7 +111,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -56,7 +124,7 @@ for crate::proto::connectrpc::conformance::v1::__buffa::view::ClientStreamRespon
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -71,7 +139,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -84,7 +152,7 @@ for crate::proto::connectrpc::conformance::v1::__buffa::view::BidiStreamResponse
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -99,7 +167,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -112,7 +180,7 @@ for crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedRespo
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -127,7 +195,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -140,7 +208,7 @@ for crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryRes
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -155,7 +223,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 /// Full service name for this service.
@@ -167,14 +235,21 @@ pub const CONFORMANCE_SERVICE_SERVICE_NAME: &str = "connectrpc.conformance.v1.Co
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait ConformanceService: Send + Sync + 'static {
     /// A unary operation. The request indicates the response headers and trailers
@@ -188,14 +263,12 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// Servers should allow the response definition to be unset in the request and
     /// if it is, set no response headers or trailers and return no response data.
     /// The returned payload should only contain the request info.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn unary<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedUnaryRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -223,11 +296,7 @@ pub trait ConformanceService: Send + Sync + 'static {
     fn server_stream(
         &self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::connectrpc::conformance::v1::__buffa::view::ServerStreamRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedServerStreamRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             ::connectrpc::ServiceStream<
@@ -249,16 +318,12 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// Servers should allow the response definition to be unset in the request and
     /// if it is, set no response headers or trailers and return no response data.
     /// The returned payload should only contain the request info.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn client_stream<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        requests: ::connectrpc::ServiceStream<
-            ::buffa::view::OwnedView<
-                crate::proto::connectrpc::conformance::v1::__buffa::view::ClientStreamRequestView<
-                    'static,
-                >,
-            >,
-        >,
+        requests: ::connectrpc::ServiceStream<OwnedClientStreamRequestView>,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -305,13 +370,7 @@ pub trait ConformanceService: Send + Sync + 'static {
     fn bidi_stream(
         &self,
         ctx: ::connectrpc::RequestContext,
-        requests: ::connectrpc::ServiceStream<
-            ::buffa::view::OwnedView<
-                crate::proto::connectrpc::conformance::v1::__buffa::view::BidiStreamRequestView<
-                    'static,
-                >,
-            >,
-        >,
+        requests: ::connectrpc::ServiceStream<OwnedBidiStreamRequestView>,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             ::connectrpc::ServiceStream<
@@ -321,14 +380,12 @@ pub trait ConformanceService: Send + Sync + 'static {
     > + Send;
     /// A unary endpoint that the server should not implement and should instead
     /// return an unimplemented error when invoked.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn unimplemented<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedUnimplementedRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -339,14 +396,12 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// A unary endpoint denoted as having no side effects (i.e. idempotent).
     /// Implementations should use an HTTP GET when invoking this endpoint and
     /// leverage query parameters to send data.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn idempotent_unary<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedIdempotentUnaryRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<

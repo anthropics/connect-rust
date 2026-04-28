@@ -1,10 +1,38 @@
+///Shorthand for `OwnedView<BenchRequestView<'static>>`.
+pub type OwnedBenchRequestView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::BenchRequestView<'static>,
+>;
+///Shorthand for `OwnedView<BenchResponseView<'static>>`.
+pub type OwnedBenchResponseView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::BenchResponseView<'static>,
+>;
+///Shorthand for `OwnedView<LogRequestView<'static>>`.
+pub type OwnedLogRequestView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
+>;
+///Shorthand for `OwnedView<LogResponseView<'static>>`.
+pub type OwnedLogResponseView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogResponseView<'static>,
+>;
+///Shorthand for `OwnedView<EchoRequestView<'static>>`.
+pub type OwnedEchoRequestView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::EchoRequestView<'static>,
+>;
+///Shorthand for `OwnedView<EchoResponseView<'static>>`.
+pub type OwnedEchoResponseView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::EchoResponseView<'static>,
+>;
+///Shorthand for `OwnedView<LogIngestResponseView<'static>>`.
+pub type OwnedLogIngestResponseView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogIngestResponseView<'static>,
+>;
 impl ::connectrpc::Encodable<crate::proto::bench::v1::BenchResponse>
 for crate::proto::bench::v1::__buffa::view::BenchResponseView<'_> {
     fn encode(
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<crate::proto::bench::v1::BenchResponse>
@@ -15,7 +43,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<crate::proto::bench::v1::LogResponse>
@@ -24,7 +52,7 @@ for crate::proto::bench::v1::__buffa::view::LogResponseView<'_> {
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<crate::proto::bench::v1::LogResponse>
@@ -35,7 +63,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<crate::proto::bench::v1::EchoResponse>
@@ -44,7 +72,7 @@ for crate::proto::bench::v1::__buffa::view::EchoResponseView<'_> {
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<crate::proto::bench::v1::EchoResponse>
@@ -55,7 +83,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<crate::proto::bench::v1::LogIngestResponse>
@@ -64,7 +92,7 @@ for crate::proto::bench::v1::__buffa::view::LogIngestResponseView<'_> {
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<crate::proto::bench::v1::LogIngestResponse>
@@ -75,7 +103,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 /// Full service name for this service.
@@ -84,23 +112,30 @@ pub const BENCH_SERVICE_SERVICE_NAME: &str = "bench.v1.BenchService";
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait BenchService: Send + Sync + 'static {
     /// Handle the Unary RPC.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn unary<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::BenchRequestView<'static>,
-        >,
+        request: OwnedBenchRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -112,23 +147,19 @@ pub trait BenchService: Send + Sync + 'static {
     fn server_stream(
         &self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::BenchRequestView<'static>,
-        >,
+        request: OwnedBenchRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             ::connectrpc::ServiceStream<crate::proto::bench::v1::BenchResponse>,
         >,
     > + Send;
     /// Handle the ClientStream RPC.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn client_stream<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        requests: ::connectrpc::ServiceStream<
-            ::buffa::view::OwnedView<
-                crate::proto::bench::v1::__buffa::view::BenchRequestView<'static>,
-            >,
-        >,
+        requests: ::connectrpc::ServiceStream<OwnedBenchRequestView>,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -140,23 +171,19 @@ pub trait BenchService: Send + Sync + 'static {
     fn bidi_stream(
         &self,
         ctx: ::connectrpc::RequestContext,
-        requests: ::connectrpc::ServiceStream<
-            ::buffa::view::OwnedView<
-                crate::proto::bench::v1::__buffa::view::BenchRequestView<'static>,
-            >,
-        >,
+        requests: ::connectrpc::ServiceStream<OwnedBenchRequestView>,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             ::connectrpc::ServiceStream<crate::proto::bench::v1::BenchResponse>,
         >,
     > + Send;
     /// Handle the LogUnary RPC.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn log_unary<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
-        >,
+        request: OwnedLogRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -165,12 +192,12 @@ pub trait BenchService: Send + Sync + 'static {
         >,
     > + Send;
     /// Handle the LogUnaryOwned RPC.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn log_unary_owned<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
-        >,
+        request: OwnedLogRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -812,23 +839,30 @@ pub const ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.EchoService";
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait EchoService: Send + Sync + 'static {
     /// Handle the Echo RPC.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn echo<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::EchoRequestView<'static>,
-        >,
+        request: OwnedEchoRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -1119,23 +1153,30 @@ pub const LOG_INGEST_SERVICE_SERVICE_NAME: &str = "bench.v1.LogIngestService";
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait LogIngestService: Send + Sync + 'static {
     /// Handle the Ingest RPC.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn ingest<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
-        >,
+        request: OwnedLogRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<

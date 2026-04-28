@@ -1,3 +1,39 @@
+///Shorthand for `OwnedView<CreateEventRequestView<'static>>`.
+pub type OwnedCreateEventRequestView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventRequestView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<CreateEventResponseView<'static>>`.
+pub type OwnedCreateEventResponseView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventResponseView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<CalculateDurationRequestView<'static>>`.
+pub type OwnedCalculateDurationRequestView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationRequestView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<CalculateDurationResponseView<'static>>`.
+pub type OwnedCalculateDurationResponseView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationResponseView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<ProcessMetadataRequestView<'static>>`.
+pub type OwnedProcessMetadataRequestView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataRequestView<
+        'static,
+    >,
+>;
+///Shorthand for `OwnedView<ProcessMetadataResponseView<'static>>`.
+pub type OwnedProcessMetadataResponseView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataResponseView<
+        'static,
+    >,
+>;
 impl ::connectrpc::Encodable<
     crate::proto::anthropic::connectrpc::wkt::v1::CreateEventResponse,
 >
@@ -8,7 +44,7 @@ for crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventResp
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -23,7 +59,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -36,7 +72,7 @@ for crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurati
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -51,7 +87,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -64,7 +100,7 @@ for crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadata
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(self, codec)
+        ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
 impl ::connectrpc::Encodable<
@@ -79,7 +115,7 @@ for ::buffa::view::OwnedView<
         &self,
         codec: ::connectrpc::CodecFormat,
     ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
-        ::connectrpc::encode_view_body(&**self, codec)
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
     }
 }
 /// Full service name for this service.
@@ -88,25 +124,30 @@ pub const WELL_KNOWN_TYPES_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.wk
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait WellKnownTypesService: Send + Sync + 'static {
     /// CreateEvent creates an event with a timestamp.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn create_event<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedCreateEventRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -115,14 +156,12 @@ pub trait WellKnownTypesService: Send + Sync + 'static {
         >,
     > + Send;
     /// CalculateDuration calculates the duration between two timestamps.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn calculate_duration<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedCalculateDurationRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -131,14 +170,12 @@ pub trait WellKnownTypesService: Send + Sync + 'static {
         >,
     > + Send;
     /// ProcessMetadata processes arbitrary metadata as a Struct.
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
     fn process_metadata<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedProcessMetadataRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<

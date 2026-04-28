@@ -76,11 +76,11 @@ increment the patch version.
   Encodable<Out> + use<'a, Self>>`, so a handler can return a body
   that borrows from `&self`. Codegen emits `impl Encodable<Out> for
   OutView<'_>` and for `OwnedView<OutView<'static>>` per RPC output
-  type (proto via `ViewEncode`; JSON returns an `internal` error
-  since view types lack `Serialize`). The new
+  type (proto via `ViewEncode`; JSON returns an `unimplemented`
+  error since view types lack `Serialize`). The new
   `MaybeBorrowed<M, V>` enum lets a handler return either: see
   `benches/rpc/benches/filter_handler.rs` for a redaction example
-  (1.67x at the codec layer when no modification is needed).
+  (~1.65x at the codec layer when no modification is needed).
   `ViewHandler`/`ViewClientStreamingHandler` now take `CodecFormat`
   and return the response already encoded, dropping the `Res` type
   param.
