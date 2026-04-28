@@ -17,55 +17,49 @@ pub trait WellKnownTypesService: Send + Sync + 'static {
     /// CreateEvent creates an event with a timestamp.
     fn create_event(
         &self,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventRequestView<
                 'static,
             >,
         >,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
                 crate::proto::anthropic::connectrpc::wkt::v1::CreateEventResponse,
-                ::connectrpc::Context,
-            ),
-            ::connectrpc::ConnectError,
+            > + Send + 'static + use<Self>,
         >,
     > + Send;
     /// CalculateDuration calculates the duration between two timestamps.
     fn calculate_duration(
         &self,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationRequestView<
                 'static,
             >,
         >,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
                 crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationResponse,
-                ::connectrpc::Context,
-            ),
-            ::connectrpc::ConnectError,
+            > + Send + 'static + use<Self>,
         >,
     > + Send;
     /// ProcessMetadata processes arbitrary metadata as a Struct.
     fn process_metadata(
         &self,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataRequestView<
                 'static,
             >,
         >,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
                 crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataResponse,
-                ::connectrpc::Context,
-            ),
-            ::connectrpc::ConnectError,
+            > + Send + 'static + use<Self>,
         >,
     > + Send;
 }
@@ -192,7 +186,7 @@ for WellKnownTypesServiceServer<T> {
     fn call_unary(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -208,12 +202,11 @@ for WellKnownTypesServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.create_event(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.create_event(ctx, req)
+                        .await?
+                        .encode::<
+                            crate::proto::anthropic::connectrpc::wkt::v1::CreateEventResponse,
+                        >(format)
                 })
             }
             "CalculateDuration" => {
@@ -222,12 +215,11 @@ for WellKnownTypesServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.calculate_duration(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.calculate_duration(ctx, req)
+                        .await?
+                        .encode::<
+                            crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationResponse,
+                        >(format)
                 })
             }
             "ProcessMetadata" => {
@@ -236,12 +228,11 @@ for WellKnownTypesServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.process_metadata(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.process_metadata(ctx, req)
+                        .await?
+                        .encode::<
+                            crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataResponse,
+                        >(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -250,7 +241,7 @@ for WellKnownTypesServiceServer<T> {
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -266,7 +257,7 @@ for WellKnownTypesServiceServer<T> {
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -282,7 +273,7 @@ for WellKnownTypesServiceServer<T> {
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {

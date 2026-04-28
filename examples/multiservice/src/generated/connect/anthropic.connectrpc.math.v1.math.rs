@@ -17,19 +17,17 @@ pub trait MathService: Send + Sync + 'static {
     /// Add returns the sum of two numbers.
     fn add(
         &self,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView<
                 'static,
             >,
         >,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
                 crate::proto::anthropic::connectrpc::math::v1::AddResponse,
-                ::connectrpc::Context,
-            ),
-            ::connectrpc::ConnectError,
+            > + Send + 'static + use<Self>,
         >,
     > + Send;
 }
@@ -126,7 +124,7 @@ impl<T: MathService> ::connectrpc::Dispatcher for MathServiceServer<T> {
     fn call_unary(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -142,12 +140,11 @@ impl<T: MathService> ::connectrpc::Dispatcher for MathServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.add(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.add(ctx, req)
+                        .await?
+                        .encode::<
+                            crate::proto::anthropic::connectrpc::math::v1::AddResponse,
+                        >(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -156,7 +153,7 @@ impl<T: MathService> ::connectrpc::Dispatcher for MathServiceServer<T> {
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -172,7 +169,7 @@ impl<T: MathService> ::connectrpc::Dispatcher for MathServiceServer<T> {
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -188,7 +185,7 @@ impl<T: MathService> ::connectrpc::Dispatcher for MathServiceServer<T> {
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {

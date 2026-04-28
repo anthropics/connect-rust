@@ -905,6 +905,7 @@ fn generate_service_server(
         let method_name = m.name.as_deref().unwrap_or("");
         let method_snake = make_field_ident(&method_name.to_snake_case());
         let input_view = resolver.rust_view_type(m.input_type.as_deref().unwrap_or(""), package)?;
+        let output_type = resolver.rust_type(m.output_type.as_deref().unwrap_or(""), package)?;
         let cs = m.client_streaming.unwrap_or(false);
         let ss = m.server_streaming.unwrap_or(false);
 
@@ -915,8 +916,8 @@ fn generate_service_server(
                     let svc = ::std::sync::Arc::clone(&self.inner);
                     Box::pin(async move {
                         let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<#input_view>(requests, format);
-                        let (resp_stream, ctx) = svc.#method_snake(ctx, req_stream).await?;
-                        Ok((::connectrpc::dispatcher::codegen::encode_response_stream(resp_stream, format), ctx))
+                        let resp = svc.#method_snake(ctx, req_stream).await?;
+                        Ok(resp.map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(s, format)))
                     })
                 }
             });
@@ -927,9 +928,7 @@ fn generate_service_server(
                     let svc = ::std::sync::Arc::clone(&self.inner);
                     Box::pin(async move {
                         let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<#input_view>(requests, format);
-                        let (res, ctx) = svc.#method_snake(ctx, req_stream).await?;
-                        let bytes = ::connectrpc::dispatcher::codegen::encode_response(&res, format)?;
-                        Ok((bytes, ctx))
+                        svc.#method_snake(ctx, req_stream).await?.encode::<#output_type>(format)
                     })
                 }
             });
@@ -940,8 +939,8 @@ fn generate_service_server(
                     let svc = ::std::sync::Arc::clone(&self.inner);
                     Box::pin(async move {
                         let req = ::connectrpc::dispatcher::codegen::decode_request_view::<#input_view>(request, format)?;
-                        let (resp_stream, ctx) = svc.#method_snake(ctx, req).await?;
-                        Ok((::connectrpc::dispatcher::codegen::encode_response_stream(resp_stream, format), ctx))
+                        let resp = svc.#method_snake(ctx, req).await?;
+                        Ok(resp.map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(s, format)))
                     })
                 }
             });
@@ -952,9 +951,7 @@ fn generate_service_server(
                     let svc = ::std::sync::Arc::clone(&self.inner);
                     Box::pin(async move {
                         let req = ::connectrpc::dispatcher::codegen::decode_request_view::<#input_view>(request, format)?;
-                        let (res, ctx) = svc.#method_snake(ctx, req).await?;
-                        let bytes = ::connectrpc::dispatcher::codegen::encode_response(&res, format)?;
-                        Ok((bytes, ctx))
+                        svc.#method_snake(ctx, req).await?.encode::<#output_type>(format)
                     })
                 }
             });
@@ -1013,7 +1010,7 @@ fn generate_service_server(
             fn call_unary(
                 &self,
                 path: &str,
-                ctx: ::connectrpc::Context,
+                ctx: ::connectrpc::RequestContext,
                 request: ::buffa::bytes::Bytes,
                 format: ::connectrpc::CodecFormat,
             ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -1031,7 +1028,7 @@ fn generate_service_server(
             fn call_server_streaming(
                 &self,
                 path: &str,
-                ctx: ::connectrpc::Context,
+                ctx: ::connectrpc::RequestContext,
                 request: ::buffa::bytes::Bytes,
                 format: ::connectrpc::CodecFormat,
             ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -1048,7 +1045,7 @@ fn generate_service_server(
             fn call_client_streaming(
                 &self,
                 path: &str,
-                ctx: ::connectrpc::Context,
+                ctx: ::connectrpc::RequestContext,
                 requests: ::connectrpc::dispatcher::codegen::RequestStream,
                 format: ::connectrpc::CodecFormat,
             ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -1065,7 +1062,7 @@ fn generate_service_server(
             fn call_bidi_streaming(
                 &self,
                 path: &str,
-                ctx: ::connectrpc::Context,
+                ctx: ::connectrpc::RequestContext,
                 requests: ::connectrpc::dispatcher::codegen::RequestStream,
                 format: ::connectrpc::CodecFormat,
             ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -1117,9 +1114,9 @@ fn generate_trait_method(
             #method_doc_tokens
             fn #method_snake(
                 &self,
-                ctx: ::connectrpc::Context,
+                ctx: ::connectrpc::RequestContext,
                 request: ::buffa::view::OwnedView<#input_view_type<'static>>,
-            ) -> impl ::std::future::Future<Output = Result<(::std::pin::Pin<Box<dyn ::futures::Stream<Item = Result<#output_type, ::connectrpc::ConnectError>> + Send>>, ::connectrpc::Context), ::connectrpc::ConnectError>> + Send;
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<#output_type>>> + Send;
         })
     } else if client_streaming && !server_streaming {
         // Client streaming method
@@ -1127,9 +1124,9 @@ fn generate_trait_method(
             #method_doc_tokens
             fn #method_snake(
                 &self,
-                ctx: ::connectrpc::Context,
-                requests: ::std::pin::Pin<Box<dyn ::futures::Stream<Item = Result<::buffa::view::OwnedView<#input_view_type<'static>>, ::connectrpc::ConnectError>> + Send>>,
-            ) -> impl ::std::future::Future<Output = Result<(#output_type, ::connectrpc::Context), ::connectrpc::ConnectError>> + Send;
+                ctx: ::connectrpc::RequestContext,
+                requests: ::connectrpc::ServiceStream<::buffa::view::OwnedView<#input_view_type<'static>>>,
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + 'static + use<Self>>> + Send;
         })
     } else if client_streaming && server_streaming {
         // Bidi streaming method
@@ -1137,9 +1134,9 @@ fn generate_trait_method(
             #method_doc_tokens
             fn #method_snake(
                 &self,
-                ctx: ::connectrpc::Context,
-                requests: ::std::pin::Pin<Box<dyn ::futures::Stream<Item = Result<::buffa::view::OwnedView<#input_view_type<'static>>, ::connectrpc::ConnectError>> + Send>>,
-            ) -> impl ::std::future::Future<Output = Result<(::std::pin::Pin<Box<dyn ::futures::Stream<Item = Result<#output_type, ::connectrpc::ConnectError>> + Send>>, ::connectrpc::Context), ::connectrpc::ConnectError>> + Send;
+                ctx: ::connectrpc::RequestContext,
+                requests: ::connectrpc::ServiceStream<::buffa::view::OwnedView<#input_view_type<'static>>>,
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<#output_type>>> + Send;
         })
     } else {
         // Unary method
@@ -1147,9 +1144,9 @@ fn generate_trait_method(
             #method_doc_tokens
             fn #method_snake(
                 &self,
-                ctx: ::connectrpc::Context,
+                ctx: ::connectrpc::RequestContext,
                 request: ::buffa::view::OwnedView<#input_view_type<'static>>,
-            ) -> impl ::std::future::Future<Output = Result<(#output_type, ::connectrpc::Context), ::connectrpc::ConnectError>> + Send;
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + 'static + use<Self>>> + Send;
         })
     }
 }

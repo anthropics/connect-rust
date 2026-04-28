@@ -18,19 +18,17 @@ pub trait GreetService: Send + Sync + 'static {
     /// This method has no side effects and supports GET requests.
     fn greet(
         &self,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView<
                 'static,
             >,
         >,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
                 crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
-                ::connectrpc::Context,
-            ),
-            ::connectrpc::ConnectError,
+            > + Send + 'static + use<Self>,
         >,
     > + Send;
 }
@@ -127,7 +125,7 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
     fn call_unary(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -143,12 +141,11 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.greet(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.greet(ctx, req)
+                        .await?
+                        .encode::<
+                            crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
+                        >(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -157,7 +154,7 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -173,7 +170,7 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -189,7 +186,7 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
