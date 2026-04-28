@@ -123,6 +123,16 @@ pub struct Response<B> {
 }
 
 impl<B> Response<B> {
+    /// Shorthand for `Ok(Response::from(body))` — the bare-body happy
+    /// path.
+    ///
+    /// Use `Ok(Response::new(body).with_header(...))` when setting
+    /// response metadata; this constructor is for the common case of
+    /// "just the body".
+    pub fn ok(body: B) -> ServiceResult<B> {
+        Ok(Self::from(body))
+    }
+
     /// Wrap a body with empty response metadata.
     pub fn new(body: B) -> Self {
         Self {
@@ -335,6 +345,14 @@ impl<B> Response<B> {
 mod tests {
     use super::*;
     use buffa_types::google::protobuf::StringValue;
+
+    #[test]
+    fn response_ok_shorthand() {
+        let r: ServiceResult<u32> = Response::ok(42);
+        let r = r.unwrap();
+        assert_eq!(r.body, 42);
+        assert!(r.headers.is_empty());
+    }
 
     #[test]
     fn response_from_body() {

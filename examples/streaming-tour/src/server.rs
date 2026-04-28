@@ -49,11 +49,10 @@ impl NumberService for NumberServiceImpl {
         // are Option<T>. unwrap_or(0) treats unset as zero, mirroring
         // the proto3 implicit-presence semantics.
         let v = request.value.unwrap_or(0) as i64;
-        Ok(SquareResponse {
+        Response::ok(SquareResponse {
             squared: Some(v * v),
             ..Default::default()
-        }
-        .into())
+        })
     }
 
     /// Server streaming: emit `count` consecutive integers from `start`.
@@ -83,11 +82,10 @@ impl NumberService for NumberServiceImpl {
         while let Some(req) = requests.next().await {
             total += req?.value.unwrap_or(0) as i64;
         }
-        Ok(SumResponse {
+        Response::ok(SumResponse {
             total: Some(total),
             ..Default::default()
-        }
-        .into())
+        })
     }
 
     /// Bidirectional streaming: emit a running total after each request.

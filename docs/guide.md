@@ -123,7 +123,7 @@ Implement the service:
 // src/main.rs
 use std::sync::Arc;
 use buffa::view::OwnedView;
-use connectrpc::{RequestContext, Router, ServiceResult};
+use connectrpc::{RequestContext, Response, Router, ServiceResult};
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
@@ -139,11 +139,10 @@ impl GreetService for MyGreet {
         _ctx: RequestContext,
         req: OwnedView<GreetRequestView<'static>>,
     ) -> ServiceResult<GreetResponse> {
-        Ok(GreetResponse {
+        Response::ok(GreetResponse {
             greeting: format!("Hello, {}!", req.name),
             ..Default::default()
-        }
-        .into())
+        })
     }
 }
 
@@ -229,11 +228,10 @@ impl GreetService for MyGreet {
     ) -> ServiceResult<GreetResponse> {
         // req derefs to the view: zero-copy field access.
         // String fields are &str borrowed from the request buffer.
-        Ok(GreetResponse {
+        Response::ok(GreetResponse {
             greeting: format!("Hello, {}!", req.name),
             ..Default::default()
-        }
-        .into())
+        })
     }
 }
 ```
@@ -262,7 +260,7 @@ response-side metadata lives on `Response<B>` (returned):
 | `compress` | Override the server's compression policy for this RPC |
 
 `ServiceResult<B>` is `Result<Response<B>, ConnectError>`. The happy
-path is `Ok(body.into())`; to attach response metadata, use the
+path is `Response::ok(body)`; to attach response metadata, use the
 builder:
 
 ```rust
@@ -395,7 +393,7 @@ async fn sum(
     while let Some(req) = requests.next().await {
         total += req?.value.unwrap_or(0) as i64;
     }
-    Ok(SumResponse { total: Some(total), ..Default::default() }.into())
+    Response::ok(SumResponse { total: Some(total), ..Default::default() })
 }
 ```
 

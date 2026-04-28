@@ -9,7 +9,7 @@
 //! the actual recovery.
 
 use buffa::view::OwnedView;
-use connectrpc::{ConnectRpcService, RequestContext, ServiceResult};
+use connectrpc::{ConnectRpcService, RequestContext, Response, ServiceResult};
 use rpc_bench::connect::bench::noutf8::v1::*;
 use rpc_bench::proto::bench::noutf8::v1::__buffa::view::LogRequestView;
 use rpc_bench::proto::bench::noutf8::v1::*;
@@ -61,14 +61,13 @@ impl LogIngestService for LogIngestImpl {
             }
         }
 
-        Ok(LogIngestResponse {
+        Response::ok(LogIngestResponse {
             count: Some(count),
             total_message_bytes: Some(total_message_bytes),
             total_label_bytes: Some(total_label_bytes),
             max_severity: Some(max_severity),
             ..Default::default()
-        }
-        .into())
+        })
     }
 }
 

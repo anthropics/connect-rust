@@ -56,8 +56,8 @@ increment the patch version.
   the body plus optional response headers/trailers/compression hint.
   Unary and client-stream methods return
   `ServiceResult<impl Encodable<Out>>`; server-stream and bidi
-  return `ServiceResult<ServiceStream<Out>>`. The happy path is
-  `Ok(body.into())`; for streaming bodies use
+  return `ServiceResult<ServiceStream<Out>>`. `Response::ok(body)` is
+  the bare-body happy-path shorthand; for streaming bodies use
   `Ok(Response::stream(s))`. `Encodable<M>` is the new "encodes as
   M" bound on response bodies — only the owned `M` implements it
   today; a follow-up will add a view-body impl for borrowed

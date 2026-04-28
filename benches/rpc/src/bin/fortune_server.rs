@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use connectrpc::{ConnectError, ConnectRpcService, RequestContext, ServiceResult};
+use connectrpc::{ConnectError, ConnectRpcService, RequestContext, Response, ServiceResult};
 
 use rpc_bench::connect::fortune::v1::*;
 use rpc_bench::fortune;
@@ -37,7 +37,7 @@ impl FortuneService for FortuneServiceImpl {
                 .collect(),
             ..Default::default()
         };
-        Ok(response.into())
+        Response::ok(response)
     }
 }
 

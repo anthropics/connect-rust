@@ -3393,7 +3393,7 @@ mod tests {
                 let cap = Arc::clone(&handler_captured);
                 async move {
                     *cap.lock().unwrap() = ctx.extensions.get::<PeerTag>().cloned();
-                    Ok(buffa_types::Empty::default().into())
+                    crate::Response::ok(buffa_types::Empty::default())
                 }
             }),
         );

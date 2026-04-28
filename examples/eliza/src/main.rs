@@ -44,7 +44,7 @@ use proto::connectrpc::eliza::v1::__buffa::view::*;
 use proto::connectrpc::eliza::v1::*;
 
 use buffa::view::OwnedView;
-use connectrpc::{RequestContext, Router as ConnectRouter, ServiceResult, ServiceStream};
+use connectrpc::{RequestContext, Response, Router as ConnectRouter, ServiceResult, ServiceStream};
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 
@@ -73,11 +73,10 @@ impl ElizaService for ElizaServer {
         // `request.sentence` is a `&str` borrow into the decoded buffer.
         // No allocation, no copy — `eliza::reply` just reads it.
         let (reply, _end_session) = eliza::reply(request.sentence);
-        Ok(SayResponse {
+        Response::ok(SayResponse {
             sentence: reply,
             ..Default::default()
-        }
-        .into())
+        })
     }
 
     async fn introduce(

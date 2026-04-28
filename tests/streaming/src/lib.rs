@@ -33,12 +33,11 @@ mod tests {
             request: OwnedView<EchoRequestView<'static>>,
         ) -> ServiceResult<EchoResponse> {
             let request = request.to_owned_message();
-            Ok(EchoResponse {
+            Response::ok(EchoResponse {
                 sequence: request.sequence,
                 data: request.data,
                 ..Default::default()
-            }
-            .into())
+            })
         }
 
         async fn server_stream(
@@ -79,12 +78,11 @@ mod tests {
                 count += 1;
                 parts.push(req.data);
             }
-            Ok(EchoResponse {
+            Response::ok(EchoResponse {
                 sequence: count,
                 data: parts.join(","),
                 ..Default::default()
-            }
-            .into())
+            })
         }
 
         async fn bidi_stream(

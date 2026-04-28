@@ -27,11 +27,10 @@ impl NumberService for NumberServiceImpl {
         request: OwnedView<SquareRequestView<'static>>,
     ) -> ServiceResult<SquareResponse> {
         let v = request.value.unwrap_or(0) as i64;
-        Ok(SquareResponse {
+        Response::ok(SquareResponse {
             squared: Some(v * v),
             ..Default::default()
-        }
-        .into())
+        })
     }
 
     async fn range(
@@ -59,11 +58,10 @@ impl NumberService for NumberServiceImpl {
         while let Some(req) = requests.next().await {
             total += req?.value.unwrap_or(0) as i64;
         }
-        Ok(SumResponse {
+        Response::ok(SumResponse {
             total: Some(total),
             ..Default::default()
-        }
-        .into())
+        })
     }
 
     async fn running_sum(

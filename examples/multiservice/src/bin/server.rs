@@ -22,7 +22,7 @@ use buffa_types::google::protobuf::Timestamp;
 use buffa_types::google::protobuf::Value;
 use connectrpc::ConnectError;
 use connectrpc::Router as ConnectRouter;
-use connectrpc::{RequestContext, ServiceResult};
+use connectrpc::{RequestContext, Response, ServiceResult};
 use multiservice_example::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView;
 use multiservice_example::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView;
 use multiservice_example::proto::anthropic::connectrpc::wkt::v1::__buffa::view::{
@@ -50,7 +50,7 @@ impl GreetService for MyGreetService {
             message: format!("Hello, {}!", request.name),
             ..Default::default()
         };
-        Ok(response.into())
+        Response::ok(response)
     }
 }
 
@@ -75,7 +75,7 @@ impl MathService for MyMathService {
             result,
             ..Default::default()
         };
-        Ok(response.into())
+        Response::ok(response)
     }
 }
 
@@ -131,7 +131,7 @@ impl WellKnownTypesService for MyWellKnownTypesService {
             event: event.into(),
             ..Default::default()
         };
-        Ok(response.into())
+        Response::ok(response)
     }
 
     async fn calculate_duration(
@@ -165,7 +165,7 @@ impl WellKnownTypesService for MyWellKnownTypesService {
             duration: duration.into(),
             ..Default::default()
         };
-        Ok(response.into())
+        Response::ok(response)
     }
 
     async fn process_metadata(
@@ -208,7 +208,7 @@ impl WellKnownTypesService for MyWellKnownTypesService {
             field_count,
             ..Default::default()
         };
-        Ok(response.into())
+        Response::ok(response)
     }
 }
 

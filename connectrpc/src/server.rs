@@ -775,7 +775,7 @@ mod tests {
                             entered_tx.send(()).ok();
                             release_rx.await.ok();
                         }
-                        Ok(buffa_types::Empty::default().into())
+                        crate::Response::ok(buffa_types::Empty::default())
                     }
                 },
             ),
@@ -957,7 +957,7 @@ mod tests {
                     let cap = Arc::clone(&handler_captured);
                     async move {
                         *cap.lock().unwrap() = ctx.extensions.get::<PeerAddr>().cloned();
-                        Ok(buffa_types::Empty::default().into())
+                        crate::Response::ok(buffa_types::Empty::default())
                     }
                 },
             ),
@@ -1074,7 +1074,7 @@ mod tests {
                     let cap = Arc::clone(&handler_captured);
                     async move {
                         *cap.lock().unwrap() = ctx.extensions.get::<PeerCerts>().cloned();
-                        Ok(buffa_types::Empty::default().into())
+                        crate::Response::ok(buffa_types::Empty::default())
                     }
                 },
             ),

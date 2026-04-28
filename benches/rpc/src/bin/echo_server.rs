@@ -5,7 +5,7 @@
 //! the per-request cost of the connectrpc-rs request pipeline.
 
 use buffa::view::OwnedView;
-use connectrpc::{ConnectRpcService, RequestContext, ServiceResult};
+use connectrpc::{ConnectRpcService, RequestContext, Response, ServiceResult};
 use rpc_bench::connect::bench::v1::*;
 use rpc_bench::proto::bench::v1::__buffa::view::EchoRequestView;
 use rpc_bench::proto::bench::v1::*;
@@ -24,7 +24,7 @@ impl EchoService for EchoImpl {
             message: req.message.to_string(),
             ..Default::default()
         };
-        Ok(resp.into())
+        Response::ok(resp)
     }
 }
 

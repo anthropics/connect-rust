@@ -39,11 +39,10 @@ impl BenchService for BenchServiceImpl {
         req: OwnedView<BenchRequestView<'static>>,
     ) -> ServiceResult<BenchResponse> {
         let req = req.to_owned_message();
-        Ok(BenchResponse {
+        Response::ok(BenchResponse {
             payload: req.payload,
             ..Default::default()
-        }
-        .into())
+        })
     }
 
     async fn server_stream(
@@ -82,11 +81,10 @@ impl BenchService for BenchServiceImpl {
             let req = req?.to_owned_message();
             last_payload = req.payload;
         }
-        Ok(BenchResponse {
+        Response::ok(BenchResponse {
             payload: last_payload,
             ..Default::default()
-        }
-        .into())
+        })
     }
 
     async fn log_unary(
@@ -97,11 +95,10 @@ impl BenchService for BenchServiceImpl {
         // Realistic handler: iterate records, read string fields, compute aggregate.
         // All field access is zero-copy via &str borrows from the request buffer.
         let count = process_log_records_view(&req.records);
-        Ok(LogResponse {
+        Response::ok(LogResponse {
             count,
             ..Default::default()
-        }
-        .into())
+        })
     }
 
     async fn log_unary_owned(
@@ -112,11 +109,10 @@ impl BenchService for BenchServiceImpl {
         // Same handler logic but using owned types (pre-OwnedView path).
         let req = req.to_owned_message();
         let count = process_log_records_owned(&req.records);
-        Ok(LogResponse {
+        Response::ok(LogResponse {
             count,
             ..Default::default()
-        }
-        .into())
+        })
     }
 
     async fn bidi_stream(
