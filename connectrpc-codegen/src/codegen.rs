@@ -84,7 +84,13 @@ fn emit_service_files(
     file_to_generate: &[String],
     resolver: &TypeResolver<'_>,
 ) -> Result<Vec<GeneratedFile>> {
+    use std::collections::BTreeSet;
     let mut out = Vec::new();
+    // Dedup output-type Encodable impls across the whole batch, not per
+    // file: two files in the same package whose RPCs share an output
+    // type would otherwise both emit `impl Encodable<Out> for OutView`
+    // and collide with E0119 once stitched into one module.
+    let mut encodable_seen: BTreeSet<String> = BTreeSet::new();
     for file_name in file_to_generate {
         let file_desc = proto_file
             .iter()
@@ -93,7 +99,7 @@ fn emit_service_files(
         if let Some(file) = file_desc
             && !file.service.is_empty()
         {
-            let service_tokens = generate_connect_services(file, resolver)?;
+            let service_tokens = generate_connect_services(file, resolver, &mut encodable_seen)?;
             let service_code = format_token_stream(&service_tokens)?;
             // In the unified path the service code is appended to buffa's
             // `<stem>.rs` (Owned) file by [`generate_files`], so name and
@@ -496,6 +502,7 @@ fn bare_type_name(proto_fqn: &str) -> &str {
 fn generate_connect_services(
     file: &FileDescriptorProto,
     resolver: &TypeResolver<'_>,
+    encodable_seen: &mut std::collections::BTreeSet<String>,
 ) -> Result<TokenStream> {
     let mut tokens = TokenStream::new();
 
@@ -504,7 +511,11 @@ fn generate_connect_services(
     // files can be `include!`d into the same module without E0252 duplicate
     // import errors.
 
-    tokens.extend(generate_encodable_view_impls(file, resolver)?);
+    tokens.extend(generate_encodable_view_impls(
+        file,
+        resolver,
+        encodable_seen,
+    )?);
 
     for service in &file.service {
         tokens.extend(generate_service(file, service, resolver)?);
@@ -515,22 +526,25 @@ fn generate_connect_services(
 
 /// Emit `impl Encodable<M> for MView<'_>` and
 /// `impl Encodable<M> for OwnedView<MView<'static>>` for every distinct
-/// RPC output type in this file.
+/// RPC output type not already in `seen` (proto FQN).
 ///
 /// These can't be runtime blankets (the `M: Message + Serialize` blanket
 /// in `connectrpc::response` would conflict by coherence), so they're
 /// emitted per concrete type. Orphan rules allow it because `M` (a local
 /// type) appears in the trait parameters.
 ///
+/// `seen` is owned by the caller's batch loop so an output type
+/// referenced from multiple input files only gets one impl pair (the
+/// stitcher would otherwise hit E0119).
+///
 /// Skipped for output types that resolve to an absolute (`::`) extern
 /// path, since those are foreign and would violate orphan rules.
 fn generate_encodable_view_impls(
     file: &FileDescriptorProto,
     resolver: &TypeResolver<'_>,
+    seen: &mut std::collections::BTreeSet<String>,
 ) -> Result<TokenStream> {
-    use std::collections::BTreeSet;
     let package = file.package.as_deref().unwrap_or("");
-    let mut seen: BTreeSet<String> = BTreeSet::new();
     let mut out = TokenStream::new();
     for service in &file.service {
         for m in &service.method {
@@ -1586,7 +1600,8 @@ mod tests {
             .into_iter()
             .collect::<Vec<_>>();
         let resolver = TypeResolver::new(files, &target_name, &config, require_extern);
-        Ok(generate_connect_services(&files[target_idx], &resolver)?.to_string())
+        let mut seen = std::collections::BTreeSet::new();
+        Ok(generate_connect_services(&files[target_idx], &resolver, &mut seen)?.to_string())
     }
 
     #[test]
@@ -1660,6 +1675,68 @@ mod tests {
         assert!(
             !code.contains("encode_view_body"),
             "extern output type must not get Encodable impl: {code}"
+        );
+    }
+
+    #[test]
+    fn encodable_view_impls_deduped_across_files() {
+        // Two service files in different packages both return
+        // `.common.v1.Reply`. The stitcher mounts both files into one
+        // module tree, so the Encodable<Reply> impls must be emitted
+        // exactly once across the batch (else E0119).
+        let common = FileDescriptorProto {
+            name: Some("common.proto".into()),
+            package: Some("common.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Reply".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let svc = |name: &str, pkg: &str| FileDescriptorProto {
+            name: Some(name.into()),
+            package: Some(pkg.into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Req".into()),
+                ..Default::default()
+            }],
+            service: vec![ServiceDescriptorProto {
+                name: Some("S".into()),
+                method: vec![MethodDescriptorProto {
+                    name: Some("Call".into()),
+                    input_type: Some(format!(".{pkg}.Req")),
+                    output_type: Some(".common.v1.Reply".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let files = vec![common, svc("a.proto", "a.v1"), svc("b.proto", "b.v1")];
+
+        let generated = generate_files(
+            &files,
+            &["a.proto".into(), "b.proto".into()],
+            &Options::default(),
+        )
+        .unwrap();
+        let combined: String = generated
+            .iter()
+            .filter(|f| f.kind == GeneratedFileKind::Owned)
+            .map(|f| f.content.as_str())
+            .collect();
+
+        let view_impl = "impl ::connectrpc::Encodable<super::super::common::v1::Reply>\nfor super::super::common::v1::__buffa::view::ReplyView<'_>";
+        let owned_view_impl = "impl ::connectrpc::Encodable<super::super::common::v1::Reply>\nfor ::buffa::view::OwnedView<";
+        assert_eq!(
+            combined.matches(view_impl).count(),
+            1,
+            "Encodable<Reply> for ReplyView<'_> must appear once: {combined}"
+        );
+        assert_eq!(
+            combined.matches(owned_view_impl).count(),
+            1,
+            "Encodable<Reply> for OwnedView<ReplyView> must appear once: {combined}"
         );
     }
 
@@ -2169,8 +2246,9 @@ mod tests {
         let targets = vec!["alpha.proto".to_string(), "beta.proto".to_string()];
         let resolver = TypeResolver::new(&files, &targets, &config, false);
 
-        let code_a = generate_connect_services(&files[0], &resolver).unwrap();
-        let code_b = generate_connect_services(&files[1], &resolver).unwrap();
+        let mut seen = std::collections::BTreeSet::new();
+        let code_a = generate_connect_services(&files[0], &resolver, &mut seen).unwrap();
+        let code_b = generate_connect_services(&files[1], &resolver, &mut seen).unwrap();
 
         let formatted_a = format_token_stream(&code_a).unwrap();
         let formatted_b = format_token_stream(&code_b).unwrap();

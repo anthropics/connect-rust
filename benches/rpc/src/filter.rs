@@ -49,14 +49,53 @@ pub fn sample_record(i: u32, sensitive: bool) -> Record {
     }
 }
 
-/// Build a batch of `n` encoded request bytes where `pct` percent have a
-/// sensitive field set.
-pub fn sample_batch(n: usize, pct: u32) -> Vec<bytes::Bytes> {
-    use buffa::Message as _;
+/// Build a batch of `n` records where `pct` percent have a sensitive
+/// field set, interleaved across the batch.
+///
+/// The sensitive records are scattered via a coprime stride (`i * 37 %
+/// n`) rather than front-loaded, so the `has_sensitive` branch in the
+/// view path isn't trivially predictable. With `n == 100` the count is
+/// exact (37 is coprime to 100, so the stride permutes 0..100).
+pub fn sample_records(n: usize, pct: u32) -> Vec<Record> {
+    let threshold = n * pct as usize / 100;
     (0..n)
         .map(|i| {
-            let sensitive = (i as u32 * 100 / n as u32) < pct;
-            sample_record(i as u32, sensitive).encode_to_bytes()
+            let sensitive = (i * 37) % n < threshold;
+            sample_record(i as u32, sensitive)
         })
         .collect()
+}
+
+/// Build a batch of `n` encoded request bytes where `pct` percent have a
+/// sensitive field set. See [`sample_records`] for the interleave.
+pub fn sample_batch(n: usize, pct: u32) -> Vec<bytes::Bytes> {
+    use buffa::Message as _;
+    sample_records(n, pct)
+        .iter()
+        .map(|r| r.encode_to_bytes())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_records_exact_count_and_interleaved() {
+        for pct in [0, 10, 50, 100] {
+            let recs = sample_records(100, pct);
+            let sensitive: Vec<bool> = recs.iter().map(|r| !r.email.is_empty()).collect();
+            assert_eq!(
+                sensitive.iter().filter(|&&s| s).count(),
+                pct as usize,
+                "{pct}%"
+            );
+            if pct == 50 {
+                // Not front-loaded: at least one of the first 10 is
+                // clean and one of the last 10 is sensitive.
+                assert!(sensitive[..10].iter().any(|&s| !s));
+                assert!(sensitive[90..].iter().any(|&s| s));
+            }
+        }
+    }
 }

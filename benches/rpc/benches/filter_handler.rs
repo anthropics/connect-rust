@@ -63,10 +63,9 @@ fn bench_codec(c: &mut Criterion) {
         }
     }
 
-    let payload_len: u64 = sample_batch(BATCH, 0).iter().map(|b| b.len() as u64).sum();
-
     for pct in RATIOS {
         let batch = sample_batch(BATCH, pct);
+        let payload_len: u64 = batch.iter().map(|b| b.len() as u64).sum();
         let mut group = c.benchmark_group(format!("filter/codec/{pct}pct"));
         group.throughput(Throughput::Bytes(payload_len));
         group.bench_function("owned", |b| {
@@ -156,17 +155,11 @@ fn bench_rpc(c: &mut Criterion) {
     let owned_client = make_client(owned.addr);
     let view_client = make_client(view.addr);
 
-    let payload_len = sample_record(0, false).encoded_len() as u64;
-
     for pct in RATIOS {
-        let reqs: Vec<Record> = (0..BATCH)
-            .map(|i| {
-                let sensitive = (i as u32 * 100 / BATCH as u32) < pct;
-                sample_record(i as u32, sensitive)
-            })
-            .collect();
+        let reqs = sample_records(BATCH, pct);
+        let payload_len: u64 = reqs.iter().map(|r| r.encoded_len() as u64).sum();
         let mut group = c.benchmark_group(format!("filter/rpc/{pct}pct"));
-        group.throughput(Throughput::Bytes(payload_len * BATCH as u64));
+        group.throughput(Throughput::Bytes(payload_len));
         group.bench_with_input(BenchmarkId::from_parameter("owned"), &reqs, |b, reqs| {
             b.to_async(&rt).iter(|| async {
                 for r in reqs {

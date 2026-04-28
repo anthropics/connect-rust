@@ -156,8 +156,9 @@ where
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
 {
-    /// The response body type. Typically `Res`; the [`Encodable`] bound
-    /// lets handlers return a borrowing view in a follow-up.
+    /// The response body type. Typically `Res`, or any
+    /// [`Encodable<Res>`](Encodable) (e.g.
+    /// [`MaybeBorrowed`](crate::MaybeBorrowed)).
     type Body: Encodable<Res> + Send + 'static;
 
     /// Handle a unary RPC request.
@@ -673,6 +674,21 @@ where
 }
 
 /// Helper function to create a view handler from an async function.
+///
+/// The closure receives the negotiated [`CodecFormat`] and returns the
+/// response **already encoded**, so a body that borrows from `&svc` is
+/// encoded before the borrow ends. For a hand-written router this looks
+/// like:
+///
+/// ```rust,ignore
+/// router.route_view(SERVICE, "Foo", view_handler_fn({
+///     let svc = Arc::clone(&svc);
+///     move |ctx, req, format| {
+///         let svc = Arc::clone(&svc);
+///         async move { svc.foo(ctx, req).await?.encode::<FooResponse>(format) }
+///     }
+/// }))
+/// ```
 pub fn view_handler_fn<F, Fut, ReqView>(f: F) -> FnViewHandler<F>
 where
     F: Fn(RequestContext, OwnedView<ReqView>, CodecFormat) -> Fut + Send + Sync + 'static,
