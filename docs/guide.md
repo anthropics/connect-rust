@@ -129,6 +129,7 @@ pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
 }
 use proto::greet::v1::*;
+use proto::greet::v1::__buffa::view::*;
 
 struct MyGreet;
 
