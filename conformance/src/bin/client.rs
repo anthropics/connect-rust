@@ -518,7 +518,7 @@ async fn do_unary_call(
     let proto_bytes = req
         .request_messages
         .first()
-        .map(|m| &m.value[..])
+        .map(|m| m.value.as_ref())
         .unwrap_or(&[]);
 
     // Dispatch based on method to get correct types. Use GET if the request
@@ -730,7 +730,7 @@ async fn do_server_stream_call(
     let proto_bytes = req
         .request_messages
         .first()
-        .map(|m| &m.value[..])
+        .map(|m| m.value.as_ref())
         .unwrap_or(&[]);
 
     use connectrpc_conformance::ServerStreamRequest;
@@ -1034,7 +1034,7 @@ async fn do_client_stream_call(
         .request_messages
         .iter()
         .map(|m| {
-            ClientStreamRequest::decode_from_slice(&m.value[..])
+            ClientStreamRequest::decode_from_slice(m.value.as_ref())
                 .map_err(|e| anyhow::anyhow!("decode request: {e}"))
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1199,7 +1199,7 @@ async fn do_bidi_stream_call(
         .request_messages
         .iter()
         .map(|m| {
-            BidiStreamRequest::decode_from_slice(&m.value[..])
+            BidiStreamRequest::decode_from_slice(m.value.as_ref())
                 .map_err(|e| anyhow::anyhow!("decode request: {e}"))
         })
         .collect::<Result<Vec<_>>>()?;

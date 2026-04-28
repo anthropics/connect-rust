@@ -215,6 +215,16 @@ pub fn generate_services(
 /// delegates to [`generate_services`] — service stubs only. Callers must
 /// run `protoc-gen-buffa` (or equivalent) separately for message types.
 ///
+/// # Output
+///
+/// Per proto with at least one `service`: a `<stem>.rs` content file with
+/// the service stubs. Per package with at least one such proto: a
+/// `<pkg>.mod.rs` stitcher that `include!`s the content files. The
+/// stitcher filename intentionally matches `protoc-gen-buffa`'s, so run
+/// this plugin into a separate output directory and use
+/// `protoc-gen-buffa-packaging` to wire both trees, as shown in this
+/// repo's `buf.gen.yaml` examples.
+///
 /// # Recognized options
 ///
 /// - `buffa_module=<rust_path>` — where you mounted the buffa-generated
@@ -440,8 +450,8 @@ impl<'a> TypeResolver<'a> {
     ///
     /// Under buffa's `__buffa::` ancillary tree, view types live at
     /// `<to-package>::__buffa::view::<within-package>View`, so this uses
-    /// [`rust_type_relative_split`] to find the package boundary and inserts
-    /// the sentinel path between the two halves.
+    /// `CodeGenContext::rust_type_relative_split` to find the package
+    /// boundary and inserts the sentinel path between the two halves.
     fn rust_view_type(&self, proto_fqn: &str, current_package: &str) -> Result<TokenStream> {
         use buffa_codegen::context::SENTINEL_MOD;
         let (to_package, within) =
@@ -1573,6 +1583,53 @@ mod tests {
         assert!(
             code.contains("super :: super :: common :: v1 :: __buffa :: view :: SharedView"),
             "cross-package view path not emitted: {code}"
+        );
+    }
+
+    #[test]
+    fn nested_message_view_type_mirrors_owned_module_nesting() {
+        // Service in example.v1 references Outer.Inner (nested under Outer).
+        // buffa lays out the view as __buffa::view::outer::InnerView, mirroring
+        // the owned outer::Inner layout. rust_view_type must insert the
+        // sentinel at the package boundary, not at the type boundary.
+        let file = FileDescriptorProto {
+            name: Some("nested.proto".into()),
+            package: Some("example.v1".into()),
+            message_type: vec![
+                DescriptorProto {
+                    name: Some("Outer".into()),
+                    nested_type: vec![DescriptorProto {
+                        name: Some("Inner".into()),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+                DescriptorProto {
+                    name: Some("Out".into()),
+                    ..Default::default()
+                },
+            ],
+            service: vec![ServiceDescriptorProto {
+                name: Some("NestedService".into()),
+                method: vec![MethodDescriptorProto {
+                    name: Some("Ping".into()),
+                    input_type: Some(".example.v1.Outer.Inner".into()),
+                    output_type: Some(".example.v1.Out".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+
+        assert!(
+            code.contains("__buffa :: view :: outer :: InnerView"),
+            "nested view path not emitted: {code}"
+        );
+        assert!(
+            code.contains("outer :: Inner"),
+            "nested owned path not emitted: {code}"
         );
     }
 
