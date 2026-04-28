@@ -62,6 +62,7 @@ pub struct Config {
     out_dir: Option<PathBuf>,
     descriptor_source: DescriptorSource,
     include_file: Option<String>,
+    emit_rerun_directives: bool,
     options: Options,
 }
 
@@ -74,6 +75,7 @@ impl Config {
             out_dir: None,
             descriptor_source: DescriptorSource::default(),
             include_file: None,
+            emit_rerun_directives: true,
             options: Options::default(),
         }
     }
@@ -101,6 +103,17 @@ impl Config {
     #[must_use]
     pub fn out_dir(mut self, dir: impl Into<PathBuf>) -> Self {
         self.out_dir = Some(dir.into());
+        self
+    }
+
+    /// Emit `cargo:rerun-if-changed=` directives to stdout (default: `true`).
+    ///
+    /// Set to `false` when running outside a Cargo `build.rs` context (e.g.
+    /// from a Bazel genrule or a standalone host tool) where the directives
+    /// are noise on stdout rather than instructions to a build system.
+    #[must_use]
+    pub fn emit_rerun_directives(mut self, enabled: bool) -> Self {
+        self.emit_rerun_directives = enabled;
         self
     }
 
@@ -285,11 +298,15 @@ impl Config {
             write_if_changed(&include_path, include_src.as_bytes())?;
         }
 
-        // 6. Cargo re-run triggers. In Precompiled mode `self.files` holds
-        // proto-relative names (per the docs on `descriptor_set()`), not
-        // on-disk paths; emitting `rerun-if-changed` for them points cargo at
-        // missing files and forces a rebuild on every invocation. The `.pb`
-        // path is the only real input in that mode.
+        // 6. Cargo re-run triggers. Skipped entirely for non-Cargo callers.
+        // In Precompiled mode `self.files` holds proto-relative names (per
+        // the docs on `descriptor_set()`), not on-disk paths; emitting
+        // `rerun-if-changed` for them points cargo at missing files and
+        // forces a rebuild on every invocation. The `.pb` path is the only
+        // real input in that mode.
+        if !self.emit_rerun_directives {
+            return Ok(());
+        }
         match &self.descriptor_source {
             DescriptorSource::Precompiled(p) => {
                 println!("cargo:rerun-if-changed={}", p.display());
@@ -575,7 +592,14 @@ mod tests {
         assert!(!cfg.options.buffa.strict_utf8_mapping);
         assert!(cfg.options.buffa.generate_json);
         assert!(cfg.options.buffa.emit_register_fn);
+        assert!(cfg.emit_rerun_directives);
         assert!(matches!(cfg.descriptor_source, DescriptorSource::Protoc));
+    }
+
+    #[test]
+    fn config_emit_rerun_directives_toggle() {
+        let cfg = Config::new().emit_rerun_directives(false);
+        assert!(!cfg.emit_rerun_directives);
     }
 
     #[test]
