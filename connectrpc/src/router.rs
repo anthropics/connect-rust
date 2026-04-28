@@ -433,7 +433,7 @@ impl crate::dispatcher::Dispatcher for Router {
     fn call_unary(
         &self,
         path: &str,
-        ctx: crate::handler::Context,
+        ctx: crate::response::RequestContext,
         request: bytes::Bytes,
         format: crate::codec::CodecFormat,
     ) -> crate::dispatcher::UnaryResult {
@@ -446,7 +446,7 @@ impl crate::dispatcher::Dispatcher for Router {
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: crate::handler::Context,
+        ctx: crate::response::RequestContext,
         request: bytes::Bytes,
         format: crate::codec::CodecFormat,
     ) -> crate::dispatcher::StreamingResult {
@@ -459,7 +459,7 @@ impl crate::dispatcher::Dispatcher for Router {
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: crate::handler::Context,
+        ctx: crate::response::RequestContext,
         requests: crate::dispatcher::RequestStream,
         format: crate::codec::CodecFormat,
     ) -> crate::dispatcher::UnaryResult {
@@ -472,7 +472,7 @@ impl crate::dispatcher::Dispatcher for Router {
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: crate::handler::Context,
+        ctx: crate::response::RequestContext,
         requests: crate::dispatcher::RequestStream,
         format: crate::codec::CodecFormat,
     ) -> crate::dispatcher::StreamingResult {

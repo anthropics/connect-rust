@@ -766,17 +766,19 @@ mod tests {
         let router = Router::new().route(
             "svc",
             "Slow",
-            crate::handler_fn(move |ctx: crate::Context, _req: buffa_types::Empty| {
-                let chans = Arc::clone(&chans);
-                async move {
-                    let taken = chans.lock().unwrap().take();
-                    if let Some((entered_tx, release_rx)) = taken {
-                        entered_tx.send(()).ok();
-                        release_rx.await.ok();
+            crate::handler_fn(
+                move |_ctx: crate::RequestContext, _req: buffa_types::Empty| {
+                    let chans = Arc::clone(&chans);
+                    async move {
+                        let taken = chans.lock().unwrap().take();
+                        if let Some((entered_tx, release_rx)) = taken {
+                            entered_tx.send(()).ok();
+                            release_rx.await.ok();
+                        }
+                        Ok(buffa_types::Empty::default().into())
                     }
-                    Ok((buffa_types::Empty::default(), ctx))
-                }
-            }),
+                },
+            ),
         );
 
         let bound = Server::bind("127.0.0.1:0").await.unwrap();
@@ -950,13 +952,15 @@ mod tests {
         let router = Router::new().route(
             "svc",
             "Echo",
-            crate::handler_fn(move |ctx: crate::Context, _req: buffa_types::Empty| {
-                let cap = Arc::clone(&handler_captured);
-                async move {
-                    *cap.lock().unwrap() = ctx.extensions.get::<PeerAddr>().cloned();
-                    Ok((buffa_types::Empty::default(), ctx))
-                }
-            }),
+            crate::handler_fn(
+                move |ctx: crate::RequestContext, _req: buffa_types::Empty| {
+                    let cap = Arc::clone(&handler_captured);
+                    async move {
+                        *cap.lock().unwrap() = ctx.extensions.get::<PeerAddr>().cloned();
+                        Ok(buffa_types::Empty::default().into())
+                    }
+                },
+            ),
         );
 
         let bound = Server::bind("127.0.0.1:0").await.unwrap();
@@ -1065,13 +1069,15 @@ mod tests {
         let router = Router::new().route(
             "svc",
             "Echo",
-            crate::handler_fn(move |ctx: crate::Context, _req: buffa_types::Empty| {
-                let cap = Arc::clone(&handler_captured);
-                async move {
-                    *cap.lock().unwrap() = ctx.extensions.get::<PeerCerts>().cloned();
-                    Ok((buffa_types::Empty::default(), ctx))
-                }
-            }),
+            crate::handler_fn(
+                move |ctx: crate::RequestContext, _req: buffa_types::Empty| {
+                    let cap = Arc::clone(&handler_captured);
+                    async move {
+                        *cap.lock().unwrap() = ctx.extensions.get::<PeerCerts>().cloned();
+                        Ok(buffa_types::Empty::default().into())
+                    }
+                },
+            ),
         );
 
         let bound = Server::bind("127.0.0.1:0")

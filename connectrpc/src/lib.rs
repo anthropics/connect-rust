@@ -160,6 +160,7 @@ pub mod error;
 pub(crate) mod grpc_status;
 pub mod handler;
 pub mod protocol;
+pub mod response;
 pub mod router;
 pub mod service;
 
@@ -189,10 +190,9 @@ pub use dispatcher::Chain;
 pub use dispatcher::Dispatcher;
 pub use dispatcher::MethodDescriptor;
 
-// Handler traits and context
+// Handler traits and request/response types
 pub use handler::BidiStreamingHandler;
 pub use handler::ClientStreamingHandler;
-pub use handler::Context;
 pub use handler::Handler;
 pub use handler::StreamingHandler;
 pub use handler::ViewBidiStreamingHandler;
@@ -207,6 +207,11 @@ pub use handler::view_bidi_streaming_handler_fn;
 pub use handler::view_client_streaming_handler_fn;
 pub use handler::view_handler_fn;
 pub use handler::view_streaming_handler_fn;
+pub use response::Encodable;
+pub use response::RequestContext;
+pub use response::Response;
+pub use response::ServiceResult;
+pub use response::ServiceStream;
 
 // Error types
 pub use error::ConnectError;
