@@ -1,3 +1,25 @@
+impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::math::v1::AddResponse>
+for crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::math::v1::AddResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<
+        'static,
+    >,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const MATH_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.math.v1.MathService";
 /// MathService provides basic math operations.
@@ -15,8 +37,8 @@ pub const MATH_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.math.v1.MathSe
 #[allow(clippy::type_complexity)]
 pub trait MathService: Send + Sync + 'static {
     /// Add returns the sum of two numbers.
-    fn add(
-        &self,
+    fn add<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView<
@@ -27,7 +49,7 @@ pub trait MathService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::anthropic::connectrpc::math::v1::AddResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -64,9 +86,15 @@ impl<S: MathService> MathServiceExt for S {
                 "Add",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.add(ctx, req).await }
+                        async move {
+                            svc.add(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::anthropic::connectrpc::math::v1::AddResponse,
+                                >(format)
+                        }
                     })
                 },
             )

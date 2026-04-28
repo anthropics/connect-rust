@@ -1,3 +1,31 @@
+impl ::connectrpc::Encodable<
+    crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
+>
+for crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
+    '_,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<
+    crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
+>
+for ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
+        'static,
+    >,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const GREET_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.greet.v1.GreetService";
 /// GreetService provides greeting functionality.
@@ -16,8 +44,8 @@ pub const GREET_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.greet.v1.Gree
 pub trait GreetService: Send + Sync + 'static {
     /// Greet returns a greeting message for the given name.
     /// This method has no side effects and supports GET requests.
-    fn greet(
-        &self,
+    fn greet<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView<
@@ -28,7 +56,7 @@ pub trait GreetService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -65,9 +93,15 @@ impl<S: GreetService> GreetServiceExt for S {
                 "Greet",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.greet(ctx, req).await }
+                        async move {
+                            svc.greet(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
+                                >(format)
+                        }
                     })
                 },
             )

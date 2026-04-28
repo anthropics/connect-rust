@@ -1,3 +1,23 @@
+impl ::connectrpc::Encodable<crate::proto::bench::v1::BloatEcho>
+for crate::proto::bench::v1::__buffa::view::BloatEchoView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::BloatEcho>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::BloatEchoView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const BLOAT_ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.BloatEchoService";
 /// String-heavy echo payload for measuring ViewEncode impact through
@@ -20,8 +40,8 @@ pub const BLOAT_ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.BloatEchoService";
 #[allow(clippy::type_complexity)]
 pub trait BloatEchoService: Send + Sync + 'static {
     /// Handle the Echo RPC.
-    fn echo(
-        &self,
+    fn echo<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::bench::v1::__buffa::view::BloatEchoView<'static>,
@@ -30,7 +50,7 @@ pub trait BloatEchoService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::bench::v1::BloatEcho,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -67,9 +87,13 @@ impl<S: BloatEchoService> BloatEchoServiceExt for S {
                 "Echo",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.echo(ctx, req).await }
+                        async move {
+                            svc.echo(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::BloatEcho>(format)
+                        }
                     })
                 },
             )

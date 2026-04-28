@@ -1,3 +1,23 @@
+impl ::connectrpc::Encodable<crate::proto::fortune::v1::GetFortunesResponse>
+for crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::fortune::v1::GetFortunesResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const FORTUNE_SERVICE_SERVICE_NAME: &str = "fortune.v1.FortuneService";
 /// Server trait for FortuneService.
@@ -15,8 +35,8 @@ pub const FORTUNE_SERVICE_SERVICE_NAME: &str = "fortune.v1.FortuneService";
 #[allow(clippy::type_complexity)]
 pub trait FortuneService: Send + Sync + 'static {
     /// Handle the GetFortunes RPC.
-    fn get_fortunes(
-        &self,
+    fn get_fortunes<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView<'static>,
@@ -25,7 +45,7 @@ pub trait FortuneService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::fortune::v1::GetFortunesResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -62,9 +82,15 @@ impl<S: FortuneService> FortuneServiceExt for S {
                 "GetFortunes",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.get_fortunes(ctx, req).await }
+                        async move {
+                            svc.get_fortunes(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::fortune::v1::GetFortunesResponse,
+                                >(format)
+                        }
                     })
                 },
             )

@@ -1,3 +1,63 @@
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::SayResponse>
+for crate::proto::connectrpc::eliza::v1::__buffa::view::SayResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::SayResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::SayResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::ConverseResponse>
+for crate::proto::connectrpc::eliza::v1::__buffa::view::ConverseResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::ConverseResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::ConverseResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::IntroduceResponse>
+for crate::proto::connectrpc::eliza::v1::__buffa::view::IntroduceResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::IntroduceResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::IntroduceResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const ELIZA_SERVICE_SERVICE_NAME: &str = "connectrpc.eliza.v1.ElizaService";
 /// ElizaService provides a way to talk to Eliza, a port of the DOCTOR script
@@ -20,8 +80,8 @@ pub const ELIZA_SERVICE_SERVICE_NAME: &str = "connectrpc.eliza.v1.ElizaService";
 #[allow(clippy::type_complexity)]
 pub trait ElizaService: Send + Sync + 'static {
     /// Say is a unary RPC. Eliza responds to the prompt with a single sentence.
-    fn say(
-        &self,
+    fn say<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::connectrpc::eliza::v1::__buffa::view::SayRequestView<'static>,
@@ -30,7 +90,7 @@ pub trait ElizaService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::connectrpc::eliza::v1::SayResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
     /// Converse is a bidirectional RPC. The caller may exchange multiple
@@ -104,9 +164,15 @@ impl<S: ElizaService> ElizaServiceExt for S {
                 "Say",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.say(ctx, req).await }
+                        async move {
+                            svc.say(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::connectrpc::eliza::v1::SayResponse,
+                                >(format)
+                        }
                     })
                 },
             )

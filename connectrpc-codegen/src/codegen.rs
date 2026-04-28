@@ -504,11 +504,67 @@ fn generate_connect_services(
     // files can be `include!`d into the same module without E0252 duplicate
     // import errors.
 
+    tokens.extend(generate_encodable_view_impls(file, resolver)?);
+
     for service in &file.service {
         tokens.extend(generate_service(file, service, resolver)?);
     }
 
     Ok(tokens)
+}
+
+/// Emit `impl Encodable<M> for MView<'_>` and
+/// `impl Encodable<M> for OwnedView<MView<'static>>` for every distinct
+/// RPC output type in this file.
+///
+/// These can't be runtime blankets (the `M: Message + Serialize` blanket
+/// in `connectrpc::response` would conflict by coherence), so they're
+/// emitted per concrete type. Orphan rules allow it because `M` (a local
+/// type) appears in the trait parameters.
+///
+/// Skipped for output types that resolve to an absolute (`::`) extern
+/// path, since those are foreign and would violate orphan rules.
+fn generate_encodable_view_impls(
+    file: &FileDescriptorProto,
+    resolver: &TypeResolver<'_>,
+) -> Result<TokenStream> {
+    use std::collections::BTreeSet;
+    let package = file.package.as_deref().unwrap_or("");
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut out = TokenStream::new();
+    for service in &file.service {
+        for m in &service.method {
+            let fqn = m.output_type.as_deref().unwrap_or("");
+            if !seen.insert(fqn.to_string()) {
+                continue;
+            }
+            let path = resolver.resolve_path(fqn, package)?;
+            // Skip foreign types (extern_path → `::crate_name::...`): the
+            // impl would be an orphan in the user's crate.
+            if path.starts_with("::") {
+                continue;
+            }
+            let owned = resolver.rust_type(fqn, package)?;
+            let view = resolver.rust_view_type(fqn, package)?;
+            out.extend(quote! {
+                impl ::connectrpc::Encodable<#owned> for #view<'_> {
+                    fn encode(&self, codec: ::connectrpc::CodecFormat)
+                        -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError>
+                    {
+                        ::connectrpc::encode_view_body(self, codec)
+                    }
+                }
+                impl ::connectrpc::Encodable<#owned> for ::buffa::view::OwnedView<#view<'static>> {
+                    fn encode(&self, codec: ::connectrpc::CodecFormat)
+                        -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError>
+                    {
+                        ::connectrpc::encode_view_body(&**self, codec)
+                    }
+                }
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// Generate code for a single service.
@@ -626,15 +682,20 @@ fn generate_service(
                 }
             } else if client_streaming && !server_streaming {
                 // Client streaming method
+                let output_type = resolver
+                    .rust_type(m.output_type.as_deref().unwrap_or(""), package)
+                    .unwrap();
                 quote! {
                     .route_view_client_stream(
                         #service_name_const,
                         #method_name,
                         ::connectrpc::view_client_streaming_handler_fn({
                             let svc = ::std::sync::Arc::clone(&self);
-                            move |ctx, req| {
+                            move |ctx, req, format| {
                                 let svc = ::std::sync::Arc::clone(&svc);
-                                async move { svc.#method_snake(ctx, req).await }
+                                async move {
+                                    svc.#method_snake(ctx, req).await?.encode::<#output_type>(format)
+                                }
                             }
                         }),
                     )
@@ -667,6 +728,9 @@ fn generate_service(
                 } else {
                     quote! { route_view }
                 };
+                let output_type = resolver
+                    .rust_type(m.output_type.as_deref().unwrap_or(""), package)
+                    .unwrap();
 
                 quote! {
                     .#route_method(
@@ -674,9 +738,11 @@ fn generate_service(
                         #method_name,
                         {
                             let svc = ::std::sync::Arc::clone(&self);
-                            ::connectrpc::view_handler_fn(move |ctx, req| {
+                            ::connectrpc::view_handler_fn(move |ctx, req, format| {
                                 let svc = ::std::sync::Arc::clone(&svc);
-                                async move { svc.#method_snake(ctx, req).await }
+                                async move {
+                                    svc.#method_snake(ctx, req).await?.encode::<#output_type>(format)
+                                }
                             })
                         },
                     )
@@ -1122,11 +1188,11 @@ fn generate_trait_method(
         // Client streaming method
         Ok(quote! {
             #method_doc_tokens
-            fn #method_snake(
-                &self,
+            fn #method_snake<'a>(
+                &'a self,
                 ctx: ::connectrpc::RequestContext,
                 requests: ::connectrpc::ServiceStream<::buffa::view::OwnedView<#input_view_type<'static>>>,
-            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + 'static + use<Self>>> + Send;
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + use<'a, Self>>> + Send;
         })
     } else if client_streaming && server_streaming {
         // Bidi streaming method
@@ -1142,11 +1208,11 @@ fn generate_trait_method(
         // Unary method
         Ok(quote! {
             #method_doc_tokens
-            fn #method_snake(
-                &self,
+            fn #method_snake<'a>(
+                &'a self,
                 ctx: ::connectrpc::RequestContext,
                 request: ::buffa::view::OwnedView<#input_view_type<'static>>,
-            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + 'static + use<Self>>> + Send;
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + use<'a, Self>>> + Send;
         })
     }
 }
@@ -1503,6 +1569,97 @@ mod tests {
         assert!(
             offenders.is_empty(),
             "{label} contains top-level use statement(s): {offenders:?}\nFull source:\n{formatted}"
+        );
+    }
+
+    fn gen_file(
+        files: &[FileDescriptorProto],
+        target_idx: usize,
+        extern_paths: &[(String, String)],
+        require_extern: bool,
+    ) -> Result<String> {
+        let mut config = buffa_codegen::CodeGenConfig::default();
+        config.extern_paths = extern_paths.to_vec();
+        let target_name = files[target_idx]
+            .name
+            .clone()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let resolver = TypeResolver::new(files, &target_name, &config, require_extern);
+        Ok(generate_connect_services(&files[target_idx], &resolver)?.to_string())
+    }
+
+    #[test]
+    fn unary_response_body_captures_self_lifetime() {
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(code.contains("< 'a >"), "trait method missing 'a: {code}");
+        assert!(code.contains("& 'a self"), "missing &'a self: {code}");
+        assert!(
+            code.contains("use < 'a , Self >"),
+            "missing use<'a, Self> capture: {code}"
+        );
+        assert!(
+            !code.contains("'static + use"),
+            "'static bound on body should be dropped: {code}"
+        );
+    }
+
+    #[test]
+    fn encodable_view_impls_emitted_per_output_type() {
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let code = gen_file(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(
+            code.contains(
+                ":: connectrpc :: Encodable < PingResp > for __buffa :: view :: PingRespView"
+            ),
+            "missing Encodable<PingResp> for PingRespView: {code}"
+        );
+        assert!(
+            code.contains(
+                ":: connectrpc :: Encodable < PingResp > for :: buffa :: view :: OwnedView"
+            ),
+            "missing Encodable<PingResp> for OwnedView<PingRespView>: {code}"
+        );
+        // Input type should NOT get an impl (only output types).
+        assert!(!code.contains("Encodable < PingReq >"), "got: {code}");
+    }
+
+    #[test]
+    fn encodable_view_impls_skipped_for_extern_output() {
+        // Output type resolves via the WKT extern_path → ::buffa_types::...
+        // so the impl would be an orphan; verify it's skipped.
+        let wkt = FileDescriptorProto {
+            name: Some("google/protobuf/empty.proto".into()),
+            package: Some("google.protobuf".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Empty".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".google.protobuf.Empty",
+            &["PingReq"],
+        );
+        let code = gen_file(&[wkt, file], 1, &[], false).unwrap();
+        // The impl bodies call encode_view_body; the trait method's
+        // `impl Encodable<M>` RPITIT bound doesn't.
+        assert!(
+            !code.contains("encode_view_body"),
+            "extern output type must not get Encodable impl: {code}"
         );
     }
 

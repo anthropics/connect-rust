@@ -1,3 +1,23 @@
+impl ::connectrpc::Encodable<crate::proto::bench::noutf8::v1::LogIngestResponse>
+for crate::proto::bench::noutf8::v1::__buffa::view::LogIngestResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::noutf8::v1::LogIngestResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::noutf8::v1::__buffa::view::LogIngestResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const LOG_INGEST_SERVICE_SERVICE_NAME: &str = "bench.noutf8.v1.LogIngestService";
 /// Server trait for LogIngestService.
@@ -15,8 +35,8 @@ pub const LOG_INGEST_SERVICE_SERVICE_NAME: &str = "bench.noutf8.v1.LogIngestServ
 #[allow(clippy::type_complexity)]
 pub trait LogIngestService: Send + Sync + 'static {
     /// Handle the Ingest RPC.
-    fn ingest(
-        &self,
+    fn ingest<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::bench::noutf8::v1::__buffa::view::LogRequestView<'static>,
@@ -25,7 +45,7 @@ pub trait LogIngestService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::bench::noutf8::v1::LogIngestResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -62,9 +82,15 @@ impl<S: LogIngestService> LogIngestServiceExt for S {
                 "Ingest",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.ingest(ctx, req).await }
+                        async move {
+                            svc.ingest(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::bench::noutf8::v1::LogIngestResponse,
+                                >(format)
+                        }
                     })
                 },
             )

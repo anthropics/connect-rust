@@ -1,3 +1,83 @@
+impl ::connectrpc::Encodable<crate::proto::bench::v1::BenchResponse>
+for crate::proto::bench::v1::__buffa::view::BenchResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::BenchResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::BenchResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::LogResponse>
+for crate::proto::bench::v1::__buffa::view::LogResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::LogResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::EchoResponse>
+for crate::proto::bench::v1::__buffa::view::EchoResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::EchoResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::EchoResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::LogIngestResponse>
+for crate::proto::bench::v1::__buffa::view::LogIngestResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::LogIngestResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogIngestResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const BENCH_SERVICE_SERVICE_NAME: &str = "bench.v1.BenchService";
 /// Server trait for BenchService.
@@ -15,8 +95,8 @@ pub const BENCH_SERVICE_SERVICE_NAME: &str = "bench.v1.BenchService";
 #[allow(clippy::type_complexity)]
 pub trait BenchService: Send + Sync + 'static {
     /// Handle the Unary RPC.
-    fn unary(
-        &self,
+    fn unary<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::bench::v1::__buffa::view::BenchRequestView<'static>,
@@ -25,7 +105,7 @@ pub trait BenchService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::bench::v1::BenchResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
     /// Handle the ServerStream RPC.
@@ -41,8 +121,8 @@ pub trait BenchService: Send + Sync + 'static {
         >,
     > + Send;
     /// Handle the ClientStream RPC.
-    fn client_stream(
-        &self,
+    fn client_stream<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::ServiceStream<
             ::buffa::view::OwnedView<
@@ -53,7 +133,7 @@ pub trait BenchService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::bench::v1::BenchResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
     /// Handle the BidiStream RPC.
@@ -71,8 +151,8 @@ pub trait BenchService: Send + Sync + 'static {
         >,
     > + Send;
     /// Handle the LogUnary RPC.
-    fn log_unary(
-        &self,
+    fn log_unary<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
@@ -81,12 +161,12 @@ pub trait BenchService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::bench::v1::LogResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
     /// Handle the LogUnaryOwned RPC.
-    fn log_unary_owned(
-        &self,
+    fn log_unary_owned<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
@@ -95,7 +175,7 @@ pub trait BenchService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::bench::v1::LogResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -132,9 +212,13 @@ impl<S: BenchService> BenchServiceExt for S {
                 "Unary",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.unary(ctx, req).await }
+                        async move {
+                            svc.unary(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::BenchResponse>(format)
+                        }
                     })
                 },
             )
@@ -154,9 +238,13 @@ impl<S: BenchService> BenchServiceExt for S {
                 "ClientStream",
                 ::connectrpc::view_client_streaming_handler_fn({
                     let svc = ::std::sync::Arc::clone(&self);
-                    move |ctx, req| {
+                    move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.client_stream(ctx, req).await }
+                        async move {
+                            svc.client_stream(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::BenchResponse>(format)
+                        }
                     }
                 }),
             )
@@ -176,9 +264,13 @@ impl<S: BenchService> BenchServiceExt for S {
                 "LogUnary",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.log_unary(ctx, req).await }
+                        async move {
+                            svc.log_unary(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::LogResponse>(format)
+                        }
                     })
                 },
             )
@@ -187,9 +279,13 @@ impl<S: BenchService> BenchServiceExt for S {
                 "LogUnaryOwned",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.log_unary_owned(ctx, req).await }
+                        async move {
+                            svc.log_unary_owned(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::LogResponse>(format)
+                        }
                     })
                 },
             )
@@ -727,8 +823,8 @@ pub const ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.EchoService";
 #[allow(clippy::type_complexity)]
 pub trait EchoService: Send + Sync + 'static {
     /// Handle the Echo RPC.
-    fn echo(
-        &self,
+    fn echo<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::bench::v1::__buffa::view::EchoRequestView<'static>,
@@ -737,7 +833,7 @@ pub trait EchoService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::bench::v1::EchoResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -774,9 +870,13 @@ impl<S: EchoService> EchoServiceExt for S {
                 "Echo",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.echo(ctx, req).await }
+                        async move {
+                            svc.echo(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::EchoResponse>(format)
+                        }
                     })
                 },
             )
@@ -1030,8 +1130,8 @@ pub const LOG_INGEST_SERVICE_SERVICE_NAME: &str = "bench.v1.LogIngestService";
 #[allow(clippy::type_complexity)]
 pub trait LogIngestService: Send + Sync + 'static {
     /// Handle the Ingest RPC.
-    fn ingest(
-        &self,
+    fn ingest<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
@@ -1040,7 +1140,7 @@ pub trait LogIngestService: Send + Sync + 'static {
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::bench::v1::LogIngestResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -1077,9 +1177,15 @@ impl<S: LogIngestService> LogIngestServiceExt for S {
                 "Ingest",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.ingest(ctx, req).await }
+                        async move {
+                            svc.ingest(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::bench::v1::LogIngestResponse,
+                                >(format)
+                        }
                     })
                 },
             )
