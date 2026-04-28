@@ -1,7 +1,7 @@
 //! Baseline filter server: always converts the request to the owned
 //! `Record`, scrubs sensitive fields if any are set, and returns owned.
 
-use connectrpc::{ConnectRpcService, RequestContext, ServiceResult};
+use connectrpc::{ConnectRpcService, RequestContext, Response, ServiceResult};
 
 use rpc_bench::filter::*;
 
@@ -17,7 +17,7 @@ impl FilterService for Impl {
         if has_sensitive(&request) {
             scrub(&mut owned);
         }
-        Ok(owned.into())
+        Response::ok(owned)
     }
 }
 

@@ -3,7 +3,7 @@
 //! via `ViewEncode`, no per-field allocation). Otherwise convert to
 //! owned, scrub, and return owned.
 
-use connectrpc::{ConnectRpcService, MaybeBorrowed, RequestContext, ServiceResult};
+use connectrpc::{ConnectRpcService, MaybeBorrowed, RequestContext, Response, ServiceResult};
 
 use rpc_bench::filter::*;
 
@@ -16,11 +16,11 @@ impl FilterService for Impl {
         request: OwnedRecordView,
     ) -> ServiceResult<MaybeBorrowed<Record, OwnedRecordView>> {
         if !has_sensitive(&request) {
-            return Ok(MaybeBorrowed::borrowed(request).into());
+            return Response::ok(MaybeBorrowed::borrowed(request));
         }
         let mut owned = request.to_owned_message();
         scrub(&mut owned);
-        Ok(MaybeBorrowed::owned(owned).into())
+        Response::ok(MaybeBorrowed::owned(owned))
     }
 }
 

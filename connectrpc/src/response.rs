@@ -371,12 +371,12 @@ pub fn encode_view_body<'a, V: ViewEncode<'a>>(
 /// {
 ///     if req.email.is_empty() && req.ssn.is_empty() {
 ///         // pass-through: re-encode straight from the request bytes
-///         return Ok(MaybeBorrowed::borrowed(req).into());
+///         return Response::ok(MaybeBorrowed::borrowed(req));
 ///     }
 ///     let mut owned = req.to_owned_message();
 ///     owned.email.clear();
 ///     owned.ssn.clear();
-///     Ok(MaybeBorrowed::owned(owned).into())
+///     Response::ok(MaybeBorrowed::owned(owned))
 /// }
 /// ```
 ///
