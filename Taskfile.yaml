@@ -99,13 +99,13 @@ tasks:
     desc: Override crates.io buffa with a sibling ../buffa checkout (local only, gitignored)
     cmds:
       - cp .cargo/config.toml.example .cargo/config.toml
-      - cargo update -p buffa -p buffa-types -p buffa-codegen
+      - cargo update -p buffa -p buffa-types -p buffa-codegen -p buffa-descriptor
 
   buffa:unlink:
     desc: Remove the local buffa path override and revert to crates.io
     cmds:
       - rm -f .cargo/config.toml
-      - cargo update -p buffa -p buffa-types -p buffa-codegen
+      - cargo update -p buffa -p buffa-types -p buffa-codegen -p buffa-descriptor
 
   # ===========================================================================
   # Examples

@@ -1,21 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-use ::connectrpc::{
-    Context, ConnectError, Router, Dispatcher, view_handler_fn,
-    view_streaming_handler_fn, view_client_streaming_handler_fn,
-    view_bidi_streaming_handler_fn,
-};
-use ::connectrpc::dispatcher::codegen as __crpc_codegen;
-use ::connectrpc::CodecFormat as __CodecFormat;
-use buffa::bytes::Bytes as __Bytes;
-use ::connectrpc::client::{
-    ClientConfig, ClientTransport, CallOptions, call_unary, call_server_stream,
-    call_client_stream, call_bidi_stream,
-};
-use futures::Stream;
-use buffa::Message;
-use buffa::view::OwnedView;
 /// Full service name for this service.
 pub const FORTUNE_SERVICE_SERVICE_NAME: &str = "fortune.v1.FortuneService";
 /// Server trait for FortuneService.
@@ -35,12 +17,14 @@ pub trait FortuneService: Send + Sync + 'static {
     /// Handle the GetFortunes RPC.
     fn get_fortunes(
         &self,
-        ctx: Context,
-        request: OwnedView<crate::proto::fortune::v1::GetFortunesRequestView<'static>>,
-    ) -> impl Future<
+        ctx: ::connectrpc::Context,
+        request: ::buffa::view::OwnedView<
+            crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView<'static>,
+        >,
+    ) -> impl ::std::future::Future<
         Output = Result<
-            (crate::proto::fortune::v1::GetFortunesResponse, Context),
-            ConnectError,
+            (crate::proto::fortune::v1::GetFortunesResponse, ::connectrpc::Context),
+            ::connectrpc::ConnectError,
         >,
     > + Send;
 }
@@ -61,18 +45,24 @@ pub trait FortuneServiceExt: FortuneService {
     ///
     /// Takes ownership of the `Arc<Self>` and returns a new Router with
     /// this service's methods registered.
-    fn register(self: Arc<Self>, router: Router) -> Router;
+    fn register(
+        self: ::std::sync::Arc<Self>,
+        router: ::connectrpc::Router,
+    ) -> ::connectrpc::Router;
 }
 impl<S: FortuneService> FortuneServiceExt for S {
-    fn register(self: Arc<Self>, router: Router) -> Router {
+    fn register(
+        self: ::std::sync::Arc<Self>,
+        router: ::connectrpc::Router,
+    ) -> ::connectrpc::Router {
         router
             .route_view(
                 FORTUNE_SERVICE_SERVICE_NAME,
                 "GetFortunes",
                 {
-                    let svc = Arc::clone(&self);
-                    view_handler_fn(move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                    let svc = ::std::sync::Arc::clone(&self);
+                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.get_fortunes(ctx, req).await }
                     })
                 },
@@ -93,103 +83,113 @@ impl<S: FortuneService> FortuneServiceExt for S {
 /// // hand `service` to axum/hyper as a fallback_service
 /// ```
 pub struct FortuneServiceServer<T> {
-    inner: Arc<T>,
+    inner: ::std::sync::Arc<T>,
 }
 impl<T: FortuneService> FortuneServiceServer<T> {
     /// Wrap a service implementation in a monomorphic dispatcher.
     pub fn new(service: T) -> Self {
-        Self { inner: Arc::new(service) }
+        Self {
+            inner: ::std::sync::Arc::new(service),
+        }
     }
     /// Wrap an already-`Arc`'d service implementation.
-    pub fn from_arc(inner: Arc<T>) -> Self {
+    pub fn from_arc(inner: ::std::sync::Arc<T>) -> Self {
         Self { inner }
     }
 }
 impl<T> Clone for FortuneServiceServer<T> {
     fn clone(&self) -> Self {
         Self {
-            inner: Arc::clone(&self.inner),
+            inner: ::std::sync::Arc::clone(&self.inner),
         }
     }
 }
-impl<T: FortuneService> Dispatcher for FortuneServiceServer<T> {
+impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
     #[inline]
-    fn lookup(&self, path: &str) -> Option<__crpc_codegen::MethodDescriptor> {
+    fn lookup(
+        &self,
+        path: &str,
+    ) -> Option<::connectrpc::dispatcher::codegen::MethodDescriptor> {
         let method = path.strip_prefix("fortune.v1.FortuneService/")?;
         match method {
-            "GetFortunes" => Some(__crpc_codegen::MethodDescriptor::unary(false)),
+            "GetFortunes" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
+            }
             _ => None,
         }
     }
     fn call_unary(
         &self,
         path: &str,
-        ctx: Context,
-        request: __Bytes,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::UnaryResult {
+        ctx: ::connectrpc::Context,
+        request: ::buffa::bytes::Bytes,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
-            return __crpc_codegen::unimplemented_unary(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
             "GetFortunes" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req = __crpc_codegen::decode_request_view::<
-                        crate::proto::fortune::v1::GetFortunesRequestView,
+                    let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
+                        crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView,
                     >(request, format)?;
                     let (res, ctx) = svc.get_fortunes(ctx, req).await?;
-                    let bytes = __crpc_codegen::encode_response(&res, format)?;
+                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
+                        &res,
+                        format,
+                    )?;
                     Ok((bytes, ctx))
                 })
             }
-            _ => __crpc_codegen::unimplemented_unary(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
         }
     }
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        request: __Bytes,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::StreamingResult {
+        ctx: ::connectrpc::Context,
+        request: ::buffa::bytes::Bytes,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
-            return __crpc_codegen::unimplemented_streaming(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
-            _ => __crpc_codegen::unimplemented_streaming(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
         }
     }
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        requests: __crpc_codegen::RequestStream,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::UnaryResult {
+        ctx: ::connectrpc::Context,
+        requests: ::connectrpc::dispatcher::codegen::RequestStream,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
-            return __crpc_codegen::unimplemented_unary(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &requests, &format);
         match method {
-            _ => __crpc_codegen::unimplemented_unary(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
         }
     }
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        requests: __crpc_codegen::RequestStream,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::StreamingResult {
+        ctx: ::connectrpc::Context,
+        requests: ::connectrpc::dispatcher::codegen::RequestStream,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
-            return __crpc_codegen::unimplemented_streaming(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &requests, &format);
         match method {
-            _ => __crpc_codegen::unimplemented_streaming(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
         }
     }
 }
@@ -245,23 +245,23 @@ impl<T: FortuneService> Dispatcher for FortuneServiceServer<T> {
 #[derive(Clone)]
 pub struct FortuneServiceClient<T> {
     transport: T,
-    config: ClientConfig,
+    config: ::connectrpc::client::ClientConfig,
 }
 impl<T> FortuneServiceClient<T>
 where
-    T: ClientTransport,
-    <T::ResponseBody as http_body::Body>::Error: std::fmt::Display,
+    T: ::connectrpc::client::ClientTransport,
+    <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
 {
     /// Create a new client with the given transport and configuration.
-    pub fn new(transport: T, config: ClientConfig) -> Self {
+    pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
         Self { transport, config }
     }
     /// Get the client configuration.
-    pub fn config(&self) -> &ClientConfig {
+    pub fn config(&self) -> &::connectrpc::client::ClientConfig {
         &self.config
     }
     /// Get a mutable reference to the client configuration.
-    pub fn config_mut(&mut self) -> &mut ClientConfig {
+    pub fn config_mut(&mut self) -> &mut ::connectrpc::client::ClientConfig {
         &mut self.config
     }
     /// Call the GetFortunes RPC. Sends a request to /fortune.v1.FortuneService/GetFortunes.
@@ -270,27 +270,39 @@ where
         request: crate::proto::fortune::v1::GetFortunesRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<crate::proto::fortune::v1::GetFortunesResponseView<'static>>,
+            ::buffa::view::OwnedView<
+                crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<
+                    'static,
+                >,
+            >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.get_fortunes_with_options(request, CallOptions::default()).await
+        self.get_fortunes_with_options(
+                request,
+                ::connectrpc::client::CallOptions::default(),
+            )
+            .await
     }
-    /// Call the GetFortunes RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the GetFortunes RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn get_fortunes_with_options(
         &self,
         request: crate::proto::fortune::v1::GetFortunesRequest,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<crate::proto::fortune::v1::GetFortunesResponseView<'static>>,
+            ::buffa::view::OwnedView<
+                crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<
+                    'static,
+                >,
+            >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_unary(
+        ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                "fortune.v1.FortuneService",
+                FORTUNE_SERVICE_SERVICE_NAME,
                 "GetFortunes",
                 request,
                 options,

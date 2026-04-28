@@ -15,3 +15,4 @@
 buffa = { path = "../buffa/buffa" }
 buffa-types = { path = "../buffa/buffa-types" }
 buffa-codegen = { path = "../buffa/buffa-codegen" }
+buffa-descriptor = { path = "../buffa/buffa-descriptor" }

@@ -1,6 +1,7 @@
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
 }
+pub use proto::test::echo::v1::__buffa::view::*;
 pub use proto::test::echo::v1::*;
 
 #[cfg(test)]

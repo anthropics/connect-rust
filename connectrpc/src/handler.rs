@@ -1278,7 +1278,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use buffa_types::google::protobuf::{StringValue, StringValueView};
+    use buffa_types::google::protobuf::__buffa::view::StringValueView;
+    use buffa_types::google::protobuf::StringValue;
 
     // ── decode_request / encode_response (owned types) ─────────────────
 

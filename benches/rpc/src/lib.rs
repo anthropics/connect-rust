@@ -7,6 +7,15 @@ pub mod proto;
 
 pub use connect::bench::v1::*;
 pub use proto::bench::v1::*;
+// View types live under the `__buffa::view::` ancillary tree as of buffa #62.
+// Re-export the ones used by handler/service signatures so they can be named
+// unqualified, matching pre-#62 ergonomics. Bench-only types (echo_bloat
+// shapes) are NOT re-exported here — `benches/echo_bloat.rs` imports them
+// directly so the lib surface stays minimal.
+pub use proto::bench::v1::__buffa::view::{
+    BenchRequestView, BenchResponseView, EchoRequestView, LogRecordView, LogRequestView,
+    LogSourceView, MetadataView, PayloadView,
+};
 
 use std::collections::HashMap;
 use std::net::SocketAddr;

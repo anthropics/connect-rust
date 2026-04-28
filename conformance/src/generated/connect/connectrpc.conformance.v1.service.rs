@@ -1,21 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-use ::connectrpc::{
-    Context, ConnectError, Router, Dispatcher, view_handler_fn,
-    view_streaming_handler_fn, view_client_streaming_handler_fn,
-    view_bidi_streaming_handler_fn,
-};
-use ::connectrpc::dispatcher::codegen as __crpc_codegen;
-use ::connectrpc::CodecFormat as __CodecFormat;
-use buffa::bytes::Bytes as __Bytes;
-use ::connectrpc::client::{
-    ClientConfig, ClientTransport, CallOptions, call_unary, call_server_stream,
-    call_client_stream, call_bidi_stream,
-};
-use futures::Stream;
-use buffa::Message;
-use buffa::view::OwnedView;
 /// Full service name for this service.
 pub const CONFORMANCE_SERVICE_SERVICE_NAME: &str = "connectrpc.conformance.v1.ConformanceService";
 /// The service implemented by conformance test servers. This is implemented by
@@ -48,14 +30,19 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// The returned payload should only contain the request info.
     fn unary(
         &self,
-        ctx: Context,
-        request: OwnedView<
-            crate::proto::connectrpc::conformance::v1::UnaryRequestView<'static>,
+        ctx: ::connectrpc::Context,
+        request: ::buffa::view::OwnedView<
+            crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryRequestView<
+                'static,
+            >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
-            (crate::proto::connectrpc::conformance::v1::UnaryResponse, Context),
-            ConnectError,
+            (
+                crate::proto::connectrpc::conformance::v1::UnaryResponse,
+                ::connectrpc::Context,
+            ),
+            ::connectrpc::ConnectError,
         >,
     > + Send;
     /// A server-streaming operation. The request indicates the response headers,
@@ -77,26 +64,28 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// sent or an error is thrown.
     fn server_stream(
         &self,
-        ctx: Context,
-        request: OwnedView<
-            crate::proto::connectrpc::conformance::v1::ServerStreamRequestView<'static>,
+        ctx: ::connectrpc::Context,
+        request: ::buffa::view::OwnedView<
+            crate::proto::connectrpc::conformance::v1::__buffa::view::ServerStreamRequestView<
+                'static,
+            >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
             (
-                Pin<
+                ::std::pin::Pin<
                     Box<
-                        dyn Stream<
+                        dyn ::futures::Stream<
                             Item = Result<
                                 crate::proto::connectrpc::conformance::v1::ServerStreamResponse,
-                                ConnectError,
+                                ::connectrpc::ConnectError,
                             >,
                         > + Send,
                     >,
                 >,
-                Context,
+                ::connectrpc::Context,
             ),
-            ConnectError,
+            ::connectrpc::ConnectError,
         >,
     > + Send;
     /// A client-streaming operation. The first request indicates the response
@@ -115,25 +104,28 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// The returned payload should only contain the request info.
     fn client_stream(
         &self,
-        ctx: Context,
-        requests: Pin<
+        ctx: ::connectrpc::Context,
+        requests: ::std::pin::Pin<
             Box<
-                dyn Stream<
+                dyn ::futures::Stream<
                     Item = Result<
-                        OwnedView<
-                            crate::proto::connectrpc::conformance::v1::ClientStreamRequestView<
+                        ::buffa::view::OwnedView<
+                            crate::proto::connectrpc::conformance::v1::__buffa::view::ClientStreamRequestView<
                                 'static,
                             >,
                         >,
-                        ConnectError,
+                        ::connectrpc::ConnectError,
                     >,
                 > + Send,
             >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
-            (crate::proto::connectrpc::conformance::v1::ClientStreamResponse, Context),
-            ConnectError,
+            (
+                crate::proto::connectrpc::conformance::v1::ClientStreamResponse,
+                ::connectrpc::Context,
+            ),
+            ::connectrpc::ConnectError,
         >,
     > + Send;
     /// A bidirectional-streaming operation. The first request indicates the response
@@ -174,51 +166,56 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// long in between sending each response message.
     fn bidi_stream(
         &self,
-        ctx: Context,
-        requests: Pin<
+        ctx: ::connectrpc::Context,
+        requests: ::std::pin::Pin<
             Box<
-                dyn Stream<
+                dyn ::futures::Stream<
                     Item = Result<
-                        OwnedView<
-                            crate::proto::connectrpc::conformance::v1::BidiStreamRequestView<
+                        ::buffa::view::OwnedView<
+                            crate::proto::connectrpc::conformance::v1::__buffa::view::BidiStreamRequestView<
                                 'static,
                             >,
                         >,
-                        ConnectError,
+                        ::connectrpc::ConnectError,
                     >,
                 > + Send,
             >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
             (
-                Pin<
+                ::std::pin::Pin<
                     Box<
-                        dyn Stream<
+                        dyn ::futures::Stream<
                             Item = Result<
                                 crate::proto::connectrpc::conformance::v1::BidiStreamResponse,
-                                ConnectError,
+                                ::connectrpc::ConnectError,
                             >,
                         > + Send,
                     >,
                 >,
-                Context,
+                ::connectrpc::Context,
             ),
-            ConnectError,
+            ::connectrpc::ConnectError,
         >,
     > + Send;
     /// A unary endpoint that the server should not implement and should instead
     /// return an unimplemented error when invoked.
     fn unimplemented(
         &self,
-        ctx: Context,
-        request: OwnedView<
-            crate::proto::connectrpc::conformance::v1::UnimplementedRequestView<'static>,
+        ctx: ::connectrpc::Context,
+        request: ::buffa::view::OwnedView<
+            crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedRequestView<
+                'static,
+            >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
-            (crate::proto::connectrpc::conformance::v1::UnimplementedResponse, Context),
-            ConnectError,
+            (
+                crate::proto::connectrpc::conformance::v1::UnimplementedResponse,
+                ::connectrpc::Context,
+            ),
+            ::connectrpc::ConnectError,
         >,
     > + Send;
     /// A unary endpoint denoted as having no side effects (i.e. idempotent).
@@ -226,19 +223,19 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// leverage query parameters to send data.
     fn idempotent_unary(
         &self,
-        ctx: Context,
-        request: OwnedView<
-            crate::proto::connectrpc::conformance::v1::IdempotentUnaryRequestView<
+        ctx: ::connectrpc::Context,
+        request: ::buffa::view::OwnedView<
+            crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryRequestView<
                 'static,
             >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
             (
                 crate::proto::connectrpc::conformance::v1::IdempotentUnaryResponse,
-                Context,
+                ::connectrpc::Context,
             ),
-            ConnectError,
+            ::connectrpc::ConnectError,
         >,
     > + Send;
 }
@@ -259,18 +256,24 @@ pub trait ConformanceServiceExt: ConformanceService {
     ///
     /// Takes ownership of the `Arc<Self>` and returns a new Router with
     /// this service's methods registered.
-    fn register(self: Arc<Self>, router: Router) -> Router;
+    fn register(
+        self: ::std::sync::Arc<Self>,
+        router: ::connectrpc::Router,
+    ) -> ::connectrpc::Router;
 }
 impl<S: ConformanceService> ConformanceServiceExt for S {
-    fn register(self: Arc<Self>, router: Router) -> Router {
+    fn register(
+        self: ::std::sync::Arc<Self>,
+        router: ::connectrpc::Router,
+    ) -> ::connectrpc::Router {
         router
             .route_view(
                 CONFORMANCE_SERVICE_SERVICE_NAME,
                 "Unary",
                 {
-                    let svc = Arc::clone(&self);
-                    view_handler_fn(move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                    let svc = ::std::sync::Arc::clone(&self);
+                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.unary(ctx, req).await }
                     })
                 },
@@ -278,10 +281,10 @@ impl<S: ConformanceService> ConformanceServiceExt for S {
             .route_view_server_stream(
                 CONFORMANCE_SERVICE_SERVICE_NAME,
                 "ServerStream",
-                view_streaming_handler_fn({
-                    let svc = Arc::clone(&self);
+                ::connectrpc::view_streaming_handler_fn({
+                    let svc = ::std::sync::Arc::clone(&self);
                     move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.server_stream(ctx, req).await }
                     }
                 }),
@@ -289,10 +292,10 @@ impl<S: ConformanceService> ConformanceServiceExt for S {
             .route_view_client_stream(
                 CONFORMANCE_SERVICE_SERVICE_NAME,
                 "ClientStream",
-                view_client_streaming_handler_fn({
-                    let svc = Arc::clone(&self);
+                ::connectrpc::view_client_streaming_handler_fn({
+                    let svc = ::std::sync::Arc::clone(&self);
                     move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.client_stream(ctx, req).await }
                     }
                 }),
@@ -300,10 +303,10 @@ impl<S: ConformanceService> ConformanceServiceExt for S {
             .route_view_bidi_stream(
                 CONFORMANCE_SERVICE_SERVICE_NAME,
                 "BidiStream",
-                view_bidi_streaming_handler_fn({
-                    let svc = Arc::clone(&self);
+                ::connectrpc::view_bidi_streaming_handler_fn({
+                    let svc = ::std::sync::Arc::clone(&self);
                     move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.bidi_stream(ctx, req).await }
                     }
                 }),
@@ -312,9 +315,9 @@ impl<S: ConformanceService> ConformanceServiceExt for S {
                 CONFORMANCE_SERVICE_SERVICE_NAME,
                 "Unimplemented",
                 {
-                    let svc = Arc::clone(&self);
-                    view_handler_fn(move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                    let svc = ::std::sync::Arc::clone(&self);
+                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.unimplemented(ctx, req).await }
                     })
                 },
@@ -323,9 +326,9 @@ impl<S: ConformanceService> ConformanceServiceExt for S {
                 CONFORMANCE_SERVICE_SERVICE_NAME,
                 "IdempotentUnary",
                 {
-                    let svc = Arc::clone(&self);
-                    view_handler_fn(move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                    let svc = ::std::sync::Arc::clone(&self);
+                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.idempotent_unary(ctx, req).await }
                     })
                 },
@@ -346,171 +349,212 @@ impl<S: ConformanceService> ConformanceServiceExt for S {
 /// // hand `service` to axum/hyper as a fallback_service
 /// ```
 pub struct ConformanceServiceServer<T> {
-    inner: Arc<T>,
+    inner: ::std::sync::Arc<T>,
 }
 impl<T: ConformanceService> ConformanceServiceServer<T> {
     /// Wrap a service implementation in a monomorphic dispatcher.
     pub fn new(service: T) -> Self {
-        Self { inner: Arc::new(service) }
+        Self {
+            inner: ::std::sync::Arc::new(service),
+        }
     }
     /// Wrap an already-`Arc`'d service implementation.
-    pub fn from_arc(inner: Arc<T>) -> Self {
+    pub fn from_arc(inner: ::std::sync::Arc<T>) -> Self {
         Self { inner }
     }
 }
 impl<T> Clone for ConformanceServiceServer<T> {
     fn clone(&self) -> Self {
         Self {
-            inner: Arc::clone(&self.inner),
+            inner: ::std::sync::Arc::clone(&self.inner),
         }
     }
 }
-impl<T: ConformanceService> Dispatcher for ConformanceServiceServer<T> {
+impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServer<T> {
     #[inline]
-    fn lookup(&self, path: &str) -> Option<__crpc_codegen::MethodDescriptor> {
+    fn lookup(
+        &self,
+        path: &str,
+    ) -> Option<::connectrpc::dispatcher::codegen::MethodDescriptor> {
         let method = path.strip_prefix("connectrpc.conformance.v1.ConformanceService/")?;
         match method {
-            "Unary" => Some(__crpc_codegen::MethodDescriptor::unary(false)),
-            "ServerStream" => Some(__crpc_codegen::MethodDescriptor::server_streaming()),
-            "ClientStream" => Some(__crpc_codegen::MethodDescriptor::client_streaming()),
-            "BidiStream" => Some(__crpc_codegen::MethodDescriptor::bidi_streaming()),
-            "Unimplemented" => Some(__crpc_codegen::MethodDescriptor::unary(false)),
-            "IdempotentUnary" => Some(__crpc_codegen::MethodDescriptor::unary(true)),
+            "Unary" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
+            }
+            "ServerStream" => {
+                Some(
+                    ::connectrpc::dispatcher::codegen::MethodDescriptor::server_streaming(),
+                )
+            }
+            "ClientStream" => {
+                Some(
+                    ::connectrpc::dispatcher::codegen::MethodDescriptor::client_streaming(),
+                )
+            }
+            "BidiStream" => {
+                Some(
+                    ::connectrpc::dispatcher::codegen::MethodDescriptor::bidi_streaming(),
+                )
+            }
+            "Unimplemented" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
+            }
+            "IdempotentUnary" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(true))
+            }
             _ => None,
         }
     }
     fn call_unary(
         &self,
         path: &str,
-        ctx: Context,
-        request: __Bytes,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::UnaryResult {
+        ctx: ::connectrpc::Context,
+        request: ::buffa::bytes::Bytes,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
             .strip_prefix("connectrpc.conformance.v1.ConformanceService/") else {
-            return __crpc_codegen::unimplemented_unary(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
             "Unary" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req = __crpc_codegen::decode_request_view::<
-                        crate::proto::connectrpc::conformance::v1::UnaryRequestView,
+                    let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
+                        crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryRequestView,
                     >(request, format)?;
                     let (res, ctx) = svc.unary(ctx, req).await?;
-                    let bytes = __crpc_codegen::encode_response(&res, format)?;
+                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
+                        &res,
+                        format,
+                    )?;
                     Ok((bytes, ctx))
                 })
             }
             "Unimplemented" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req = __crpc_codegen::decode_request_view::<
-                        crate::proto::connectrpc::conformance::v1::UnimplementedRequestView,
+                    let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
+                        crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedRequestView,
                     >(request, format)?;
                     let (res, ctx) = svc.unimplemented(ctx, req).await?;
-                    let bytes = __crpc_codegen::encode_response(&res, format)?;
+                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
+                        &res,
+                        format,
+                    )?;
                     Ok((bytes, ctx))
                 })
             }
             "IdempotentUnary" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req = __crpc_codegen::decode_request_view::<
-                        crate::proto::connectrpc::conformance::v1::IdempotentUnaryRequestView,
+                    let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
+                        crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryRequestView,
                     >(request, format)?;
                     let (res, ctx) = svc.idempotent_unary(ctx, req).await?;
-                    let bytes = __crpc_codegen::encode_response(&res, format)?;
+                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
+                        &res,
+                        format,
+                    )?;
                     Ok((bytes, ctx))
                 })
             }
-            _ => __crpc_codegen::unimplemented_unary(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
         }
     }
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        request: __Bytes,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::StreamingResult {
+        ctx: ::connectrpc::Context,
+        request: ::buffa::bytes::Bytes,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path
             .strip_prefix("connectrpc.conformance.v1.ConformanceService/") else {
-            return __crpc_codegen::unimplemented_streaming(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
             "ServerStream" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req = __crpc_codegen::decode_request_view::<
-                        crate::proto::connectrpc::conformance::v1::ServerStreamRequestView,
+                    let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
+                        crate::proto::connectrpc::conformance::v1::__buffa::view::ServerStreamRequestView,
                     >(request, format)?;
                     let (resp_stream, ctx) = svc.server_stream(ctx, req).await?;
                     Ok((
-                        __crpc_codegen::encode_response_stream(resp_stream, format),
+                        ::connectrpc::dispatcher::codegen::encode_response_stream(
+                            resp_stream,
+                            format,
+                        ),
                         ctx,
                     ))
                 })
             }
-            _ => __crpc_codegen::unimplemented_streaming(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
         }
     }
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        requests: __crpc_codegen::RequestStream,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::UnaryResult {
+        ctx: ::connectrpc::Context,
+        requests: ::connectrpc::dispatcher::codegen::RequestStream,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
             .strip_prefix("connectrpc.conformance.v1.ConformanceService/") else {
-            return __crpc_codegen::unimplemented_unary(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &requests, &format);
         match method {
             "ClientStream" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req_stream = __crpc_codegen::decode_view_request_stream::<
-                        crate::proto::connectrpc::conformance::v1::ClientStreamRequestView,
+                    let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<
+                        crate::proto::connectrpc::conformance::v1::__buffa::view::ClientStreamRequestView,
                     >(requests, format);
                     let (res, ctx) = svc.client_stream(ctx, req_stream).await?;
-                    let bytes = __crpc_codegen::encode_response(&res, format)?;
+                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
+                        &res,
+                        format,
+                    )?;
                     Ok((bytes, ctx))
                 })
             }
-            _ => __crpc_codegen::unimplemented_unary(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
         }
     }
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        requests: __crpc_codegen::RequestStream,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::StreamingResult {
+        ctx: ::connectrpc::Context,
+        requests: ::connectrpc::dispatcher::codegen::RequestStream,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path
             .strip_prefix("connectrpc.conformance.v1.ConformanceService/") else {
-            return __crpc_codegen::unimplemented_streaming(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &requests, &format);
         match method {
             "BidiStream" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req_stream = __crpc_codegen::decode_view_request_stream::<
-                        crate::proto::connectrpc::conformance::v1::BidiStreamRequestView,
+                    let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<
+                        crate::proto::connectrpc::conformance::v1::__buffa::view::BidiStreamRequestView,
                     >(requests, format);
                     let (resp_stream, ctx) = svc.bidi_stream(ctx, req_stream).await?;
                     Ok((
-                        __crpc_codegen::encode_response_stream(resp_stream, format),
+                        ::connectrpc::dispatcher::codegen::encode_response_stream(
+                            resp_stream,
+                            format,
+                        ),
                         ctx,
                     ))
                 })
             }
-            _ => __crpc_codegen::unimplemented_streaming(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
         }
     }
 }
@@ -566,23 +610,23 @@ impl<T: ConformanceService> Dispatcher for ConformanceServiceServer<T> {
 #[derive(Clone)]
 pub struct ConformanceServiceClient<T> {
     transport: T,
-    config: ClientConfig,
+    config: ::connectrpc::client::ClientConfig,
 }
 impl<T> ConformanceServiceClient<T>
 where
-    T: ClientTransport,
-    <T::ResponseBody as http_body::Body>::Error: std::fmt::Display,
+    T: ::connectrpc::client::ClientTransport,
+    <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
 {
     /// Create a new client with the given transport and configuration.
-    pub fn new(transport: T, config: ClientConfig) -> Self {
+    pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
         Self { transport, config }
     }
     /// Get the client configuration.
-    pub fn config(&self) -> &ClientConfig {
+    pub fn config(&self) -> &::connectrpc::client::ClientConfig {
         &self.config
     }
     /// Get a mutable reference to the client configuration.
-    pub fn config_mut(&mut self) -> &mut ClientConfig {
+    pub fn config_mut(&mut self) -> &mut ::connectrpc::client::ClientConfig {
         &mut self.config
     }
     /// Call the Unary RPC. Sends a request to /connectrpc.conformance.v1.ConformanceService/Unary.
@@ -591,31 +635,36 @@ where
         request: crate::proto::connectrpc::conformance::v1::UnaryRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::connectrpc::conformance::v1::UnaryResponseView<'static>,
+            ::buffa::view::OwnedView<
+                crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryResponseView<
+                    'static,
+                >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.unary_with_options(request, CallOptions::default()).await
+        self.unary_with_options(request, ::connectrpc::client::CallOptions::default())
+            .await
     }
-    /// Call the Unary RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the Unary RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn unary_with_options(
         &self,
         request: crate::proto::connectrpc::conformance::v1::UnaryRequest,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::connectrpc::conformance::v1::UnaryResponseView<'static>,
+            ::buffa::view::OwnedView<
+                crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryResponseView<
+                    'static,
+                >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_unary(
+        ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                "connectrpc.conformance.v1.ConformanceService",
+                CONFORMANCE_SERVICE_SERVICE_NAME,
                 "Unary",
                 request,
                 options,
@@ -629,28 +678,36 @@ where
     ) -> Result<
         ::connectrpc::client::ServerStream<
             T::ResponseBody,
-            crate::proto::connectrpc::conformance::v1::ServerStreamResponseView<'static>,
+            crate::proto::connectrpc::conformance::v1::__buffa::view::ServerStreamResponseView<
+                'static,
+            >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.server_stream_with_options(request, CallOptions::default()).await
+        self.server_stream_with_options(
+                request,
+                ::connectrpc::client::CallOptions::default(),
+            )
+            .await
     }
-    /// Call the ServerStream RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the ServerStream RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn server_stream_with_options(
         &self,
         request: crate::proto::connectrpc::conformance::v1::ServerStreamRequest,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::ServerStream<
             T::ResponseBody,
-            crate::proto::connectrpc::conformance::v1::ServerStreamResponseView<'static>,
+            crate::proto::connectrpc::conformance::v1::__buffa::view::ServerStreamResponseView<
+                'static,
+            >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_server_stream(
+        ::connectrpc::client::call_server_stream(
                 &self.transport,
                 &self.config,
-                "connectrpc.conformance.v1.ConformanceService",
+                CONFORMANCE_SERVICE_SERVICE_NAME,
                 "ServerStream",
                 request,
                 options,
@@ -665,37 +722,41 @@ where
         >,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::connectrpc::conformance::v1::ClientStreamResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::connectrpc::conformance::v1::__buffa::view::ClientStreamResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.client_stream_with_options(requests, CallOptions::default()).await
+        self.client_stream_with_options(
+                requests,
+                ::connectrpc::client::CallOptions::default(),
+            )
+            .await
     }
-    /// Call the ClientStream RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the ClientStream RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn client_stream_with_options(
         &self,
         requests: impl IntoIterator<
             Item = crate::proto::connectrpc::conformance::v1::ClientStreamRequest,
         >,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::connectrpc::conformance::v1::ClientStreamResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::connectrpc::conformance::v1::__buffa::view::ClientStreamResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_client_stream(
+        ::connectrpc::client::call_client_stream(
                 &self.transport,
                 &self.config,
-                "connectrpc.conformance.v1.ConformanceService",
+                CONFORMANCE_SERVICE_SERVICE_NAME,
                 "ClientStream",
                 requests,
                 options,
@@ -709,28 +770,32 @@ where
         ::connectrpc::client::BidiStream<
             T::ResponseBody,
             crate::proto::connectrpc::conformance::v1::BidiStreamRequest,
-            crate::proto::connectrpc::conformance::v1::BidiStreamResponseView<'static>,
+            crate::proto::connectrpc::conformance::v1::__buffa::view::BidiStreamResponseView<
+                'static,
+            >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.bidi_stream_with_options(CallOptions::default()).await
+        self.bidi_stream_with_options(::connectrpc::client::CallOptions::default()).await
     }
-    /// Call the BidiStream RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the BidiStream RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn bidi_stream_with_options(
         &self,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::BidiStream<
             T::ResponseBody,
             crate::proto::connectrpc::conformance::v1::BidiStreamRequest,
-            crate::proto::connectrpc::conformance::v1::BidiStreamResponseView<'static>,
+            crate::proto::connectrpc::conformance::v1::__buffa::view::BidiStreamResponseView<
+                'static,
+            >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_bidi_stream(
+        ::connectrpc::client::call_bidi_stream(
                 &self.transport,
                 &self.config,
-                "connectrpc.conformance.v1.ConformanceService",
+                CONFORMANCE_SERVICE_SERVICE_NAME,
                 "BidiStream",
                 options,
             )
@@ -742,35 +807,39 @@ where
         request: crate::proto::connectrpc::conformance::v1::UnimplementedRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::connectrpc::conformance::v1::UnimplementedResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.unimplemented_with_options(request, CallOptions::default()).await
+        self.unimplemented_with_options(
+                request,
+                ::connectrpc::client::CallOptions::default(),
+            )
+            .await
     }
-    /// Call the Unimplemented RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the Unimplemented RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn unimplemented_with_options(
         &self,
         request: crate::proto::connectrpc::conformance::v1::UnimplementedRequest,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::connectrpc::conformance::v1::UnimplementedResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_unary(
+        ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                "connectrpc.conformance.v1.ConformanceService",
+                CONFORMANCE_SERVICE_SERVICE_NAME,
                 "Unimplemented",
                 request,
                 options,
@@ -783,35 +852,39 @@ where
         request: crate::proto::connectrpc::conformance::v1::IdempotentUnaryRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::connectrpc::conformance::v1::IdempotentUnaryResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.idempotent_unary_with_options(request, CallOptions::default()).await
+        self.idempotent_unary_with_options(
+                request,
+                ::connectrpc::client::CallOptions::default(),
+            )
+            .await
     }
-    /// Call the IdempotentUnary RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the IdempotentUnary RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn idempotent_unary_with_options(
         &self,
         request: crate::proto::connectrpc::conformance::v1::IdempotentUnaryRequest,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::connectrpc::conformance::v1::IdempotentUnaryResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_unary(
+        ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                "connectrpc.conformance.v1.ConformanceService",
+                CONFORMANCE_SERVICE_SERVICE_NAME,
                 "IdempotentUnary",
                 request,
                 options,

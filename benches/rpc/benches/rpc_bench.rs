@@ -67,7 +67,7 @@ fn bench_unary_logs(c: &mut Criterion) {
     let req = log_request(10);
     let payload_size = {
         use buffa::Message;
-        req.compute_size() as u64
+        req.encoded_len() as u64
     };
 
     let mut group = c.benchmark_group("unary/logs_10");
@@ -85,7 +85,7 @@ fn bench_unary_logs(c: &mut Criterion) {
     let req = log_request(50);
     let payload_size = {
         use buffa::Message;
-        req.compute_size() as u64
+        req.encoded_len() as u64
     };
 
     let mut group = c.benchmark_group("unary/logs_50");
@@ -108,7 +108,7 @@ fn bench_unary_logs_owned_vs_view(c: &mut Criterion) {
         let req = log_request(record_count);
         let payload_size = {
             use buffa::Message;
-            req.compute_size() as u64
+            req.encoded_len() as u64
         };
 
         let mut group = c.benchmark_group(format!("unary/logs_{record_count}_owned_vs_view"));
@@ -142,7 +142,7 @@ fn bench_unary_large(c: &mut Criterion) {
     let req = large_request();
     let payload_size = {
         use buffa::Message;
-        req.compute_size() as u64
+        req.encoded_len() as u64
     };
 
     for compression in ["gzip", "zstd"] {

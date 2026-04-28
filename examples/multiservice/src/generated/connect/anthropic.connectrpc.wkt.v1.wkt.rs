@@ -1,21 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
-use std::sync::Arc;
-use ::connectrpc::{
-    Context, ConnectError, Router, Dispatcher, view_handler_fn,
-    view_streaming_handler_fn, view_client_streaming_handler_fn,
-    view_bidi_streaming_handler_fn,
-};
-use ::connectrpc::dispatcher::codegen as __crpc_codegen;
-use ::connectrpc::CodecFormat as __CodecFormat;
-use buffa::bytes::Bytes as __Bytes;
-use ::connectrpc::client::{
-    ClientConfig, ClientTransport, CallOptions, call_unary, call_server_stream,
-    call_client_stream, call_bidi_stream,
-};
-use futures::Stream;
-use buffa::Message;
-use buffa::view::OwnedView;
 /// Full service name for this service.
 pub const WELL_KNOWN_TYPES_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.wkt.v1.WellKnownTypesService";
 /// WellKnownTypesService provides operations using Timestamp, Duration, and Struct.
@@ -35,50 +17,55 @@ pub trait WellKnownTypesService: Send + Sync + 'static {
     /// CreateEvent creates an event with a timestamp.
     fn create_event(
         &self,
-        ctx: Context,
-        request: OwnedView<
-            crate::proto::anthropic::connectrpc::wkt::v1::CreateEventRequestView<'static>,
+        ctx: ::connectrpc::Context,
+        request: ::buffa::view::OwnedView<
+            crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventRequestView<
+                'static,
+            >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
-            (crate::proto::anthropic::connectrpc::wkt::v1::CreateEventResponse, Context),
-            ConnectError,
+            (
+                crate::proto::anthropic::connectrpc::wkt::v1::CreateEventResponse,
+                ::connectrpc::Context,
+            ),
+            ::connectrpc::ConnectError,
         >,
     > + Send;
     /// CalculateDuration calculates the duration between two timestamps.
     fn calculate_duration(
         &self,
-        ctx: Context,
-        request: OwnedView<
-            crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationRequestView<
+        ctx: ::connectrpc::Context,
+        request: ::buffa::view::OwnedView<
+            crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationRequestView<
                 'static,
             >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
             (
                 crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationResponse,
-                Context,
+                ::connectrpc::Context,
             ),
-            ConnectError,
+            ::connectrpc::ConnectError,
         >,
     > + Send;
     /// ProcessMetadata processes arbitrary metadata as a Struct.
     fn process_metadata(
         &self,
-        ctx: Context,
-        request: OwnedView<
-            crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataRequestView<
+        ctx: ::connectrpc::Context,
+        request: ::buffa::view::OwnedView<
+            crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataRequestView<
                 'static,
             >,
         >,
-    ) -> impl Future<
+    ) -> impl ::std::future::Future<
         Output = Result<
             (
                 crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataResponse,
-                Context,
+                ::connectrpc::Context,
             ),
-            ConnectError,
+            ::connectrpc::ConnectError,
         >,
     > + Send;
 }
@@ -99,18 +86,24 @@ pub trait WellKnownTypesServiceExt: WellKnownTypesService {
     ///
     /// Takes ownership of the `Arc<Self>` and returns a new Router with
     /// this service's methods registered.
-    fn register(self: Arc<Self>, router: Router) -> Router;
+    fn register(
+        self: ::std::sync::Arc<Self>,
+        router: ::connectrpc::Router,
+    ) -> ::connectrpc::Router;
 }
 impl<S: WellKnownTypesService> WellKnownTypesServiceExt for S {
-    fn register(self: Arc<Self>, router: Router) -> Router {
+    fn register(
+        self: ::std::sync::Arc<Self>,
+        router: ::connectrpc::Router,
+    ) -> ::connectrpc::Router {
         router
             .route_view(
                 WELL_KNOWN_TYPES_SERVICE_SERVICE_NAME,
                 "CreateEvent",
                 {
-                    let svc = Arc::clone(&self);
-                    view_handler_fn(move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                    let svc = ::std::sync::Arc::clone(&self);
+                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.create_event(ctx, req).await }
                     })
                 },
@@ -119,9 +112,9 @@ impl<S: WellKnownTypesService> WellKnownTypesServiceExt for S {
                 WELL_KNOWN_TYPES_SERVICE_SERVICE_NAME,
                 "CalculateDuration",
                 {
-                    let svc = Arc::clone(&self);
-                    view_handler_fn(move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                    let svc = ::std::sync::Arc::clone(&self);
+                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.calculate_duration(ctx, req).await }
                     })
                 },
@@ -130,9 +123,9 @@ impl<S: WellKnownTypesService> WellKnownTypesServiceExt for S {
                 WELL_KNOWN_TYPES_SERVICE_SERVICE_NAME,
                 "ProcessMetadata",
                 {
-                    let svc = Arc::clone(&self);
-                    view_handler_fn(move |ctx, req| {
-                        let svc = Arc::clone(&svc);
+                    let svc = ::std::sync::Arc::clone(&self);
+                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                        let svc = ::std::sync::Arc::clone(&svc);
                         async move { svc.process_metadata(ctx, req).await }
                     })
                 },
@@ -153,132 +146,153 @@ impl<S: WellKnownTypesService> WellKnownTypesServiceExt for S {
 /// // hand `service` to axum/hyper as a fallback_service
 /// ```
 pub struct WellKnownTypesServiceServer<T> {
-    inner: Arc<T>,
+    inner: ::std::sync::Arc<T>,
 }
 impl<T: WellKnownTypesService> WellKnownTypesServiceServer<T> {
     /// Wrap a service implementation in a monomorphic dispatcher.
     pub fn new(service: T) -> Self {
-        Self { inner: Arc::new(service) }
+        Self {
+            inner: ::std::sync::Arc::new(service),
+        }
     }
     /// Wrap an already-`Arc`'d service implementation.
-    pub fn from_arc(inner: Arc<T>) -> Self {
+    pub fn from_arc(inner: ::std::sync::Arc<T>) -> Self {
         Self { inner }
     }
 }
 impl<T> Clone for WellKnownTypesServiceServer<T> {
     fn clone(&self) -> Self {
         Self {
-            inner: Arc::clone(&self.inner),
+            inner: ::std::sync::Arc::clone(&self.inner),
         }
     }
 }
-impl<T: WellKnownTypesService> Dispatcher for WellKnownTypesServiceServer<T> {
+impl<T: WellKnownTypesService> ::connectrpc::Dispatcher
+for WellKnownTypesServiceServer<T> {
     #[inline]
-    fn lookup(&self, path: &str) -> Option<__crpc_codegen::MethodDescriptor> {
+    fn lookup(
+        &self,
+        path: &str,
+    ) -> Option<::connectrpc::dispatcher::codegen::MethodDescriptor> {
         let method = path
             .strip_prefix("anthropic.connectrpc.wkt.v1.WellKnownTypesService/")?;
         match method {
-            "CreateEvent" => Some(__crpc_codegen::MethodDescriptor::unary(false)),
-            "CalculateDuration" => Some(__crpc_codegen::MethodDescriptor::unary(false)),
-            "ProcessMetadata" => Some(__crpc_codegen::MethodDescriptor::unary(false)),
+            "CreateEvent" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
+            }
+            "CalculateDuration" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
+            }
+            "ProcessMetadata" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
+            }
             _ => None,
         }
     }
     fn call_unary(
         &self,
         path: &str,
-        ctx: Context,
-        request: __Bytes,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::UnaryResult {
+        ctx: ::connectrpc::Context,
+        request: ::buffa::bytes::Bytes,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
             .strip_prefix("anthropic.connectrpc.wkt.v1.WellKnownTypesService/") else {
-            return __crpc_codegen::unimplemented_unary(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
             "CreateEvent" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req = __crpc_codegen::decode_request_view::<
-                        crate::proto::anthropic::connectrpc::wkt::v1::CreateEventRequestView,
+                    let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
+                        crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventRequestView,
                     >(request, format)?;
                     let (res, ctx) = svc.create_event(ctx, req).await?;
-                    let bytes = __crpc_codegen::encode_response(&res, format)?;
+                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
+                        &res,
+                        format,
+                    )?;
                     Ok((bytes, ctx))
                 })
             }
             "CalculateDuration" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req = __crpc_codegen::decode_request_view::<
-                        crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationRequestView,
+                    let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
+                        crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationRequestView,
                     >(request, format)?;
                     let (res, ctx) = svc.calculate_duration(ctx, req).await?;
-                    let bytes = __crpc_codegen::encode_response(&res, format)?;
+                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
+                        &res,
+                        format,
+                    )?;
                     Ok((bytes, ctx))
                 })
             }
             "ProcessMetadata" => {
-                let svc = Arc::clone(&self.inner);
+                let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let req = __crpc_codegen::decode_request_view::<
-                        crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataRequestView,
+                    let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
+                        crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataRequestView,
                     >(request, format)?;
                     let (res, ctx) = svc.process_metadata(ctx, req).await?;
-                    let bytes = __crpc_codegen::encode_response(&res, format)?;
+                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
+                        &res,
+                        format,
+                    )?;
                     Ok((bytes, ctx))
                 })
             }
-            _ => __crpc_codegen::unimplemented_unary(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
         }
     }
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        request: __Bytes,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::StreamingResult {
+        ctx: ::connectrpc::Context,
+        request: ::buffa::bytes::Bytes,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path
             .strip_prefix("anthropic.connectrpc.wkt.v1.WellKnownTypesService/") else {
-            return __crpc_codegen::unimplemented_streaming(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
-            _ => __crpc_codegen::unimplemented_streaming(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
         }
     }
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        requests: __crpc_codegen::RequestStream,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::UnaryResult {
+        ctx: ::connectrpc::Context,
+        requests: ::connectrpc::dispatcher::codegen::RequestStream,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
             .strip_prefix("anthropic.connectrpc.wkt.v1.WellKnownTypesService/") else {
-            return __crpc_codegen::unimplemented_unary(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &requests, &format);
         match method {
-            _ => __crpc_codegen::unimplemented_unary(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
         }
     }
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: Context,
-        requests: __crpc_codegen::RequestStream,
-        format: __CodecFormat,
-    ) -> __crpc_codegen::StreamingResult {
+        ctx: ::connectrpc::Context,
+        requests: ::connectrpc::dispatcher::codegen::RequestStream,
+        format: ::connectrpc::CodecFormat,
+    ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path
             .strip_prefix("anthropic.connectrpc.wkt.v1.WellKnownTypesService/") else {
-            return __crpc_codegen::unimplemented_streaming(path);
+            return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &requests, &format);
         match method {
-            _ => __crpc_codegen::unimplemented_streaming(path),
+            _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
         }
     }
 }
@@ -334,23 +348,23 @@ impl<T: WellKnownTypesService> Dispatcher for WellKnownTypesServiceServer<T> {
 #[derive(Clone)]
 pub struct WellKnownTypesServiceClient<T> {
     transport: T,
-    config: ClientConfig,
+    config: ::connectrpc::client::ClientConfig,
 }
 impl<T> WellKnownTypesServiceClient<T>
 where
-    T: ClientTransport,
-    <T::ResponseBody as http_body::Body>::Error: std::fmt::Display,
+    T: ::connectrpc::client::ClientTransport,
+    <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
 {
     /// Create a new client with the given transport and configuration.
-    pub fn new(transport: T, config: ClientConfig) -> Self {
+    pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
         Self { transport, config }
     }
     /// Get the client configuration.
-    pub fn config(&self) -> &ClientConfig {
+    pub fn config(&self) -> &::connectrpc::client::ClientConfig {
         &self.config
     }
     /// Get a mutable reference to the client configuration.
-    pub fn config_mut(&mut self) -> &mut ClientConfig {
+    pub fn config_mut(&mut self) -> &mut ::connectrpc::client::ClientConfig {
         &mut self.config
     }
     /// Call the CreateEvent RPC. Sends a request to /anthropic.connectrpc.wkt.v1.WellKnownTypesService/CreateEvent.
@@ -359,35 +373,39 @@ where
         request: crate::proto::anthropic::connectrpc::wkt::v1::CreateEventRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::anthropic::connectrpc::wkt::v1::CreateEventResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.create_event_with_options(request, CallOptions::default()).await
+        self.create_event_with_options(
+                request,
+                ::connectrpc::client::CallOptions::default(),
+            )
+            .await
     }
-    /// Call the CreateEvent RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the CreateEvent RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn create_event_with_options(
         &self,
         request: crate::proto::anthropic::connectrpc::wkt::v1::CreateEventRequest,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::anthropic::connectrpc::wkt::v1::CreateEventResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_unary(
+        ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                "anthropic.connectrpc.wkt.v1.WellKnownTypesService",
+                WELL_KNOWN_TYPES_SERVICE_SERVICE_NAME,
                 "CreateEvent",
                 request,
                 options,
@@ -400,35 +418,39 @@ where
         request: crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.calculate_duration_with_options(request, CallOptions::default()).await
+        self.calculate_duration_with_options(
+                request,
+                ::connectrpc::client::CallOptions::default(),
+            )
+            .await
     }
-    /// Call the CalculateDuration RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the CalculateDuration RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn calculate_duration_with_options(
         &self,
         request: crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationRequest,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_unary(
+        ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                "anthropic.connectrpc.wkt.v1.WellKnownTypesService",
+                WELL_KNOWN_TYPES_SERVICE_SERVICE_NAME,
                 "CalculateDuration",
                 request,
                 options,
@@ -441,35 +463,39 @@ where
         request: crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        self.process_metadata_with_options(request, CallOptions::default()).await
+        self.process_metadata_with_options(
+                request,
+                ::connectrpc::client::CallOptions::default(),
+            )
+            .await
     }
-    /// Call the ProcessMetadata RPC with explicit per-call options. Options override [`ClientConfig`] defaults.
+    /// Call the ProcessMetadata RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
     pub async fn process_metadata_with_options(
         &self,
         request: crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataRequest,
-        options: CallOptions,
+        options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
-            OwnedView<
-                crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataResponseView<
+            ::buffa::view::OwnedView<
+                crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataResponseView<
                     'static,
                 >,
             >,
         >,
-        ConnectError,
+        ::connectrpc::ConnectError,
     > {
-        call_unary(
+        ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                "anthropic.connectrpc.wkt.v1.WellKnownTypesService",
+                WELL_KNOWN_TYPES_SERVICE_SERVICE_NAME,
                 "ProcessMetadata",
                 request,
                 options,
