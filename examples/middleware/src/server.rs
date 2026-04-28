@@ -27,7 +27,7 @@ use axum::extract::{Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 use buffa::view::OwnedView;
-use connectrpc::{ConnectError, Context, ErrorCode, Router};
+use connectrpc::{ConnectError, ErrorCode, RequestContext, Router, ServiceResult};
 use http_body_util::BodyExt;
 use tower::ServiceBuilder;
 use tower_http::timeout::TimeoutLayer;
@@ -137,9 +137,9 @@ struct SecretServiceImpl {
 impl SecretService for SecretServiceImpl {
     async fn get_secret(
         &self,
-        mut ctx: Context,
+        ctx: RequestContext,
         request: OwnedView<GetSecretRequestView<'static>>,
-    ) -> Result<(GetSecretResponse, Context), ConnectError> {
+    ) -> ServiceResult<GetSecretResponse> {
         // The auth layer stamped UserId into the http::Request extensions,
         // which the connect dispatcher then forwarded into ctx.extensions.
         let user = ctx
@@ -170,18 +170,11 @@ impl SecretService for SecretServiceImpl {
 
         // Stamp the serving user into a response trailer so the client
         // (or any tracing middleware downstream) can attribute the read.
-        ctx.set_trailer(
-            http::header::HeaderName::from_static("x-served-by"),
-            user.0.parse().unwrap(),
-        );
-
-        Ok((
-            GetSecretResponse {
-                value: Some(value.clone()),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Ok(connectrpc::Response::new(GetSecretResponse {
+            value: Some(value.clone()),
+            ..Default::default()
+        })
+        .with_trailer("x-served-by", user.0))
     }
 }
 

@@ -21,8 +21,8 @@ use buffa_types::google::protobuf::Struct;
 use buffa_types::google::protobuf::Timestamp;
 use buffa_types::google::protobuf::Value;
 use connectrpc::ConnectError;
-use connectrpc::Context;
 use connectrpc::Router as ConnectRouter;
+use connectrpc::{RequestContext, ServiceResult};
 use multiservice_example::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView;
 use multiservice_example::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView;
 use multiservice_example::proto::anthropic::connectrpc::wkt::v1::__buffa::view::{
@@ -36,9 +36,9 @@ struct MyGreetService;
 impl GreetService for MyGreetService {
     async fn greet(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<GreetRequestView<'static>>,
-    ) -> Result<(GreetResponse, Context), ConnectError> {
+    ) -> ServiceResult<GreetResponse> {
         let request = request.to_owned_message();
         tracing::info!("Received greet request for: {}", request.name);
 
@@ -50,7 +50,7 @@ impl GreetService for MyGreetService {
             message: format!("Hello, {}!", request.name),
             ..Default::default()
         };
-        Ok((response, ctx))
+        Ok(response.into())
     }
 }
 
@@ -60,9 +60,9 @@ struct MyMathService;
 impl MathService for MyMathService {
     async fn add(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<AddRequestView<'static>>,
-    ) -> Result<(AddResponse, Context), ConnectError> {
+    ) -> ServiceResult<AddResponse> {
         let request = request.to_owned_message();
         tracing::info!("Received add request: {} + {}", request.a, request.b);
 
@@ -75,7 +75,7 @@ impl MathService for MyMathService {
             result,
             ..Default::default()
         };
-        Ok((response, ctx))
+        Ok(response.into())
     }
 }
 
@@ -86,9 +86,9 @@ struct MyWellKnownTypesService;
 impl WellKnownTypesService for MyWellKnownTypesService {
     async fn create_event(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<CreateEventRequestView<'static>>,
-    ) -> Result<(CreateEventResponse, Context), ConnectError> {
+    ) -> ServiceResult<CreateEventResponse> {
         let request = request.to_owned_message();
         tracing::info!("Received create_event request: {:?}", request.name);
 
@@ -131,14 +131,14 @@ impl WellKnownTypesService for MyWellKnownTypesService {
             event: event.into(),
             ..Default::default()
         };
-        Ok((response, ctx))
+        Ok(response.into())
     }
 
     async fn calculate_duration(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<CalculateDurationRequestView<'static>>,
-    ) -> Result<(CalculateDurationResponse, Context), ConnectError> {
+    ) -> ServiceResult<CalculateDurationResponse> {
         let request = request.to_owned_message();
         tracing::info!("Received calculate_duration request");
 
@@ -165,14 +165,14 @@ impl WellKnownTypesService for MyWellKnownTypesService {
             duration: duration.into(),
             ..Default::default()
         };
-        Ok((response, ctx))
+        Ok(response.into())
     }
 
     async fn process_metadata(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<ProcessMetadataRequestView<'static>>,
-    ) -> Result<(ProcessMetadataResponse, Context), ConnectError> {
+    ) -> ServiceResult<ProcessMetadataResponse> {
         let request = request.to_owned_message();
         tracing::info!("Received process_metadata request");
 
@@ -208,7 +208,7 @@ impl WellKnownTypesService for MyWellKnownTypesService {
             field_count,
             ..Default::default()
         };
-        Ok((response, ctx))
+        Ok(response.into())
     }
 }
 

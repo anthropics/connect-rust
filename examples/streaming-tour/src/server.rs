@@ -13,12 +13,11 @@
 //! cargo run -p streaming-tour-example --bin streaming-tour-client
 //! ```
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use buffa::view::OwnedView;
-use connectrpc::{ConnectError, Context, Router};
-use futures::{Stream, StreamExt};
+use connectrpc::{RequestContext, Response, Router, ServiceResult, ServiceStream};
+use futures::StreamExt;
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
@@ -32,9 +31,8 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 // Local type aliases that flatten the streaming-handler signatures.
 // The verbose `Pin<Box<dyn Stream<...> + Send>>` form is what the
 // generated traits expect today; these aliases are pure sugar at the
-// call site (pending broader handler-trait ergonomics work).
-type ResponseStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> + Send>>;
-type RequestStream<V> = Pin<Box<dyn Stream<Item = Result<OwnedView<V>, ConnectError>> + Send>>;
+// call site.
+type RequestStream<V> = ServiceStream<OwnedView<V>>;
 
 /// Trivial NumberService implementation. Each method demonstrates one
 /// of the four RPC patterns.
@@ -44,28 +42,26 @@ impl NumberService for NumberServiceImpl {
     /// Unary: square the input value.
     async fn square(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<SquareRequestView<'static>>,
-    ) -> Result<(SquareResponse, Context), ConnectError> {
+    ) -> ServiceResult<SquareResponse> {
         // Edition 2023 default presence is EXPLICIT, so scalar fields
         // are Option<T>. unwrap_or(0) treats unset as zero, mirroring
         // the proto3 implicit-presence semantics.
         let v = request.value.unwrap_or(0) as i64;
-        Ok((
-            SquareResponse {
-                squared: Some(v * v),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Ok(SquareResponse {
+            squared: Some(v * v),
+            ..Default::default()
+        }
+        .into())
     }
 
     /// Server streaming: emit `count` consecutive integers from `start`.
     async fn range(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<RangeRequestView<'static>>,
-    ) -> Result<(ResponseStream<RangeResponse>, Context), ConnectError> {
+    ) -> ServiceResult<ServiceStream<RangeResponse>> {
         let start = request.start.unwrap_or(0);
         let count = request.count.unwrap_or(0).max(0);
         let stream = futures::stream::iter((0..count).map(move |i| {
@@ -74,34 +70,32 @@ impl NumberService for NumberServiceImpl {
                 ..Default::default()
             })
         }));
-        Ok((Box::pin(stream), ctx))
+        Ok(Response::stream(stream))
     }
 
     /// Client streaming: drain the request stream, return the total.
     async fn sum(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         mut requests: RequestStream<SumRequestView<'static>>,
-    ) -> Result<(SumResponse, Context), ConnectError> {
+    ) -> ServiceResult<SumResponse> {
         let mut total: i64 = 0;
         while let Some(req) = requests.next().await {
             total += req?.value.unwrap_or(0) as i64;
         }
-        Ok((
-            SumResponse {
-                total: Some(total),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Ok(SumResponse {
+            total: Some(total),
+            ..Default::default()
+        }
+        .into())
     }
 
     /// Bidirectional streaming: emit a running total after each request.
     async fn running_sum(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         requests: RequestStream<RunningSumRequestView<'static>>,
-    ) -> Result<(ResponseStream<RunningSumResponse>, Context), ConnectError> {
+    ) -> ServiceResult<ServiceStream<RunningSumResponse>> {
         let response_stream =
             futures::stream::unfold((requests, 0i64), |(mut requests, mut total)| async move {
                 match requests.next().await? {
@@ -118,7 +112,7 @@ impl NumberService for NumberServiceImpl {
                     Err(e) => Some((Err(e), (requests, total))),
                 }
             });
-        Ok((Box::pin(response_stream), ctx))
+        Ok(Response::stream(response_stream))
     }
 }
 

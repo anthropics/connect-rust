@@ -197,6 +197,15 @@ impl<B> From<B> for Response<B> {
     }
 }
 
+impl<T> Response<ServiceStream<T>> {
+    /// Wrap a streaming body, boxing and unsize-coercing it to
+    /// [`ServiceStream<T>`]. Handles the explicit coercion that
+    /// `Ok(Box::pin(s).into())` would otherwise need.
+    pub fn stream(s: impl Stream<Item = Result<T, ConnectError>> + Send + 'static) -> Self {
+        Self::new(Box::pin(s))
+    }
+}
+
 /// Result type returned by handler trait methods.
 ///
 /// `B` is the body type — typically the owned response message, or any

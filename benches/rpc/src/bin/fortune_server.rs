@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use connectrpc::{ConnectError, ConnectRpcService, Context};
+use connectrpc::{ConnectError, ConnectRpcService, RequestContext, ServiceResult};
 
 use rpc_bench::connect::fortune::v1::*;
 use rpc_bench::fortune;
@@ -18,9 +18,9 @@ struct FortuneServiceImpl {
 impl FortuneService for FortuneServiceImpl {
     async fn get_fortunes(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         _req: OwnedView<GetFortunesRequestView<'static>>,
-    ) -> Result<(GetFortunesResponse, Context), ConnectError> {
+    ) -> ServiceResult<GetFortunesResponse> {
         let mut conn = self.pool.get();
         let fortunes = fortune::query_fortunes(&mut conn)
             .await
@@ -37,7 +37,7 @@ impl FortuneService for FortuneServiceImpl {
                 .collect(),
             ..Default::default()
         };
-        Ok((response, ctx))
+        Ok(response.into())
     }
 }
 

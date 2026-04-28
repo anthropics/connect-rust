@@ -44,9 +44,7 @@ use proto::connectrpc::eliza::v1::__buffa::view::*;
 use proto::connectrpc::eliza::v1::*;
 
 use buffa::view::OwnedView;
-use connectrpc::{ConnectError, Context, Router as ConnectRouter};
-use futures::Stream;
-use std::pin::Pin;
+use connectrpc::{RequestContext, Router as ConnectRouter, ServiceResult, ServiceStream};
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 
@@ -69,32 +67,24 @@ impl ElizaServer {
 impl ElizaService for ElizaServer {
     async fn say(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<SayRequestView<'static>>,
-    ) -> Result<(SayResponse, Context), ConnectError> {
+    ) -> ServiceResult<SayResponse> {
         // `request.sentence` is a `&str` borrow into the decoded buffer.
         // No allocation, no copy — `eliza::reply` just reads it.
         let (reply, _end_session) = eliza::reply(request.sentence);
-        Ok((
-            SayResponse {
-                sentence: reply,
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Ok(SayResponse {
+            sentence: reply,
+            ..Default::default()
+        }
+        .into())
     }
 
     async fn introduce(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<IntroduceRequestView<'static>>,
-    ) -> Result<
-        (
-            Pin<Box<dyn Stream<Item = Result<IntroduceResponse, ConnectError>> + Send>>,
-            Context,
-        ),
-        ConnectError,
-    > {
+    ) -> ServiceResult<ServiceStream<IntroduceResponse>> {
         let delay = self.stream_delay;
 
         // Zero-copy read of the name; fall back to a default for the empty case.
@@ -125,28 +115,14 @@ impl ElizaService for ElizaServer {
                 ))
             });
 
-        Ok((
-            Box::pin(response_stream) as Pin<Box<dyn Stream<Item = _> + Send>>,
-            ctx,
-        ))
+        Ok((Box::pin(response_stream) as ServiceStream<_>).into())
     }
 
     async fn converse(
         &self,
-        ctx: Context,
-        requests: Pin<
-            Box<
-                dyn Stream<Item = Result<OwnedView<ConverseRequestView<'static>>, ConnectError>>
-                    + Send,
-            >,
-        >,
-    ) -> Result<
-        (
-            Pin<Box<dyn Stream<Item = Result<ConverseResponse, ConnectError>> + Send>>,
-            Context,
-        ),
-        ConnectError,
-    > {
+        _ctx: RequestContext,
+        requests: ServiceStream<OwnedView<ConverseRequestView<'static>>>,
+    ) -> ServiceResult<ServiceStream<ConverseResponse>> {
         use futures::StreamExt;
 
         // Unfold over the request stream so we can end the response stream
@@ -180,10 +156,7 @@ impl ElizaService for ElizaServer {
             },
         );
 
-        Ok((
-            Box::pin(response_stream) as Pin<Box<dyn Stream<Item = _> + Send>>,
-            ctx,
-        ))
+        Ok((Box::pin(response_stream) as ServiceStream<_>).into())
     }
 }
 

@@ -6,7 +6,6 @@
 //! 3. Writes `ServerCompatResponse` with host:port to stdout
 //! 4. Handles test RPC calls from the conformance runner
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -16,12 +15,12 @@ use buffa::view::OwnedView;
 use buffa_types::google::protobuf::Any;
 use connectrpc::ConnectError;
 use connectrpc::ConnectRpcService;
-use connectrpc::Context;
 use connectrpc::Limits;
 use connectrpc::Router;
 use connectrpc::error::ErrorDetail;
 use connectrpc::rustls;
 use connectrpc::server::Server;
+use connectrpc::{RequestContext, Response, ServiceResult, ServiceStream};
 use connectrpc_conformance::BidiStreamRequest;
 use connectrpc_conformance::BidiStreamResponse;
 use connectrpc_conformance::ClientStreamRequest;
@@ -47,7 +46,6 @@ use connectrpc_conformance::proto::connectrpc::conformance::v1::__buffa::view::{
 };
 use connectrpc_conformance::read_message;
 use connectrpc_conformance::write_message;
-use futures::Stream;
 use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
@@ -80,7 +78,7 @@ struct ConformanceServiceImpl;
 
 /// Build request info from the context and encoded request bytes.
 fn build_request_info(
-    ctx: &Context,
+    ctx: &RequestContext,
     request_bytes: &[u8],
     type_url: &str,
 ) -> connectrpc_conformance::conformance_payload::RequestInfo {
@@ -157,69 +155,43 @@ async fn apply_response_delay(def: &UnaryResponseDefinition) {
     }
 }
 
-/// Apply response headers and trailers from the response definition to the context.
-fn apply_response_headers_trailers(mut ctx: Context, def: &UnaryResponseDefinition) -> Context {
-    // Apply response headers
-    for header in &def.response_headers {
+/// Convert the proto `Header` list to an `http::HeaderMap`.
+fn to_header_map(headers: &[Header]) -> http::HeaderMap {
+    let mut out = http::HeaderMap::new();
+    for header in headers {
         if let Ok(name) = HeaderName::try_from(&header.name) {
             for val in &header.value {
                 if let Ok(value) = HeaderValue::try_from(val) {
-                    ctx.response_headers.append(name.clone(), value);
+                    out.append(name.clone(), value);
                 }
             }
         }
     }
-
-    // Apply response trailers
-    for header in &def.response_trailers {
-        if let Ok(name) = HeaderName::try_from(&header.name) {
-            for val in &header.value {
-                if let Ok(value) = HeaderValue::try_from(val) {
-                    ctx.trailers.append(name.clone(), value);
-                }
-            }
-        }
-    }
-
-    ctx
+    out
 }
 
-/// Apply response headers and trailers from a streaming response definition to the context.
-fn apply_stream_response_headers_trailers(
-    mut ctx: Context,
-    def: &StreamResponseDefinition,
-) -> Context {
-    // Apply response headers
-    for header in &def.response_headers {
-        if let Ok(name) = HeaderName::try_from(&header.name) {
-            for val in &header.value {
-                if let Ok(value) = HeaderValue::try_from(val) {
-                    ctx.response_headers.append(name.clone(), value);
-                }
-            }
-        }
-    }
+/// Wrap a body with the response headers/trailers from the unary definition.
+fn unary_response<B>(body: B, def: &UnaryResponseDefinition) -> Response<B> {
+    let mut resp = Response::new(body);
+    resp.headers = to_header_map(&def.response_headers);
+    resp.trailers = to_header_map(&def.response_trailers);
+    resp
+}
 
-    // Apply response trailers
-    for header in &def.response_trailers {
-        if let Ok(name) = HeaderName::try_from(&header.name) {
-            for val in &header.value {
-                if let Ok(value) = HeaderValue::try_from(val) {
-                    ctx.trailers.append(name.clone(), value);
-                }
-            }
-        }
-    }
-
-    ctx
+/// Wrap a body with the response headers/trailers from the stream definition.
+fn stream_response<B>(body: B, def: &StreamResponseDefinition) -> Response<B> {
+    let mut resp = Response::new(body);
+    resp.headers = to_header_map(&def.response_headers);
+    resp.trailers = to_header_map(&def.response_trailers);
+    resp
 }
 
 impl ConformanceService for ConformanceServiceImpl {
     async fn unary(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: OwnedView<UnaryRequestView<'static>>,
-    ) -> Result<(UnaryResponse, Context), ConnectError> {
+    ) -> ServiceResult<UnaryResponse> {
         tracing::debug!("Received unary request");
 
         // Build request info with headers
@@ -230,43 +202,29 @@ impl ConformanceService for ConformanceServiceImpl {
         );
 
         let request = request.to_owned_message();
+        let def = request.response_definition.as_option();
 
-        // Handle response definition
-        let (data, ctx) = if request.response_definition.is_set() {
-            let def = &*request.response_definition;
+        if let Some(def) = def {
             apply_response_delay(def).await;
+        }
 
-            match &def.response {
-                Some(
-                    connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
-                ) => {
-                    // Apply response headers and trailers from definition
-                    let ctx = apply_response_headers_trailers(ctx, def);
-                    (d.clone(), ctx)
-                }
-                Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
-                    // Apply response headers and trailers from definition to the error
-                    let ctx = apply_response_headers_trailers(ctx, def);
-
-                    // Return error with request info in details
-                    let code = e
-                        .code
-                        .as_known()
-                        .unwrap_or(connectrpc_conformance::Code::CODE_INTERNAL);
-                    let msg = e.message.clone().unwrap_or_default();
-                    let error = ConnectError::new(code_to_connect_error(code), msg)
-                        .with_detail(request_info_error_detail(request_info))
-                        .with_headers(ctx.response_headers)
-                        .with_trailers(ctx.trailers);
-                    return Err(error);
-                }
-                None => {
-                    let ctx = apply_response_headers_trailers(ctx, def);
-                    (vec![], ctx)
-                }
+        let data = match def.and_then(|d| d.response.as_ref()) {
+            Some(
+                connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
+            ) => d.clone(),
+            Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
+                let def = def.unwrap();
+                let code = e
+                    .code
+                    .as_known()
+                    .unwrap_or(connectrpc_conformance::Code::CODE_INTERNAL);
+                let msg = e.message.clone().unwrap_or_default();
+                return Err(ConnectError::new(code_to_connect_error(code), msg)
+                    .with_detail(request_info_error_detail(request_info))
+                    .with_headers(to_header_map(&def.response_headers))
+                    .with_trailers(to_header_map(&def.response_trailers)));
             }
-        } else {
-            (vec![], ctx)
+            None => vec![],
         };
 
         let payload = ConformancePayload {
@@ -275,19 +233,22 @@ impl ConformanceService for ConformanceServiceImpl {
             ..Default::default()
         };
 
-        let response = UnaryResponse {
+        let body = UnaryResponse {
             payload: payload.into(),
             ..Default::default()
         };
 
-        Ok((response, ctx))
+        Ok(match def {
+            Some(def) => unary_response(body, def),
+            None => body.into(),
+        })
     }
 
     async fn idempotent_unary(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: OwnedView<IdempotentUnaryRequestView<'static>>,
-    ) -> Result<(IdempotentUnaryResponse, Context), ConnectError> {
+    ) -> ServiceResult<IdempotentUnaryResponse> {
         tracing::debug!("Received idempotent_unary request");
 
         // Build request info with headers
@@ -298,41 +259,29 @@ impl ConformanceService for ConformanceServiceImpl {
         );
 
         let request = request.to_owned_message();
+        let def = request.response_definition.as_option();
 
-        // Handle response definition
-        let (data, ctx) = if request.response_definition.is_set() {
-            let def = &*request.response_definition;
+        if let Some(def) = def {
             apply_response_delay(def).await;
+        }
 
-            match &def.response {
-                Some(
-                    connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
-                ) => {
-                    let ctx = apply_response_headers_trailers(ctx, def);
-                    (d.clone(), ctx)
-                }
-                Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
-                    // Apply response headers and trailers from definition to the error
-                    let ctx = apply_response_headers_trailers(ctx, def);
-
-                    let code = e
-                        .code
-                        .as_known()
-                        .unwrap_or(connectrpc_conformance::Code::CODE_INTERNAL);
-                    let msg = e.message.clone().unwrap_or_default();
-                    let error = ConnectError::new(code_to_connect_error(code), msg)
-                        .with_detail(request_info_error_detail(request_info))
-                        .with_headers(ctx.response_headers)
-                        .with_trailers(ctx.trailers);
-                    return Err(error);
-                }
-                None => {
-                    let ctx = apply_response_headers_trailers(ctx, def);
-                    (vec![], ctx)
-                }
+        let data = match def.and_then(|d| d.response.as_ref()) {
+            Some(
+                connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
+            ) => d.clone(),
+            Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
+                let def = def.unwrap();
+                let code = e
+                    .code
+                    .as_known()
+                    .unwrap_or(connectrpc_conformance::Code::CODE_INTERNAL);
+                let msg = e.message.clone().unwrap_or_default();
+                return Err(ConnectError::new(code_to_connect_error(code), msg)
+                    .with_detail(request_info_error_detail(request_info))
+                    .with_headers(to_header_map(&def.response_headers))
+                    .with_trailers(to_header_map(&def.response_trailers)));
             }
-        } else {
-            (vec![], ctx)
+            None => vec![],
         };
 
         let payload = ConformancePayload {
@@ -341,19 +290,22 @@ impl ConformanceService for ConformanceServiceImpl {
             ..Default::default()
         };
 
-        let response = IdempotentUnaryResponse {
+        let body = IdempotentUnaryResponse {
             payload: payload.into(),
             ..Default::default()
         };
 
-        Ok((response, ctx))
+        Ok(match def {
+            Some(def) => unary_response(body, def),
+            None => body.into(),
+        })
     }
 
     async fn unimplemented(
         &self,
-        _ctx: Context,
+        _ctx: RequestContext,
         _request: OwnedView<UnimplementedRequestView<'static>>,
-    ) -> Result<(UnimplementedResponse, Context), ConnectError> {
+    ) -> ServiceResult<UnimplementedResponse> {
         // This endpoint should always return unimplemented
         Err(ConnectError::unimplemented(
             "ConformanceService.Unimplemented is not implemented",
@@ -362,15 +314,9 @@ impl ConformanceService for ConformanceServiceImpl {
 
     async fn server_stream(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: OwnedView<ServerStreamRequestView<'static>>,
-    ) -> Result<
-        (
-            Pin<Box<dyn Stream<Item = Result<ServerStreamResponse, ConnectError>> + Send>>,
-            Context,
-        ),
-        ConnectError,
-    > {
+    ) -> ServiceResult<ServiceStream<ServerStreamResponse>> {
         tracing::debug!("Received server_stream request");
 
         // Build request info with headers
@@ -385,15 +331,9 @@ impl ConformanceService for ConformanceServiceImpl {
         // Handle response definition
         if !request.response_definition.is_set() {
             // No response definition - return empty stream
-            let stream: Pin<
-                Box<dyn Stream<Item = Result<ServerStreamResponse, ConnectError>> + Send>,
-            > = Box::pin(futures::stream::empty());
-            return Ok((stream, ctx));
+            return Ok(Response::stream(futures::stream::empty()));
         }
         let def = &*request.response_definition;
-
-        // Apply response headers and trailers
-        let ctx = apply_stream_response_headers_trailers(ctx, def);
 
         // Get response data
         let response_data = def.response_data.clone();
@@ -414,16 +354,16 @@ impl ConformanceService for ConformanceServiceImpl {
                 let msg = e.message.clone().unwrap_or_default();
                 let error = ConnectError::new(code_to_connect_error(code), msg)
                     .with_detail(request_info_error_detail(request_info))
-                    .with_headers(ctx.response_headers)
-                    .with_trailers(ctx.trailers);
+                    .with_headers(to_header_map(&def.response_headers))
+                    .with_trailers(to_header_map(&def.response_trailers));
                 return Err(error);
             }
 
-            // No error, return empty stream
-            let stream: Pin<
-                Box<dyn Stream<Item = Result<ServerStreamResponse, ConnectError>> + Send>,
-            > = Box::pin(futures::stream::empty());
-            return Ok((stream, ctx));
+            // No error, return empty stream with headers/trailers from def
+            return Ok(stream_response(
+                Box::pin(futures::stream::empty()) as ServiceStream<_>,
+                def,
+            ));
         }
 
         // Create stream that yields responses
@@ -481,23 +421,14 @@ impl ConformanceService for ConformanceServiceImpl {
             },
         );
 
-        let boxed_stream: Pin<
-            Box<dyn Stream<Item = Result<ServerStreamResponse, ConnectError>> + Send>,
-        > = Box::pin(stream);
-
-        Ok((boxed_stream, ctx))
+        Ok(stream_response(Box::pin(stream) as ServiceStream<_>, def))
     }
 
     async fn client_stream(
         &self,
-        ctx: Context,
-        requests: Pin<
-            Box<
-                dyn Stream<Item = Result<OwnedView<ClientStreamRequestView<'static>>, ConnectError>>
-                    + Send,
-            >,
-        >,
-    ) -> Result<(ClientStreamResponse, Context), ConnectError> {
+        ctx: RequestContext,
+        requests: ServiceStream<OwnedView<ClientStreamRequestView<'static>>>,
+    ) -> ServiceResult<ClientStreamResponse> {
         tracing::debug!("Received client_stream request");
 
         // The conformance protocol requires all request messages to be available
@@ -571,36 +502,27 @@ impl ConformanceService for ConformanceServiceImpl {
             }
         });
 
-        let (data, ctx) = if let Some(def) = &def {
+        if let Some(def) = &def {
             apply_response_delay(def).await;
+        }
 
-            match &def.response {
-                Some(
-                    connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
-                ) => {
-                    let ctx = apply_response_headers_trailers(ctx, def);
-                    (d.clone(), ctx)
-                }
-                Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
-                    let ctx = apply_response_headers_trailers(ctx, def);
-                    let code = e
-                        .code
-                        .as_known()
-                        .unwrap_or(connectrpc_conformance::Code::CODE_INTERNAL);
-                    let msg = e.message.clone().unwrap_or_default();
-                    let error = ConnectError::new(code_to_connect_error(code), msg)
-                        .with_detail(request_info_error_detail(request_info))
-                        .with_headers(ctx.response_headers)
-                        .with_trailers(ctx.trailers);
-                    return Err(error);
-                }
-                None => {
-                    let ctx = apply_response_headers_trailers(ctx, def);
-                    (vec![], ctx)
-                }
+        let data = match def.as_ref().and_then(|d| d.response.as_ref()) {
+            Some(
+                connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
+            ) => d.clone(),
+            Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
+                let def = def.as_ref().unwrap();
+                let code = e
+                    .code
+                    .as_known()
+                    .unwrap_or(connectrpc_conformance::Code::CODE_INTERNAL);
+                let msg = e.message.clone().unwrap_or_default();
+                return Err(ConnectError::new(code_to_connect_error(code), msg)
+                    .with_detail(request_info_error_detail(request_info))
+                    .with_headers(to_header_map(&def.response_headers))
+                    .with_trailers(to_header_map(&def.response_trailers)));
             }
-        } else {
-            (vec![], ctx)
+            None => vec![],
         };
 
         let payload = ConformancePayload {
@@ -609,30 +531,22 @@ impl ConformanceService for ConformanceServiceImpl {
             ..Default::default()
         };
 
-        let response = ClientStreamResponse {
+        let body = ClientStreamResponse {
             payload: payload.into(),
             ..Default::default()
         };
 
-        Ok((response, ctx))
+        Ok(match &def {
+            Some(def) => unary_response(body, def),
+            None => body.into(),
+        })
     }
 
     async fn bidi_stream(
         &self,
-        ctx: Context,
-        requests: Pin<
-            Box<
-                dyn Stream<Item = Result<OwnedView<BidiStreamRequestView<'static>>, ConnectError>>
-                    + Send,
-            >,
-        >,
-    ) -> Result<
-        (
-            Pin<Box<dyn Stream<Item = Result<BidiStreamResponse, ConnectError>> + Send>>,
-            Context,
-        ),
-        ConnectError,
-    > {
+        ctx: RequestContext,
+        requests: ServiceStream<OwnedView<BidiStreamRequestView<'static>>>,
+    ) -> ServiceResult<ServiceStream<BidiStreamResponse>> {
         tracing::debug!("Received bidi_stream request");
 
         // Convert OwnedView items to owned types. The conformance protocol
@@ -652,10 +566,7 @@ impl ConformanceService for ConformanceServiceImpl {
             Some(Err(e)) => return Err(e),
             None => {
                 // Empty request stream — return empty response stream
-                let stream: Pin<
-                    Box<dyn Stream<Item = Result<BidiStreamResponse, ConnectError>> + Send>,
-                > = Box::pin(futures::stream::empty());
-                return Ok((stream, ctx));
+                return Ok(Response::stream(futures::stream::empty()));
             }
         };
 
@@ -666,11 +577,18 @@ impl ConformanceService for ConformanceServiceImpl {
         };
         let full_duplex = first_msg.full_duplex;
 
-        // Apply response headers/trailers from definition
-        let ctx = if let Some(ref def) = def {
-            apply_stream_response_headers_trailers(ctx, def)
-        } else {
-            ctx
+        // Response headers/trailers from the definition; applied to whichever
+        // Response<B> arm we return.
+        let wrap = |stream: ServiceStream<BidiStreamResponse>| match &def {
+            Some(d) => stream_response(stream, d),
+            None => Response::new(stream),
+        };
+        let (resp_headers, resp_trailers) = match &def {
+            Some(d) => (
+                to_header_map(&d.response_headers),
+                to_header_map(&d.response_trailers),
+            ),
+            None => (http::HeaderMap::new(), http::HeaderMap::new()),
         };
 
         // Build initial request info from headers
@@ -744,8 +662,8 @@ impl ConformanceService for ConformanceServiceImpl {
                 let msg = e.message.clone().unwrap_or_default();
                 let error = ConnectError::new(code_to_connect_error(code), msg)
                     .with_detail(request_info_error_detail(request_info))
-                    .with_headers(ctx.response_headers)
-                    .with_trailers(ctx.trailers);
+                    .with_headers(resp_headers)
+                    .with_trailers(resp_trailers);
                 return Err(error);
             }
 
@@ -906,11 +824,7 @@ impl ConformanceService for ConformanceServiceImpl {
                 },
             );
 
-            let boxed_stream: Pin<
-                Box<dyn Stream<Item = Result<BidiStreamResponse, ConnectError>> + Send>,
-            > = Box::pin(stream);
-
-            Ok((boxed_stream, ctx))
+            Ok(wrap(Box::pin(stream)))
         } else {
             // Half-duplex mode: collect all requests first, then send responses.
             // Echo all request properties in the first response only.
@@ -943,10 +857,7 @@ impl ConformanceService for ConformanceServiceImpl {
 
             let Some(ref def) = def else {
                 // No response definition — return empty stream
-                let stream: Pin<
-                    Box<dyn Stream<Item = Result<BidiStreamResponse, ConnectError>> + Send>,
-                > = Box::pin(futures::stream::empty());
-                return Ok((stream, ctx));
+                return Ok(wrap(Box::pin(futures::stream::empty())));
             };
 
             let response_data = def.response_data.clone();
@@ -967,16 +878,13 @@ impl ConformanceService for ConformanceServiceImpl {
                     let msg = e.message.clone().unwrap_or_default();
                     let error = ConnectError::new(code_to_connect_error(code), msg)
                         .with_detail(request_info_error_detail(request_info))
-                        .with_headers(ctx.response_headers)
-                        .with_trailers(ctx.trailers);
+                        .with_headers(resp_headers)
+                        .with_trailers(resp_trailers);
                     return Err(error);
                 }
 
                 // No error, return empty stream
-                let stream: Pin<
-                    Box<dyn Stream<Item = Result<BidiStreamResponse, ConnectError>> + Send>,
-                > = Box::pin(futures::stream::empty());
-                return Ok((stream, ctx));
+                return Ok(wrap(Box::pin(futures::stream::empty())));
             }
 
             // Create stream that yields responses
@@ -1030,11 +938,7 @@ impl ConformanceService for ConformanceServiceImpl {
                 },
             );
 
-            let boxed_stream: Pin<
-                Box<dyn Stream<Item = Result<BidiStreamResponse, ConnectError>> + Send>,
-            > = Box::pin(stream);
-
-            Ok((boxed_stream, ctx))
+            Ok(wrap(Box::pin(stream)))
         }
     }
 }

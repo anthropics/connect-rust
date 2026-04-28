@@ -6,13 +6,16 @@ pub use proto::test::echo::v1::*;
 
 #[cfg(test)]
 mod tests {
-    use std::pin::Pin;
+
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     use connectrpc::client::{ClientConfig, ClientTransport, HttpClient};
-    use connectrpc::{ConnectError, ConnectRpcService, Context, Router};
-    use futures::{Stream, StreamExt};
+    use connectrpc::{
+        ConnectError, ConnectRpcService, RequestContext, Response, Router, ServiceResult,
+        ServiceStream,
+    };
+    use futures::StreamExt;
     use tokio::net::TcpListener;
 
     use super::*;
@@ -26,31 +29,23 @@ mod tests {
     impl EchoService for TestEchoService {
         async fn echo(
             &self,
-            ctx: Context,
+            _ctx: RequestContext,
             request: OwnedView<EchoRequestView<'static>>,
-        ) -> Result<(EchoResponse, Context), ConnectError> {
+        ) -> ServiceResult<EchoResponse> {
             let request = request.to_owned_message();
-            Ok((
-                EchoResponse {
-                    sequence: request.sequence,
-                    data: request.data,
-                    ..Default::default()
-                },
-                ctx,
-            ))
+            Ok(EchoResponse {
+                sequence: request.sequence,
+                data: request.data,
+                ..Default::default()
+            }
+            .into())
         }
 
         async fn server_stream(
             &self,
-            ctx: Context,
+            _ctx: RequestContext,
             request: OwnedView<EchoRequestView<'static>>,
-        ) -> Result<
-            (
-                Pin<Box<dyn Stream<Item = Result<EchoResponse, ConnectError>> + Send>>,
-                Context,
-            ),
-            ConnectError,
-        > {
+        ) -> ServiceResult<ServiceStream<EchoResponse>> {
             let request = request.to_owned_message();
             let count = request.sequence;
             let stream = futures::stream::unfold(0, move |i| async move {
@@ -69,19 +64,14 @@ mod tests {
                     i + 1,
                 ))
             });
-            Ok((Box::pin(stream), ctx))
+            Ok(Response::stream(stream))
         }
 
         async fn client_stream(
             &self,
-            ctx: Context,
-            mut requests: Pin<
-                Box<
-                    dyn Stream<Item = Result<OwnedView<EchoRequestView<'static>>, ConnectError>>
-                        + Send,
-                >,
-            >,
-        ) -> Result<(EchoResponse, Context), ConnectError> {
+            _ctx: RequestContext,
+            mut requests: ServiceStream<OwnedView<EchoRequestView<'static>>>,
+        ) -> ServiceResult<EchoResponse> {
             let mut count = 0i32;
             let mut parts = Vec::new();
             while let Some(req) = requests.next().await {
@@ -89,32 +79,19 @@ mod tests {
                 count += 1;
                 parts.push(req.data);
             }
-            Ok((
-                EchoResponse {
-                    sequence: count,
-                    data: parts.join(","),
-                    ..Default::default()
-                },
-                ctx,
-            ))
+            Ok(EchoResponse {
+                sequence: count,
+                data: parts.join(","),
+                ..Default::default()
+            }
+            .into())
         }
 
         async fn bidi_stream(
             &self,
-            ctx: Context,
-            requests: Pin<
-                Box<
-                    dyn Stream<Item = Result<OwnedView<EchoRequestView<'static>>, ConnectError>>
-                        + Send,
-                >,
-            >,
-        ) -> Result<
-            (
-                Pin<Box<dyn Stream<Item = Result<EchoResponse, ConnectError>> + Send>>,
-                Context,
-            ),
-            ConnectError,
-        > {
+            _ctx: RequestContext,
+            requests: ServiceStream<OwnedView<EchoRequestView<'static>>>,
+        ) -> ServiceResult<ServiceStream<EchoResponse>> {
             // Map stream to owned types before spawning to satisfy Send bounds
             let mut requests = Box::pin(requests.map(|r| r.map(|v| v.to_owned_message())));
             // Echo each request back immediately via an mpsc channel.
@@ -140,7 +117,7 @@ mod tests {
                 }
             });
             let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-            Ok((Box::pin(stream), ctx))
+            Ok(Response::stream(stream))
         }
     }
 

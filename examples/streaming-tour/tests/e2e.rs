@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use buffa::view::OwnedView;
 use connectrpc::client::{ClientConfig, HttpClient};
-use connectrpc::{ConnectError, Context, Router};
+use connectrpc::{ConnectError, RequestContext, Response, Router, ServiceResult, ServiceStream};
 use futures::{Stream, StreamExt};
 
 pub mod proto {
@@ -26,24 +26,22 @@ struct NumberServiceImpl;
 impl NumberService for NumberServiceImpl {
     async fn square(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<SquareRequestView<'static>>,
-    ) -> Result<(SquareResponse, Context), ConnectError> {
+    ) -> ServiceResult<SquareResponse> {
         let v = request.value.unwrap_or(0) as i64;
-        Ok((
-            SquareResponse {
-                squared: Some(v * v),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Ok(SquareResponse {
+            squared: Some(v * v),
+            ..Default::default()
+        }
+        .into())
     }
 
     async fn range(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<RangeRequestView<'static>>,
-    ) -> Result<(ResponseStream<RangeResponse>, Context), ConnectError> {
+    ) -> ServiceResult<ServiceStream<RangeResponse>> {
         let start = request.start.unwrap_or(0);
         let count = request.count.unwrap_or(0).max(0);
         let stream = futures::stream::iter((0..count).map(move |i| {
@@ -52,32 +50,30 @@ impl NumberService for NumberServiceImpl {
                 ..Default::default()
             })
         }));
-        Ok((Box::pin(stream), ctx))
+        Ok(Response::stream(stream))
     }
 
     async fn sum(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         mut requests: RequestStream<SumRequestView<'static>>,
-    ) -> Result<(SumResponse, Context), ConnectError> {
+    ) -> ServiceResult<SumResponse> {
         let mut total: i64 = 0;
         while let Some(req) = requests.next().await {
             total += req?.value.unwrap_or(0) as i64;
         }
-        Ok((
-            SumResponse {
-                total: Some(total),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Ok(SumResponse {
+            total: Some(total),
+            ..Default::default()
+        }
+        .into())
     }
 
     async fn running_sum(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         requests: RequestStream<RunningSumRequestView<'static>>,
-    ) -> Result<(ResponseStream<RunningSumResponse>, Context), ConnectError> {
+    ) -> ServiceResult<ServiceStream<RunningSumResponse>> {
         let response_stream =
             futures::stream::unfold((requests, 0i64), |(mut requests, mut total)| async move {
                 match requests.next().await? {
@@ -94,7 +90,7 @@ impl NumberService for NumberServiceImpl {
                     Err(e) => Some((Err(e), (requests, total))),
                 }
             });
-        Ok((Box::pin(response_stream), ctx))
+        Ok(Response::stream(response_stream))
     }
 }
 

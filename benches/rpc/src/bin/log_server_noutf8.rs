@@ -9,7 +9,7 @@
 //! the actual recovery.
 
 use buffa::view::OwnedView;
-use connectrpc::{ConnectError, ConnectRpcService, Context};
+use connectrpc::{ConnectRpcService, RequestContext, ServiceResult};
 use rpc_bench::connect::bench::noutf8::v1::*;
 use rpc_bench::proto::bench::noutf8::v1::__buffa::view::LogRequestView;
 use rpc_bench::proto::bench::noutf8::v1::*;
@@ -19,9 +19,9 @@ struct LogIngestImpl;
 impl LogIngestService for LogIngestImpl {
     async fn ingest(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         req: OwnedView<LogRequestView<'static>>,
-    ) -> Result<(LogIngestResponse, Context), ConnectError> {
+    ) -> ServiceResult<LogIngestResponse> {
         let mut count = 0i32;
         let mut total_message_bytes = 0i64;
         let mut max_severity = 0i32;
@@ -61,16 +61,14 @@ impl LogIngestService for LogIngestImpl {
             }
         }
 
-        Ok((
-            LogIngestResponse {
-                count: Some(count),
-                total_message_bytes: Some(total_message_bytes),
-                total_label_bytes: Some(total_label_bytes),
-                max_severity: Some(max_severity),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Ok(LogIngestResponse {
+            count: Some(count),
+            total_message_bytes: Some(total_message_bytes),
+            total_label_bytes: Some(total_label_bytes),
+            max_severity: Some(max_severity),
+            ..Default::default()
+        }
+        .into())
     }
 }
 
