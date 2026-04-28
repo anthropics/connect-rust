@@ -9,6 +9,18 @@
 //! [`Response<B>`](crate::Response) carrying the body plus any response
 //! headers/trailers/compression hint. See [`crate::response`] for the
 //! type definitions.
+//!
+//! # Why response metadata lives on `Response<B>`
+//!
+//! The earlier `Context` design conflated request-side reads
+//! (`headers`, `deadline`, `extensions`) with response-side writes
+//! (`response_headers`, `trailers`, `compress_response`) on one struct
+//! that the handler took ownership of and threaded back. Splitting it
+//! gives a clean in/out separation: handlers that don't touch response
+//! metadata bind `_ctx` and return `Ok(body.into())` with no `mut`
+//! ceremony, while handlers that do attach metadata get a fluent
+//! builder (`Response::new(body).with_header(..).with_trailer(..)`)
+//! instead of field-mutation followed by `Ok((body, ctx))`.
 
 use std::pin::Pin;
 use std::sync::Arc;

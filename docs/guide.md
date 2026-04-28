@@ -284,6 +284,22 @@ a custom auth layer can stamp a `UserId` into the request's
 `ctx.extensions.get::<UserId>()`. See [Tower middleware](#tower-middleware)
 for the full pattern.
 
+### The `refining_impl_trait` lint
+
+The generated trait declares unary/client-stream returns as
+`ServiceResult<impl Encodable<M>>` so handlers can return either the
+owned `M` or (in a follow-up) a borrowed view that encodes as `M`.
+Writing your impl as `-> ServiceResult<FooResponse>` *refines* that
+opaque bound to a concrete type, which triggers
+`refining_impl_trait_internal` / `refining_impl_trait_reachable`. This
+is intentional - the refinement is the point. Add at your crate root:
+
+```rust
+#![allow(refining_impl_trait_internal, refining_impl_trait_reachable)]
+```
+
+or `#[allow(refining_impl_trait)]` on the impl block.
+
 ### Returning errors
 
 Handlers return `ConnectError` for failures. Each error carries an
@@ -794,7 +810,7 @@ let service = ConnectRpcService::new(router).with_compression(registry);
 | Example | What it covers |
 |---|---|
 | [`streaming-tour/`](../examples/streaming-tour) | All four RPC types (unary, server stream, client stream, bidi) on a trivial NumberService. Smallest demo of handler signatures and client invocation patterns. |
-| [`middleware/`](../examples/middleware) | Server-side tower middleware composition: an `axum::middleware::from_fn` bearer-token auth, identity passthrough via `RequestContext::extensions`, response trailers via `Context::set_trailer`. Client demos `ClientConfig::default_header` and `CallOptions::with_timeout`. |
+| [`middleware/`](../examples/middleware) | Server-side tower middleware composition: an `axum::middleware::from_fn` bearer-token auth, identity passthrough via `RequestContext::extensions`, response trailers via `Response::with_trailer`. Client demos `ClientConfig::default_header` and `CallOptions::with_timeout`. |
 | [`eliza/`](../examples/eliza) | Production-shaped streaming app: a port of the `connectrpc/examples-go` ELIZA demo. Server-streaming Introduce + bidi-streaming Converse, TLS, mTLS, CORS, IPv6, both server and client binaries, interoperates with the hosted Go reference at `demo.connectrpc.com`. |
 | [`multiservice/`](../examples/multiservice) | Multiple proto packages compiled together with `buf generate`, multiple services on one server, well-known type usage. |
 | [`wasm-client/`](../examples/wasm-client) | Browser fetch transport: same generated client used from `wasm32-unknown-unknown` with a custom `ClientTransport` backed by `web-sys::fetch`. |

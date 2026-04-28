@@ -135,11 +135,16 @@ impl<B> Response<B> {
 
     /// Append a response header.
     ///
+    /// Uses [`HeaderMap::append`], so calling twice with the same name
+    /// accumulates values rather than replacing.
+    ///
     /// # Panics
     ///
     /// Panics if `name` or `value` cannot be converted into the
-    /// corresponding header type. Use the `headers` field directly for
-    /// fallible insertion.
+    /// corresponding header type (invalid characters, non-ASCII name,
+    /// etc.). Use [`try_with_header`](Self::try_with_header) for
+    /// dynamic values, or the `headers` field directly for full
+    /// control.
     #[must_use]
     pub fn with_header<K, V>(mut self, name: K, value: V) -> Self
     where
@@ -153,13 +158,37 @@ impl<B> Response<B> {
         self
     }
 
+    /// Append a response header, returning an error if `name` or
+    /// `value` is invalid.
+    ///
+    /// Non-panicking sibling of [`with_header`](Self::with_header) for
+    /// dynamic values. Uses [`HeaderMap::append`], so repeated calls
+    /// accumulate.
+    pub fn try_with_header<K, V>(mut self, name: K, value: V) -> Result<Self, http::Error>
+    where
+        K: TryInto<HeaderName>,
+        K::Error: Into<http::Error>,
+        V: TryInto<HeaderValue>,
+        V::Error: Into<http::Error>,
+    {
+        self.headers.append(
+            name.try_into().map_err(Into::into)?,
+            value.try_into().map_err(Into::into)?,
+        );
+        Ok(self)
+    }
+
     /// Append a response trailer.
+    ///
+    /// Uses [`HeaderMap::append`], so calling twice with the same name
+    /// accumulates values rather than replacing.
     ///
     /// # Panics
     ///
     /// Panics if `name` or `value` cannot be converted into the
-    /// corresponding header type. Use the `trailers` field directly for
-    /// fallible insertion.
+    /// corresponding header type. Use
+    /// [`try_with_trailer`](Self::try_with_trailer) for dynamic
+    /// values, or the `trailers` field directly for full control.
     #[must_use]
     pub fn with_trailer<K, V>(mut self, name: K, value: V) -> Self
     where
@@ -171,6 +200,26 @@ impl<B> Response<B> {
         self.trailers
             .append(name.try_into().unwrap(), value.try_into().unwrap());
         self
+    }
+
+    /// Append a response trailer, returning an error if `name` or
+    /// `value` is invalid.
+    ///
+    /// Non-panicking sibling of [`with_trailer`](Self::with_trailer)
+    /// for dynamic values. Uses [`HeaderMap::append`], so repeated
+    /// calls accumulate.
+    pub fn try_with_trailer<K, V>(mut self, name: K, value: V) -> Result<Self, http::Error>
+    where
+        K: TryInto<HeaderName>,
+        K::Error: Into<http::Error>,
+        V: TryInto<HeaderValue>,
+        V::Error: Into<http::Error>,
+    {
+        self.trailers.append(
+            name.try_into().map_err(Into::into)?,
+            value.try_into().map_err(Into::into)?,
+        );
+        Ok(self)
     }
 
     /// Override the server's compression policy for this response.
@@ -228,6 +277,11 @@ pub type ServiceStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> +
 /// The blanket impl for `M: Message + Serialize` covers the owned
 /// message; a follow-up change adds an impl for buffa's `MView<'_>` so
 /// handlers can return borrowed responses.
+///
+/// # Contract
+///
+/// Implementations must produce bytes that decode as a valid `M` in
+/// the given format.
 ///
 /// `encode` is fallible: the owned-message impl never errors, but a
 /// view-body impl is proto-only (view types lack `Serialize`) and must
@@ -347,6 +401,62 @@ mod tests {
         let d = Instant::now();
         let ctx = RequestContext::new(HeaderMap::new()).with_deadline(Some(d));
         assert_eq!(ctx.deadline, Some(d));
+    }
+
+    #[test]
+    fn response_map_body_preserves_metadata() {
+        let r = Response::new(2u32)
+            .with_header("x-h", "1")
+            .with_trailer("x-t", "2")
+            .compress(true);
+        let r = r.map_body(|n| n.to_string());
+        assert_eq!(r.body, "2");
+        assert_eq!(r.headers.get("x-h").unwrap(), "1");
+        assert_eq!(r.trailers.get("x-t").unwrap(), "2");
+        assert_eq!(r.compress, Some(true));
+    }
+
+    #[tokio::test]
+    async fn response_stream_yields_items() {
+        use futures::StreamExt;
+        let r: Response<ServiceStream<i32>> =
+            Response::stream(futures::stream::iter([Ok(1), Ok(2), Ok(3)]));
+        let collected: Vec<_> = r.body.map(|x| x.unwrap()).collect().await;
+        assert_eq!(collected, vec![1, 2, 3]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn with_header_panics_on_invalid_name() {
+        let _ = Response::new(()).with_header("invalid header name", "v");
+    }
+
+    #[test]
+    fn try_with_header_errors_on_invalid_name() {
+        let err = Response::new(())
+            .try_with_header("invalid header name", "v")
+            .unwrap_err();
+        assert!(err.is::<http::header::InvalidHeaderName>());
+    }
+
+    #[test]
+    fn try_with_header_ok_appends() {
+        let r = Response::new(())
+            .try_with_header("x-a", "1")
+            .unwrap()
+            .try_with_header("x-a", "2")
+            .unwrap();
+        let vals: Vec<_> = r.headers.get_all("x-a").iter().collect();
+        assert_eq!(vals.len(), 2);
+    }
+
+    #[test]
+    fn try_with_trailer_errors_on_invalid_value() {
+        // Newlines are not permitted in header values.
+        let err = Response::new(())
+            .try_with_trailer("x-t", "bad\nvalue")
+            .unwrap_err();
+        assert!(err.is::<http::header::InvalidHeaderValue>());
     }
 
     #[test]
