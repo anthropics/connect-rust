@@ -17,14 +17,15 @@ pub trait FortuneService: Send + Sync + 'static {
     /// Handle the GetFortunes RPC.
     fn get_fortunes(
         &self,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::view::OwnedView<
             crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView<'static>,
         >,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (crate::proto::fortune::v1::GetFortunesResponse, ::connectrpc::Context),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::fortune::v1::GetFortunesResponse,
+            > + Send + 'static + use<Self>,
         >,
     > + Send;
 }
@@ -121,7 +122,7 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
     fn call_unary(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -136,12 +137,9 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.get_fortunes(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.get_fortunes(ctx, req)
+                        .await?
+                        .encode::<crate::proto::fortune::v1::GetFortunesResponse>(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -150,7 +148,7 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -165,7 +163,7 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -180,7 +178,7 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {

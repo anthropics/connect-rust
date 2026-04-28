@@ -48,6 +48,31 @@ increment the patch version.
   `HeaderMap` to "unset" (observationally identical via the
   accessors), and the `Debug` output for an unset map now shows
   `None` instead of `{}`.
+- **Handler signatures redesigned** ([#7]): the generated service
+  trait no longer threads a single `Context` in and out. Handlers
+  now receive a read-only `RequestContext` (headers, deadline,
+  extensions) and return `ServiceResult<B>` =
+  `Result<Response<B>, ConnectError>`, where `Response<B>` carries
+  the body plus optional response headers/trailers/compression hint.
+  Unary and client-stream methods return
+  `ServiceResult<impl Encodable<Out>>`; server-stream and bidi
+  return `ServiceResult<ServiceStream<Out>>`. `Response::ok(body)` is
+  the bare-body happy-path shorthand; for streaming bodies use
+  `Response::stream_ok(s)`. `Encodable<M>` is the new "encodes as
+  M" bound on response bodies — the owned `M` and the
+  `MaybeBorrowed` view wrapper both implement it. The old
+  `Context` type is removed.
+
+  ```rust
+  // before
+  async fn say(&self, ctx: Context, req: ...) -> Result<(SayResponse, Context), ConnectError> {
+      Ok((SayResponse { ... }, ctx))
+  }
+  // after
+  async fn say(&self, _ctx: RequestContext, req: ...) -> ServiceResult<SayResponse> {
+      Response::ok(SayResponse { ... })
+  }
+  ```
 
 ### Added
 
@@ -56,6 +81,7 @@ increment the patch version.
   `build.rs` context (e.g. from a Bazel genrule or standalone host tool).
   Default remains `true`.
 
+[#7]: https://github.com/anthropics/connect-rust/issues/7
 [#34]: https://github.com/anthropics/connect-rust/issues/34
 [#61]: https://github.com/anthropics/connect-rust/issues/61
 [buffa#22]: https://github.com/anthropics/buffa/pull/22

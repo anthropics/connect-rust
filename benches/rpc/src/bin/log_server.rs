@@ -8,7 +8,7 @@
 //! struct: proto decode/encode cost dominates.
 
 use buffa::view::OwnedView;
-use connectrpc::{ConnectError, ConnectRpcService, Context};
+use connectrpc::{ConnectRpcService, RequestContext, Response, ServiceResult};
 use rpc_bench::connect::bench::v1::*;
 use rpc_bench::proto::bench::v1::__buffa::view::LogRequestView;
 use rpc_bench::proto::bench::v1::*;
@@ -18,9 +18,9 @@ struct LogIngestImpl;
 impl LogIngestService for LogIngestImpl {
     async fn ingest(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         req: OwnedView<LogRequestView<'static>>,
-    ) -> Result<(LogIngestResponse, Context), ConnectError> {
+    ) -> ServiceResult<LogIngestResponse> {
         let mut count = 0i32;
         let mut total_message_bytes = 0i64;
         let mut total_label_bytes = 0i64;
@@ -68,16 +68,13 @@ impl LogIngestService for LogIngestImpl {
             }
         }
 
-        Ok((
-            LogIngestResponse {
-                count,
-                total_message_bytes,
-                total_label_bytes,
-                max_severity,
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Response::ok(LogIngestResponse {
+            count,
+            total_message_bytes,
+            total_label_bytes,
+            max_severity,
+            ..Default::default()
+        })
     }
 }
 

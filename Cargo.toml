@@ -95,6 +95,9 @@ dead_code = "warn"
 explicit_outlives_requirements = "warn"
 unused_imports = "warn"
 unused_lifetimes = "warn"
+# Generated trait methods return `ServiceResult<impl Encodable<M>>`; impls
+# intentionally refine to a concrete body type (e.g. `ServiceResult<M>`).
+refining_impl_trait = { level = "allow", priority = -1 }
 
 [workspace.lints.clippy]
 dbg_macro = "warn"
