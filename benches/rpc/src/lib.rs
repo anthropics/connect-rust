@@ -68,7 +68,7 @@ impl BenchService for BenchServiceImpl {
                 ))
             }
         });
-        Ok(Response::stream(stream))
+        Response::stream_ok(stream)
     }
 
     async fn client_stream(
@@ -143,7 +143,7 @@ impl BenchService for BenchServiceImpl {
             }
         });
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        Ok(Response::stream(stream))
+        Response::stream_ok(stream)
     }
 }
 

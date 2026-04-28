@@ -331,7 +331,7 @@ impl ConformanceService for ConformanceServiceImpl {
         // Handle response definition
         if !request.response_definition.is_set() {
             // No response definition - return empty stream
-            return Ok(Response::stream(futures::stream::empty()));
+            return Response::stream_ok(futures::stream::empty());
         }
         let def = &*request.response_definition;
 
@@ -566,7 +566,7 @@ impl ConformanceService for ConformanceServiceImpl {
             Some(Err(e)) => return Err(e),
             None => {
                 // Empty request stream — return empty response stream
-                return Ok(Response::stream(futures::stream::empty()));
+                return Response::stream_ok(futures::stream::empty());
             }
         };
 

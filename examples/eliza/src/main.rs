@@ -114,7 +114,7 @@ impl ElizaService for ElizaServer {
                 ))
             });
 
-        Ok((Box::pin(response_stream) as ServiceStream<_>).into())
+        Response::stream_ok(response_stream)
     }
 
     async fn converse(
@@ -155,7 +155,7 @@ impl ElizaService for ElizaServer {
             },
         );
 
-        Ok((Box::pin(response_stream) as ServiceStream<_>).into())
+        Response::stream_ok(response_stream)
     }
 }
 

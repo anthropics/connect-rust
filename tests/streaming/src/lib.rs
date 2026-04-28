@@ -63,7 +63,7 @@ mod tests {
                     i + 1,
                 ))
             });
-            Ok(Response::stream(stream))
+            Response::stream_ok(stream)
         }
 
         async fn client_stream(
@@ -115,7 +115,7 @@ mod tests {
                 }
             });
             let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-            Ok(Response::stream(stream))
+            Response::stream_ok(stream)
         }
     }
 

@@ -286,7 +286,7 @@ for the full pattern.
 
 The generated trait declares unary/client-stream returns as
 `ServiceResult<impl Encodable<M>>` so handlers can return either the
-owned `M` or (in a follow-up) a borrowed view that encodes as `M`.
+owned `M` or a borrowing view (see the `MaybeBorrowed` type).
 Writing your impl as `-> ServiceResult<FooResponse>` *refines* that
 opaque bound to a concrete type, which triggers
 `refining_impl_trait_internal` / `refining_impl_trait_reachable`. This
@@ -365,7 +365,9 @@ stream of `Result<T, ConnectError>`).
 ### Server streaming
 
 The handler returns a stream of responses. Use any `futures::Stream`
-you like, then wrap it with `Response::stream`:
+you like, then wrap it with `Response::stream_ok` (or
+`Ok(Response::stream(s).with_header(...))` if you need response
+metadata):
 
 ```rust
 async fn range(
@@ -374,7 +376,7 @@ async fn range(
     req: OwnedView<RangeRequestView<'static>>,
 ) -> ServiceResult<ServiceStream<RangeResponse>> {
     let stream = futures::stream::iter(/* ... */);
-    Ok(Response::stream(stream))
+    Response::stream_ok(stream)
 }
 ```
 
@@ -410,7 +412,7 @@ async fn running_sum(
 ) -> ServiceResult<ServiceStream<RunningSumResponse>> {
     // Map the request stream to a response stream however you like.
     let response_stream = futures::stream::unfold(/* ... */);
-    Ok(Response::stream(response_stream))
+    Response::stream_ok(response_stream)
 }
 ```
 

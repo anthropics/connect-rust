@@ -208,6 +208,7 @@ pub use handler::view_client_streaming_handler_fn;
 pub use handler::view_handler_fn;
 pub use handler::view_streaming_handler_fn;
 pub use response::Encodable;
+pub use response::EncodedResponse;
 pub use response::RequestContext;
 pub use response::Response;
 pub use response::ServiceResult;

@@ -69,7 +69,7 @@ impl NumberService for NumberServiceImpl {
                 ..Default::default()
             })
         }));
-        Ok(Response::stream(stream))
+        Response::stream_ok(stream)
     }
 
     /// Client streaming: drain the request stream, return the total.
@@ -110,7 +110,7 @@ impl NumberService for NumberServiceImpl {
                     Err(e) => Some((Err(e), (requests, total))),
                 }
             });
-        Ok(Response::stream(response_stream))
+        Response::stream_ok(response_stream)
     }
 }
 

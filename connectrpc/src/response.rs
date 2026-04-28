@@ -4,7 +4,8 @@
 //! [`RequestContext`] (passed *into* handlers) and a [`Response<B>`]
 //! wrapper (returned *from* handlers). The body type `B` is bounded by
 //! [`Encodable<M>`] in the generated trait so handlers can return either
-//! the owned message `M` or, in a follow-up, a borrowing view.
+//! the owned message `M` or a borrowing view (see the `MaybeBorrowed`
+//! type).
 
 use std::pin::Pin;
 use std::time::Instant;
@@ -71,7 +72,7 @@ impl RequestContext {
     }
 
     /// Get a request header value.
-    pub fn header(&self, key: &HeaderName) -> Option<&HeaderValue> {
+    pub fn header(&self, key: impl http::header::AsHeaderName) -> Option<&HeaderValue> {
         self.headers.get(key)
     }
 }
@@ -89,13 +90,13 @@ impl RequestContext {
 ///
 /// # Happy path
 ///
-/// `From<B>` makes `Ok(body.into())` the shortest spelling:
+/// [`Response::ok`] is the bare-body shorthand:
 ///
 /// ```rust,ignore
 /// async fn say(&self, _ctx: RequestContext, req: OwnedSayRequestView)
 ///     -> ServiceResult<SayResponse>
 /// {
-///     Ok(SayResponse { sentence: reply, ..Default::default() }.into())
+///     Response::ok(SayResponse { sentence: reply, ..Default::default() })
 /// }
 /// ```
 ///
@@ -233,9 +234,12 @@ impl<B> Response<B> {
     }
 
     /// Override the server's compression policy for this response.
+    ///
+    /// `true` forces compression, `false` disables it, `None` (or
+    /// never calling this) defers to the server's policy.
     #[must_use]
-    pub fn compress(mut self, enabled: bool) -> Self {
-        self.compress = Some(enabled);
+    pub fn compress(mut self, enabled: impl Into<Option<bool>>) -> Self {
+        self.compress = enabled.into();
         self
     }
 
@@ -263,6 +267,14 @@ impl<T> Response<ServiceStream<T>> {
     pub fn stream(s: impl Stream<Item = Result<T, ConnectError>> + Send + 'static) -> Self {
         Self::new(Box::pin(s))
     }
+
+    /// Shorthand for `Ok(Response::stream(s))` — the bare-stream
+    /// happy path.
+    pub fn stream_ok(
+        s: impl Stream<Item = Result<T, ConnectError>> + Send + 'static,
+    ) -> ServiceResult<ServiceStream<T>> {
+        Ok(Self::stream(s))
+    }
 }
 
 /// Result type returned by handler trait methods.
@@ -285,7 +297,7 @@ pub type ServiceStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> +
 ///
 /// This is the bound on the response body in generated trait methods.
 /// The blanket impl for `M: Message + Serialize` covers the owned
-/// message; a follow-up change adds an impl for buffa's `MView<'_>` so
+/// message; the `MaybeBorrowed` type covers buffa's `MView<'_>` so
 /// handlers can return borrowed responses.
 ///
 /// # Contract
@@ -345,6 +357,30 @@ impl<B> Response<B> {
 mod tests {
     use super::*;
     use buffa_types::google::protobuf::StringValue;
+
+    #[tokio::test]
+    async fn response_stream_ok_shorthand() {
+        use futures::StreamExt;
+        let r: ServiceResult<ServiceStream<i32>> =
+            Response::stream_ok(futures::stream::iter([Ok(7)]));
+        let collected: Vec<_> = r.unwrap().body.map(|x| x.unwrap()).collect().await;
+        assert_eq!(collected, vec![7]);
+    }
+
+    #[test]
+    fn compress_tristate() {
+        assert_eq!(Response::new(()).compress(true).compress, Some(true));
+        assert_eq!(Response::new(()).compress(false).compress, Some(false));
+        assert_eq!(Response::new(()).compress(None).compress, None);
+    }
+
+    #[test]
+    fn header_accepts_str() {
+        let mut h = HeaderMap::new();
+        h.insert("x-custom", HeaderValue::from_static("v"));
+        let ctx = RequestContext::new(h);
+        assert_eq!(ctx.header("x-custom").unwrap(), "v");
+    }
 
     #[test]
     fn response_ok_shorthand() {
@@ -408,7 +444,7 @@ mod tests {
         h.insert("x-custom", HeaderValue::from_static("v"));
         let ctx = RequestContext::new(h);
         assert_eq!(
-            ctx.header(&HeaderName::from_static("x-custom")).unwrap(),
+            ctx.header(HeaderName::from_static("x-custom")).unwrap(),
             "v"
         );
         assert!(ctx.deadline.is_none());

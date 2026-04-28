@@ -58,10 +58,21 @@ increment the patch version.
   `ServiceResult<impl Encodable<Out>>`; server-stream and bidi
   return `ServiceResult<ServiceStream<Out>>`. `Response::ok(body)` is
   the bare-body happy-path shorthand; for streaming bodies use
-  `Ok(Response::stream(s))`. `Encodable<M>` is the new "encodes as
-  M" bound on response bodies — only the owned `M` implements it
-  today; a follow-up will add a view-body impl for borrowed
-  responses. The old `Context` type is removed.
+  `Response::stream_ok(s)`. `Encodable<M>` is the new "encodes as
+  M" bound on response bodies — the owned `M` and the
+  `MaybeBorrowed` view wrapper both implement it. The old
+  `Context` type is removed.
+
+  ```rust
+  // before
+  async fn say(&self, ctx: Context, req: ...) -> Result<(SayResponse, Context), ConnectError> {
+      Ok((SayResponse { ... }, ctx))
+  }
+  // after
+  async fn say(&self, _ctx: RequestContext, req: ...) -> ServiceResult<SayResponse> {
+      Response::ok(SayResponse { ... })
+  }
+  ```
 
 ### Added
 
