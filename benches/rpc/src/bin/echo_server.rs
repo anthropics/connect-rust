@@ -20,11 +20,10 @@ impl EchoService for EchoImpl {
     ) -> ServiceResult<EchoResponse> {
         // One allocation to copy the borrowed &str into the owned response.
         // This is the minimal work a real echo server would do.
-        let resp = EchoResponse {
+        Response::ok(EchoResponse {
             message: req.message.to_string(),
             ..Default::default()
-        };
-        Response::ok(resp)
+        })
     }
 }
 
