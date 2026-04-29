@@ -1,13 +1,12 @@
 //! End-to-end test: spin up the NumberService in-process, exercise all
 //! four RPC types over a real TCP socket, assert expected results.
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use buffa::view::OwnedView;
 use connectrpc::client::{ClientConfig, HttpClient};
-use connectrpc::{ConnectError, Context, Router};
-use futures::{Stream, StreamExt};
+use connectrpc::{RequestContext, Response, Router, ServiceResult, ServiceStream};
+use futures::StreamExt;
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
@@ -16,34 +15,29 @@ pub mod proto {
 use proto::anthropic::connectrpc::tour::v1::__buffa::view::*;
 use proto::anthropic::connectrpc::tour::v1::*;
 
-// Local type aliases that flatten the streaming-handler signatures.
-// See src/server.rs for the rationale.
-type ResponseStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> + Send>>;
-type RequestStream<V> = Pin<Box<dyn Stream<Item = Result<OwnedView<V>, ConnectError>> + Send>>;
+// Local alias that flattens client/bidi-stream request parameters.
+type RequestStream<V> = ServiceStream<OwnedView<V>>;
 
 struct NumberServiceImpl;
 
 impl NumberService for NumberServiceImpl {
     async fn square(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<SquareRequestView<'static>>,
-    ) -> Result<(SquareResponse, Context), ConnectError> {
+    ) -> ServiceResult<SquareResponse> {
         let v = request.value.unwrap_or(0) as i64;
-        Ok((
-            SquareResponse {
-                squared: Some(v * v),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Response::ok(SquareResponse {
+            squared: Some(v * v),
+            ..Default::default()
+        })
     }
 
     async fn range(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         request: OwnedView<RangeRequestView<'static>>,
-    ) -> Result<(ResponseStream<RangeResponse>, Context), ConnectError> {
+    ) -> ServiceResult<ServiceStream<RangeResponse>> {
         let start = request.start.unwrap_or(0);
         let count = request.count.unwrap_or(0).max(0);
         let stream = futures::stream::iter((0..count).map(move |i| {
@@ -52,32 +46,29 @@ impl NumberService for NumberServiceImpl {
                 ..Default::default()
             })
         }));
-        Ok((Box::pin(stream), ctx))
+        Response::stream_ok(stream)
     }
 
     async fn sum(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         mut requests: RequestStream<SumRequestView<'static>>,
-    ) -> Result<(SumResponse, Context), ConnectError> {
+    ) -> ServiceResult<SumResponse> {
         let mut total: i64 = 0;
         while let Some(req) = requests.next().await {
             total += req?.value.unwrap_or(0) as i64;
         }
-        Ok((
-            SumResponse {
-                total: Some(total),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Response::ok(SumResponse {
+            total: Some(total),
+            ..Default::default()
+        })
     }
 
     async fn running_sum(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         requests: RequestStream<RunningSumRequestView<'static>>,
-    ) -> Result<(ResponseStream<RunningSumResponse>, Context), ConnectError> {
+    ) -> ServiceResult<ServiceStream<RunningSumResponse>> {
         let response_stream =
             futures::stream::unfold((requests, 0i64), |(mut requests, mut total)| async move {
                 match requests.next().await? {
@@ -94,7 +85,7 @@ impl NumberService for NumberServiceImpl {
                     Err(e) => Some((Err(e), (requests, total))),
                 }
             });
-        Ok((Box::pin(response_stream), ctx))
+        Response::stream_ok(response_stream)
     }
 }
 

@@ -1,3 +1,27 @@
+///Shorthand for `OwnedView<BloatEchoView<'static>>`.
+pub type OwnedBloatEchoView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::BloatEchoView<'static>,
+>;
+impl ::connectrpc::Encodable<crate::proto::bench::v1::BloatEcho>
+for crate::proto::bench::v1::__buffa::view::BloatEchoView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::BloatEcho>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::BloatEchoView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const BLOAT_ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.BloatEchoService";
 /// String-heavy echo payload for measuring ViewEncode impact through
@@ -9,27 +33,35 @@ pub const BLOAT_ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.BloatEchoService";
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait BloatEchoService: Send + Sync + 'static {
     /// Handle the Echo RPC.
-    fn echo(
-        &self,
-        ctx: ::connectrpc::Context,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::BloatEchoView<'static>,
-        >,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn echo<'a>(
+        &'a self,
+        ctx: ::connectrpc::RequestContext,
+        request: OwnedBloatEchoView,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (crate::proto::bench::v1::BloatEcho, ::connectrpc::Context),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::bench::v1::BloatEcho,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -66,9 +98,13 @@ impl<S: BloatEchoService> BloatEchoServiceExt for S {
                 "Echo",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.echo(ctx, req).await }
+                        async move {
+                            svc.echo(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::BloatEcho>(format)
+                        }
                     })
                 },
             )
@@ -126,7 +162,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
     fn call_unary(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -141,12 +177,9 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::BloatEchoView,
                     >(request, format)?;
-                    let (res, ctx) = svc.echo(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.echo(ctx, req)
+                        .await?
+                        .encode::<crate::proto::bench::v1::BloatEcho>(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -155,7 +188,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -170,7 +203,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -185,7 +218,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {

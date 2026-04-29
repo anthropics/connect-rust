@@ -448,9 +448,26 @@ impl From<std::io::Error> for ConnectError {
     }
 }
 
+/// Lets `Response::try_with_header(..)?` propagate naturally inside a
+/// handler.
+impl From<http::Error> for ConnectError {
+    fn from(err: http::Error) -> Self {
+        Self::internal(err.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_http_error_is_internal() {
+        let http_err: http::Error = http::HeaderValue::from_bytes(b"bad\nval")
+            .unwrap_err()
+            .into();
+        let e: ConnectError = http_err.into();
+        assert_eq!(e.code, ErrorCode::Internal);
+    }
 
     #[test]
     fn test_grpc_code_round_trip() {

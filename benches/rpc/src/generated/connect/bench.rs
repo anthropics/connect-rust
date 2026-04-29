@@ -1,141 +1,208 @@
+///Shorthand for `OwnedView<BenchRequestView<'static>>`.
+pub type OwnedBenchRequestView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::BenchRequestView<'static>,
+>;
+///Shorthand for `OwnedView<BenchResponseView<'static>>`.
+pub type OwnedBenchResponseView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::BenchResponseView<'static>,
+>;
+///Shorthand for `OwnedView<LogRequestView<'static>>`.
+pub type OwnedLogRequestView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
+>;
+///Shorthand for `OwnedView<LogResponseView<'static>>`.
+pub type OwnedLogResponseView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogResponseView<'static>,
+>;
+///Shorthand for `OwnedView<EchoRequestView<'static>>`.
+pub type OwnedEchoRequestView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::EchoRequestView<'static>,
+>;
+///Shorthand for `OwnedView<EchoResponseView<'static>>`.
+pub type OwnedEchoResponseView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::EchoResponseView<'static>,
+>;
+///Shorthand for `OwnedView<LogIngestResponseView<'static>>`.
+pub type OwnedLogIngestResponseView = ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogIngestResponseView<'static>,
+>;
+impl ::connectrpc::Encodable<crate::proto::bench::v1::BenchResponse>
+for crate::proto::bench::v1::__buffa::view::BenchResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::BenchResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::BenchResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::LogResponse>
+for crate::proto::bench::v1::__buffa::view::LogResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::LogResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::EchoResponse>
+for crate::proto::bench::v1::__buffa::view::EchoResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::EchoResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::EchoResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::LogIngestResponse>
+for crate::proto::bench::v1::__buffa::view::LogIngestResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::v1::LogIngestResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::v1::__buffa::view::LogIngestResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const BENCH_SERVICE_SERVICE_NAME: &str = "bench.v1.BenchService";
 /// Server trait for BenchService.
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait BenchService: Send + Sync + 'static {
     /// Handle the Unary RPC.
-    fn unary(
-        &self,
-        ctx: ::connectrpc::Context,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::BenchRequestView<'static>,
-        >,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn unary<'a>(
+        &'a self,
+        ctx: ::connectrpc::RequestContext,
+        request: OwnedBenchRequestView,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (crate::proto::bench::v1::BenchResponse, ::connectrpc::Context),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::bench::v1::BenchResponse,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
     /// Handle the ServerStream RPC.
     fn server_stream(
         &self,
-        ctx: ::connectrpc::Context,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::BenchRequestView<'static>,
-        >,
+        ctx: ::connectrpc::RequestContext,
+        request: OwnedBenchRequestView,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (
-                ::std::pin::Pin<
-                    Box<
-                        dyn ::futures::Stream<
-                            Item = Result<
-                                crate::proto::bench::v1::BenchResponse,
-                                ::connectrpc::ConnectError,
-                            >,
-                        > + Send,
-                    >,
-                >,
-                ::connectrpc::Context,
-            ),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            ::connectrpc::ServiceStream<crate::proto::bench::v1::BenchResponse>,
         >,
     > + Send;
     /// Handle the ClientStream RPC.
-    fn client_stream(
-        &self,
-        ctx: ::connectrpc::Context,
-        requests: ::std::pin::Pin<
-            Box<
-                dyn ::futures::Stream<
-                    Item = Result<
-                        ::buffa::view::OwnedView<
-                            crate::proto::bench::v1::__buffa::view::BenchRequestView<
-                                'static,
-                            >,
-                        >,
-                        ::connectrpc::ConnectError,
-                    >,
-                > + Send,
-            >,
-        >,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn client_stream<'a>(
+        &'a self,
+        ctx: ::connectrpc::RequestContext,
+        requests: ::connectrpc::ServiceStream<OwnedBenchRequestView>,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (crate::proto::bench::v1::BenchResponse, ::connectrpc::Context),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::bench::v1::BenchResponse,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
     /// Handle the BidiStream RPC.
     fn bidi_stream(
         &self,
-        ctx: ::connectrpc::Context,
-        requests: ::std::pin::Pin<
-            Box<
-                dyn ::futures::Stream<
-                    Item = Result<
-                        ::buffa::view::OwnedView<
-                            crate::proto::bench::v1::__buffa::view::BenchRequestView<
-                                'static,
-                            >,
-                        >,
-                        ::connectrpc::ConnectError,
-                    >,
-                > + Send,
-            >,
-        >,
+        ctx: ::connectrpc::RequestContext,
+        requests: ::connectrpc::ServiceStream<OwnedBenchRequestView>,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (
-                ::std::pin::Pin<
-                    Box<
-                        dyn ::futures::Stream<
-                            Item = Result<
-                                crate::proto::bench::v1::BenchResponse,
-                                ::connectrpc::ConnectError,
-                            >,
-                        > + Send,
-                    >,
-                >,
-                ::connectrpc::Context,
-            ),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            ::connectrpc::ServiceStream<crate::proto::bench::v1::BenchResponse>,
         >,
     > + Send;
     /// Handle the LogUnary RPC.
-    fn log_unary(
-        &self,
-        ctx: ::connectrpc::Context,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
-        >,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn log_unary<'a>(
+        &'a self,
+        ctx: ::connectrpc::RequestContext,
+        request: OwnedLogRequestView,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (crate::proto::bench::v1::LogResponse, ::connectrpc::Context),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::bench::v1::LogResponse,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
     /// Handle the LogUnaryOwned RPC.
-    fn log_unary_owned(
-        &self,
-        ctx: ::connectrpc::Context,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
-        >,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn log_unary_owned<'a>(
+        &'a self,
+        ctx: ::connectrpc::RequestContext,
+        request: OwnedLogRequestView,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (crate::proto::bench::v1::LogResponse, ::connectrpc::Context),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::bench::v1::LogResponse,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -172,9 +239,13 @@ impl<S: BenchService> BenchServiceExt for S {
                 "Unary",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.unary(ctx, req).await }
+                        async move {
+                            svc.unary(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::BenchResponse>(format)
+                        }
                     })
                 },
             )
@@ -194,9 +265,13 @@ impl<S: BenchService> BenchServiceExt for S {
                 "ClientStream",
                 ::connectrpc::view_client_streaming_handler_fn({
                     let svc = ::std::sync::Arc::clone(&self);
-                    move |ctx, req| {
+                    move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.client_stream(ctx, req).await }
+                        async move {
+                            svc.client_stream(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::BenchResponse>(format)
+                        }
                     }
                 }),
             )
@@ -216,9 +291,13 @@ impl<S: BenchService> BenchServiceExt for S {
                 "LogUnary",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.log_unary(ctx, req).await }
+                        async move {
+                            svc.log_unary(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::LogResponse>(format)
+                        }
                     })
                 },
             )
@@ -227,9 +306,13 @@ impl<S: BenchService> BenchServiceExt for S {
                 "LogUnaryOwned",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.log_unary_owned(ctx, req).await }
+                        async move {
+                            svc.log_unary_owned(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::LogResponse>(format)
+                        }
                     })
                 },
             )
@@ -308,7 +391,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
     fn call_unary(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -323,12 +406,9 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::BenchRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.unary(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.unary(ctx, req)
+                        .await?
+                        .encode::<crate::proto::bench::v1::BenchResponse>(format)
                 })
             }
             "LogUnary" => {
@@ -337,12 +417,9 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::LogRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.log_unary(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.log_unary(ctx, req)
+                        .await?
+                        .encode::<crate::proto::bench::v1::LogResponse>(format)
                 })
             }
             "LogUnaryOwned" => {
@@ -351,12 +428,9 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::LogRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.log_unary_owned(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.log_unary_owned(ctx, req)
+                        .await?
+                        .encode::<crate::proto::bench::v1::LogResponse>(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -365,7 +439,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -380,14 +454,14 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::BenchRequestView,
                     >(request, format)?;
-                    let (resp_stream, ctx) = svc.server_stream(ctx, req).await?;
-                    Ok((
-                        ::connectrpc::dispatcher::codegen::encode_response_stream(
-                            resp_stream,
-                            format,
-                        ),
-                        ctx,
-                    ))
+                    let resp = svc.server_stream(ctx, req).await?;
+                    Ok(
+                        resp
+                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(
+                                s,
+                                format,
+                            )),
+                    )
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
@@ -396,7 +470,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -411,12 +485,9 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                     let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<
                         crate::proto::bench::v1::__buffa::view::BenchRequestView,
                     >(requests, format);
-                    let (res, ctx) = svc.client_stream(ctx, req_stream).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.client_stream(ctx, req_stream)
+                        .await?
+                        .encode::<crate::proto::bench::v1::BenchResponse>(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -425,7 +496,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -440,14 +511,14 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                     let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<
                         crate::proto::bench::v1::__buffa::view::BenchRequestView,
                     >(requests, format);
-                    let (resp_stream, ctx) = svc.bidi_stream(ctx, req_stream).await?;
-                    Ok((
-                        ::connectrpc::dispatcher::codegen::encode_response_stream(
-                            resp_stream,
-                            format,
-                        ),
-                        ctx,
-                    ))
+                    let resp = svc.bidi_stream(ctx, req_stream).await?;
+                    Ok(
+                        resp
+                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(
+                                s,
+                                format,
+                            )),
+                    )
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_streaming(path),
@@ -768,27 +839,35 @@ pub const ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.EchoService";
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait EchoService: Send + Sync + 'static {
     /// Handle the Echo RPC.
-    fn echo(
-        &self,
-        ctx: ::connectrpc::Context,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::EchoRequestView<'static>,
-        >,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn echo<'a>(
+        &'a self,
+        ctx: ::connectrpc::RequestContext,
+        request: OwnedEchoRequestView,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (crate::proto::bench::v1::EchoResponse, ::connectrpc::Context),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::bench::v1::EchoResponse,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -825,9 +904,13 @@ impl<S: EchoService> EchoServiceExt for S {
                 "Echo",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.echo(ctx, req).await }
+                        async move {
+                            svc.echo(ctx, req)
+                                .await?
+                                .encode::<crate::proto::bench::v1::EchoResponse>(format)
+                        }
                     })
                 },
             )
@@ -885,7 +968,7 @@ impl<T: EchoService> ::connectrpc::Dispatcher for EchoServiceServer<T> {
     fn call_unary(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -900,12 +983,9 @@ impl<T: EchoService> ::connectrpc::Dispatcher for EchoServiceServer<T> {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::EchoRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.echo(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.echo(ctx, req)
+                        .await?
+                        .encode::<crate::proto::bench::v1::EchoResponse>(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -914,7 +994,7 @@ impl<T: EchoService> ::connectrpc::Dispatcher for EchoServiceServer<T> {
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -929,7 +1009,7 @@ impl<T: EchoService> ::connectrpc::Dispatcher for EchoServiceServer<T> {
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -944,7 +1024,7 @@ impl<T: EchoService> ::connectrpc::Dispatcher for EchoServiceServer<T> {
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -1073,27 +1153,35 @@ pub const LOG_INGEST_SERVICE_SERVICE_NAME: &str = "bench.v1.LogIngestService";
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait LogIngestService: Send + Sync + 'static {
     /// Handle the Ingest RPC.
-    fn ingest(
-        &self,
-        ctx: ::connectrpc::Context,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::v1::__buffa::view::LogRequestView<'static>,
-        >,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn ingest<'a>(
+        &'a self,
+        ctx: ::connectrpc::RequestContext,
+        request: OwnedLogRequestView,
     ) -> impl ::std::future::Future<
-        Output = Result<
-            (crate::proto::bench::v1::LogIngestResponse, ::connectrpc::Context),
-            ::connectrpc::ConnectError,
+        Output = ::connectrpc::ServiceResult<
+            impl ::connectrpc::Encodable<
+                crate::proto::bench::v1::LogIngestResponse,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -1130,9 +1218,15 @@ impl<S: LogIngestService> LogIngestServiceExt for S {
                 "Ingest",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.ingest(ctx, req).await }
+                        async move {
+                            svc.ingest(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::bench::v1::LogIngestResponse,
+                                >(format)
+                        }
                     })
                 },
             )
@@ -1190,7 +1284,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
     fn call_unary(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -1205,12 +1299,9 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::LogRequestView,
                     >(request, format)?;
-                    let (res, ctx) = svc.ingest(ctx, req).await?;
-                    let bytes = ::connectrpc::dispatcher::codegen::encode_response(
-                        &res,
-                        format,
-                    )?;
-                    Ok((bytes, ctx))
+                    svc.ingest(ctx, req)
+                        .await?
+                        .encode::<crate::proto::bench::v1::LogIngestResponse>(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -1219,7 +1310,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
@@ -1234,7 +1325,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
@@ -1249,7 +1340,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: ::connectrpc::Context,
+        ctx: ::connectrpc::RequestContext,
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {

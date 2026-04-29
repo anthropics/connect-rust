@@ -23,7 +23,7 @@ use crate::codec::CodecFormat;
 use crate::error::ConnectError;
 use crate::handler::BoxFuture;
 use crate::handler::BoxStream;
-use crate::handler::Context;
+use crate::response::{EncodedResponse, RequestContext};
 use crate::router::MethodKind;
 
 /// Description of a method returned by [`Dispatcher::lookup`].
@@ -80,11 +80,15 @@ impl MethodDescriptor {
 }
 
 /// Result type for unary and client-streaming handler calls.
-pub type UnaryResult = BoxFuture<'static, Result<(Bytes, Context), ConnectError>>;
+pub type UnaryResult = BoxFuture<'static, Result<EncodedResponse, ConnectError>>;
 
 /// Result type for server-streaming and bidi-streaming handler calls.
-pub type StreamingResult =
-    BoxFuture<'static, Result<(BoxStream<Result<Bytes, ConnectError>>, Context), ConnectError>>;
+///
+/// The body is a stream of pre-encoded message bytes.
+pub type StreamingResult = BoxFuture<
+    'static,
+    Result<crate::response::Response<BoxStream<Result<Bytes, ConnectError>>>, ConnectError>,
+>;
 
 /// A stream of raw request message bytes (client-streaming / bidi input).
 pub type RequestStream = BoxStream<Result<Bytes, ConnectError>>;
@@ -121,7 +125,7 @@ pub trait Dispatcher: Send + Sync + 'static {
     fn call_unary(
         &self,
         path: &str,
-        ctx: Context,
+        ctx: RequestContext,
         request: Bytes,
         format: CodecFormat,
     ) -> UnaryResult;
@@ -132,7 +136,7 @@ pub trait Dispatcher: Send + Sync + 'static {
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: Context,
+        ctx: RequestContext,
         request: Bytes,
         format: CodecFormat,
     ) -> StreamingResult;
@@ -143,7 +147,7 @@ pub trait Dispatcher: Send + Sync + 'static {
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: Context,
+        ctx: RequestContext,
         requests: RequestStream,
         format: CodecFormat,
     ) -> UnaryResult;
@@ -154,7 +158,7 @@ pub trait Dispatcher: Send + Sync + 'static {
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: Context,
+        ctx: RequestContext,
         requests: RequestStream,
         format: CodecFormat,
     ) -> StreamingResult;
@@ -217,7 +221,7 @@ impl<A: Dispatcher, B: Dispatcher> Dispatcher for Chain<A, B> {
     fn call_unary(
         &self,
         path: &str,
-        ctx: Context,
+        ctx: RequestContext,
         request: Bytes,
         format: CodecFormat,
     ) -> UnaryResult {
@@ -231,7 +235,7 @@ impl<A: Dispatcher, B: Dispatcher> Dispatcher for Chain<A, B> {
     fn call_server_streaming(
         &self,
         path: &str,
-        ctx: Context,
+        ctx: RequestContext,
         request: Bytes,
         format: CodecFormat,
     ) -> StreamingResult {
@@ -245,7 +249,7 @@ impl<A: Dispatcher, B: Dispatcher> Dispatcher for Chain<A, B> {
     fn call_client_streaming(
         &self,
         path: &str,
-        ctx: Context,
+        ctx: RequestContext,
         requests: RequestStream,
         format: CodecFormat,
     ) -> UnaryResult {
@@ -259,7 +263,7 @@ impl<A: Dispatcher, B: Dispatcher> Dispatcher for Chain<A, B> {
     fn call_bidi_streaming(
         &self,
         path: &str,
-        ctx: Context,
+        ctx: RequestContext,
         requests: RequestStream,
         format: CodecFormat,
     ) -> StreamingResult {
@@ -301,7 +305,7 @@ pub mod codegen {
     // Re-exports that generated code needs direct access to.
     pub use crate::handler::BoxFuture;
     pub use crate::handler::decode_request_view;
-    pub use crate::handler::encode_response;
+    pub use crate::response::EncodedResponse;
 
     pub use super::MethodDescriptor;
     pub use super::RequestStream;
@@ -324,6 +328,7 @@ pub mod codegen {
         Res: Message + Serialize + Send + 'static,
         S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
     {
+        use crate::response::Encodable;
         Box::pin(
             futures::stream::unfold(
                 (
@@ -332,7 +337,7 @@ pub mod codegen {
                     format,
                 ),
                 async |(mut s, fmt)| match s.next().await {
-                    Some(Ok(res)) => Some((encode_response(&res, fmt), (s, fmt))),
+                    Some(Ok(res)) => Some((Encodable::<Res>::encode(&res, fmt), (s, fmt))),
                     Some(Err(e)) => Some((Err(e), (s, fmt))),
                     None => None,
                 },

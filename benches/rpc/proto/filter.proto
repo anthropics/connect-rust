@@ -1,0 +1,21 @@
+syntax = "proto3";
+package anthropic.connectrpc.filter.v1;
+
+// A redaction proxy: returns the input record with sensitive fields
+// scrubbed. Models a filtering/mutating handler where the common case
+// (no sensitive data present) can return the request view unchanged.
+service FilterService {
+  rpc Redact(Record) returns (Record);
+}
+
+message Record {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  // Sensitive: scrubbed if non-empty.
+  string email = 4;
+  string ssn = 5;
+  string notes = 6;
+  repeated string tags = 7;
+  map<string, string> attributes = 8;
+}

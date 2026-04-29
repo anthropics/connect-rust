@@ -123,7 +123,7 @@ Implement the service:
 // src/main.rs
 use std::sync::Arc;
 use buffa::view::OwnedView;
-use connectrpc::{ConnectError, Context, Router};
+use connectrpc::{RequestContext, Response, Router, ServiceResult};
 
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
@@ -136,16 +136,13 @@ struct MyGreet;
 impl GreetService for MyGreet {
     async fn greet(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         req: OwnedView<GreetRequestView<'static>>,
-    ) -> Result<(GreetResponse, Context), ConnectError> {
-        Ok((
-            GreetResponse {
-                greeting: format!("Hello, {}!", req.name),
-                ..Default::default()
-            },
-            ctx,
-        ))
+    ) -> ServiceResult<GreetResponse> {
+        Response::ok(GreetResponse {
+            greeting: format!("Hello, {}!", req.name),
+            ..Default::default()
+        })
     }
 }
 
@@ -218,25 +215,23 @@ trait name matches the proto service name (`GreetService` becomes
 
 ### Handler signatures
 
-Unary handlers take a `Context` plus an `OwnedView<RequestView<'static>>`,
-and return `(Response, Context)` or a `ConnectError`:
+Unary handlers take a read-only `RequestContext` plus an
+`OwnedView<RequestView<'static>>`, and return
+`ServiceResult<ResponseType>`:
 
 ```rust
 impl GreetService for MyGreet {
     async fn greet(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         req: OwnedView<GreetRequestView<'static>>,
-    ) -> Result<(GreetResponse, Context), ConnectError> {
+    ) -> ServiceResult<GreetResponse> {
         // req derefs to the view: zero-copy field access.
         // String fields are &str borrowed from the request buffer.
-        Ok((
-            GreetResponse {
-                greeting: format!("Hello, {}!", req.name),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Response::ok(GreetResponse {
+            greeting: format!("Hello, {}!", req.name),
+            ..Default::default()
+        })
     }
 }
 ```
@@ -246,46 +241,110 @@ allocating - `req.name` is a `&str` directly into the request bytes.
 Call `.to_owned_message()` to get the prost-style owned struct when
 you need it.
 
-### The `Context` parameter
+### `RequestContext` and `Response`
 
-`Context` carries per-call metadata in both directions:
+Request-side metadata lives on `RequestContext` (passed in);
+response-side metadata lives on `Response<B>` (returned):
 
-| Field | Direction | Purpose |
-|---|---|---|
-| `headers` | request | Caller-supplied headers (read with `ctx.header(name)` or `ctx.headers.get(...)`) |
-| `response_headers` | response | Headers to send back, set in handler before returning |
-| `trailers` | response | Trailers to send back, set via `ctx.set_trailer(name, value)` |
-| `deadline` | request | Absolute `Instant` if the caller set a timeout |
-| `extensions` | request | `http::Extensions` carried from the underlying `http::Request` |
-| `compress_response` | response | Override the server's compression policy for this RPC |
+| `RequestContext` field | Purpose |
+|---|---|
+| `headers` | Caller-supplied headers (read with `ctx.header(name)` or `ctx.headers.get(...)`) |
+| `deadline` | Absolute `Instant` if the caller set a timeout |
+| `extensions` | `http::Extensions` carried from the underlying `http::Request` |
 
-The handler **takes ownership** of `Context` and **returns it** with
-the response. This is intentional: the returned future is `'static`,
-so the context cannot be borrowed across the await. Set
-response headers or trailers before returning:
+| `Response<B>` field | Purpose |
+|---|---|
+| `body` | The response message (or `ServiceStream<M>` for streaming) |
+| `headers` | Headers to send before the body |
+| `trailers` | Trailers to send after the body |
+| `compress` | Override the server's compression policy for this RPC |
+
+`ServiceResult<B>` is `Result<Response<B>, ConnectError>`. The happy
+path is `Response::ok(body)`; to attach response metadata, use the
+builder:
 
 ```rust
 async fn greet(
     &self,
-    mut ctx: Context,
+    _ctx: RequestContext,
     req: OwnedView<GreetRequestView<'static>>,
-) -> Result<(GreetResponse, Context), ConnectError> {
-    ctx.response_headers
-        .insert("x-greet-version", "v2".parse().unwrap());
-    ctx.set_trailer(
-        http::header::HeaderName::from_static("x-server-id"),
-        "node-7".parse().unwrap(),
-    );
-    Ok((/* response */, ctx))
+) -> ServiceResult<GreetResponse> {
+    Ok(Response::new(GreetResponse { /* ... */ })
+        .with_header("x-greet-version", "v2")
+        .with_trailer("x-server-id", "node-7"))
 }
 ```
 
-`Context::extensions` is the passthrough channel for tower-layer state:
+`RequestContext::extensions` is the passthrough channel for tower-layer state:
 a custom auth layer can stamp a `UserId` into the request's
 `http::Extensions`, and the dispatcher forwards that map verbatim into
-`Context::extensions` for the handler to read with
+`RequestContext::extensions` for the handler to read with
 `ctx.extensions.get::<UserId>()`. See [Tower middleware](#tower-middleware)
 for the full pattern.
+
+### What you see vs. what you write
+
+The generated trait declares unary methods with the full RPITIT bounds:
+
+    fn say(&self, ctx: RequestContext, req: ...)
+        -> impl Future<Output = ServiceResult<impl Encodable<SayResponse> + Send + 'static + use<Self>>> + Send;
+
+That is what `cargo doc` and rust-analyzer hover show. You never write
+that form in an impl - `async fn` desugars the outer `impl Future`, and
+returning `ServiceResult<SayResponse>` (the concrete owned type) refines
+the `impl Encodable<...>` bound. The short form in the examples above is
+all you need.
+
+### The `refining_impl_trait` lint
+
+The generated trait declares unary/client-stream returns as
+`ServiceResult<impl Encodable<M>>` so handlers can return either the
+owned `M` or a borrowed view that encodes as `M` (see below). Writing
+your impl as `-> ServiceResult<FooResponse>` *refines* that opaque
+bound to a concrete type, which triggers
+`refining_impl_trait_internal` / `refining_impl_trait_reachable`. This
+is intentional - the refinement is the point. Add at your crate root:
+
+```rust
+#![allow(refining_impl_trait_internal, refining_impl_trait_reachable)]
+```
+
+or `#[allow(refining_impl_trait)]` on the impl block.
+
+### Returning a view body
+
+For handlers that often return the request unchanged (proxies, filters,
+validators), the `Encodable<M>` bound lets you skip the owned-message
+allocation by returning the request view directly. Codegen emits
+`OwnedFooView` aliases and `impl Encodable<Foo> for OwnedFooView` per
+RPC type, and `connectrpc::MaybeBorrowed` covers the conditional case:
+
+```rust
+use connectrpc::{MaybeBorrowed, RequestContext, Response, ServiceResult};
+
+async fn redact(
+    &self,
+    _ctx: RequestContext,
+    req: OwnedRecordView,
+) -> ServiceResult<MaybeBorrowed<Record, OwnedRecordView>> {
+    if req.email.is_empty() && req.ssn.is_empty() {
+        // pass-through: re-encode straight from the request bytes
+        return Response::ok(MaybeBorrowed::Borrowed(req));
+    }
+    let mut owned = req.to_owned_message();
+    owned.email.clear();
+    owned.ssn.clear();
+    Response::ok(MaybeBorrowed::Owned(owned))
+}
+```
+
+The `'a` on the trait method also lets the body borrow from `&self`
+(e.g. cached server state). View bodies only encode for the proto
+codec - JSON clients receive `unimplemented`; see
+[`MaybeBorrowed`'s codec note](https://docs.rs/connectrpc/latest/connectrpc/enum.MaybeBorrowed.html#codec-compatibility).
+View-body impls are not emitted for output types mapped via
+`extern_path` (the impl would be an orphan); return owned for WKT or
+extern outputs.
 
 ### Returning errors
 
@@ -348,27 +407,24 @@ signatures are summarized below.
 
 The streaming-handler trait signatures use `Pin<Box<dyn Stream<...> +
 Send>>` for both inbound and outbound streams. That's verbose, so the
-snippets here use two local type aliases (the same ones used in
-[`examples/streaming-tour/src/server.rs`](../examples/streaming-tour/src/server.rs)):
-
-```rust
-type ResponseStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> + Send>>;
-type RequestStream<V> = Pin<Box<dyn Stream<Item = Result<OwnedView<V>, ConnectError>> + Send>>;
-```
+snippets here use `connectrpc::ServiceStream<T>` (a boxed `Send`
+stream of `Result<T, ConnectError>`).
 
 ### Server streaming
 
 The handler returns a stream of responses. Use any `futures::Stream`
-you like, then box-pin it:
+you like, then wrap it with `Response::stream_ok` (or
+`Ok(Response::stream(s).with_header(...))` if you need response
+metadata):
 
 ```rust
 async fn range(
     &self,
-    ctx: Context,
+    _ctx: RequestContext,
     req: OwnedView<RangeRequestView<'static>>,
-) -> Result<(ResponseStream<RangeResponse>, Context), ConnectError> {
+) -> ServiceResult<ServiceStream<RangeResponse>> {
     let stream = futures::stream::iter(/* ... */);
-    Ok((Box::pin(stream), ctx))
+    Response::stream_ok(stream)
 }
 ```
 
@@ -380,14 +436,14 @@ response:
 ```rust
 async fn sum(
     &self,
-    ctx: Context,
-    mut requests: RequestStream<SumRequestView<'static>>,
-) -> Result<(SumResponse, Context), ConnectError> {
+    _ctx: RequestContext,
+    mut requests: ServiceStream<OwnedView<SumRequestView<'static>>>,
+) -> ServiceResult<SumResponse> {
     let mut total: i64 = 0;
     while let Some(req) = requests.next().await {
         total += req?.value.unwrap_or(0) as i64;
     }
-    Ok((SumResponse { total: Some(total), ..Default::default() }, ctx))
+    Response::ok(SumResponse { total: Some(total), ..Default::default() })
 }
 ```
 
@@ -399,12 +455,12 @@ emit messages independently:
 ```rust
 async fn running_sum(
     &self,
-    ctx: Context,
-    requests: RequestStream<RunningSumRequestView<'static>>,
-) -> Result<(ResponseStream<RunningSumResponse>, Context), ConnectError> {
+    _ctx: RequestContext,
+    requests: ServiceStream<OwnedView<RunningSumRequestView<'static>>>,
+) -> ServiceResult<ServiceStream<RunningSumResponse>> {
     // Map the request stream to a response stream however you like.
     let response_stream = futures::stream::unfold(/* ... */);
-    Ok((Box::pin(response_stream), ctx))
+    Response::stream_ok(response_stream)
 }
 ```
 
@@ -491,7 +547,7 @@ ServiceBuilder accepts.
 ### Passing data from a layer to a handler
 
 The dispatch path moves the request's `http::Extensions` into
-`Context::extensions` verbatim. So a middleware that inserts a value
+`RequestContext::extensions` verbatim. So a middleware that inserts a value
 via `req.extensions_mut().insert(value)` makes that value available to
 the handler via `ctx.extensions.get::<T>()`. This is the canonical way
 to pass per-request state from middleware (auth identity, trace IDs,
@@ -748,18 +804,19 @@ honor the client's `connect-content-encoding` request header (or
 ### Per-RPC compression control
 
 A handler can override the server's compression policy for a single
-response by setting `Context::set_compression`:
+response via `Response::compress`:
 
 ```rust
 async fn greet(
     &self,
-    mut ctx: Context,
+    _ctx: RequestContext,
     req: OwnedView<GreetRequestView<'static>>,
-) -> Result<(GreetResponse, Context), ConnectError> {
+) -> ServiceResult<GreetResponse> {
+    let mut resp = Response::new(/* ... */);
     if response_is_huge() {
-        ctx.set_compression(true);  // force compress this response
+        resp = resp.compress(true);  // force compress this response
     }
-    Ok((/* ... */, ctx))
+    Ok(resp)
 }
 ```
 
@@ -801,7 +858,7 @@ let service = ConnectRpcService::new(router).with_compression(registry);
 | Example | What it covers |
 |---|---|
 | [`streaming-tour/`](../examples/streaming-tour) | All four RPC types (unary, server stream, client stream, bidi) on a trivial NumberService. Smallest demo of handler signatures and client invocation patterns. |
-| [`middleware/`](../examples/middleware) | Server-side tower middleware composition: an `axum::middleware::from_fn` bearer-token auth, identity passthrough via `Context::extensions`, response trailers via `Context::set_trailer`. Client demos `ClientConfig::default_header` and `CallOptions::with_timeout`. |
+| [`middleware/`](../examples/middleware) | Server-side tower middleware composition: an `axum::middleware::from_fn` bearer-token auth, identity passthrough via `RequestContext::extensions`, response trailers via `Response::with_trailer`. Client demos `ClientConfig::default_header` and `CallOptions::with_timeout`. |
 | [`eliza/`](../examples/eliza) | Production-shaped streaming app: a port of the `connectrpc/examples-go` ELIZA demo. Server-streaming Introduce + bidi-streaming Converse, TLS, mTLS, CORS, IPv6, both server and client binaries, interoperates with the hosted Go reference at `demo.connectrpc.com`. |
 | [`multiservice/`](../examples/multiservice) | Multiple proto packages compiled together with `buf generate`, multiple services on one server, well-known type usage. |
 | [`wasm-client/`](../examples/wasm-client) | Browser fetch transport: same generated client used from `wasm32-unknown-unknown` with a custom `ClientTransport` backed by `web-sys::fetch`. |
