@@ -1,31 +1,66 @@
+///Shorthand for `OwnedView<LogRequestView<'static>>`.
+pub type OwnedLogRequestView = ::buffa::view::OwnedView<
+    crate::proto::bench::noutf8::v1::__buffa::view::LogRequestView<'static>,
+>;
+///Shorthand for `OwnedView<LogIngestResponseView<'static>>`.
+pub type OwnedLogIngestResponseView = ::buffa::view::OwnedView<
+    crate::proto::bench::noutf8::v1::__buffa::view::LogIngestResponseView<'static>,
+>;
+impl ::connectrpc::Encodable<crate::proto::bench::noutf8::v1::LogIngestResponse>
+for crate::proto::bench::noutf8::v1::__buffa::view::LogIngestResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::bench::noutf8::v1::LogIngestResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::bench::noutf8::v1::__buffa::view::LogIngestResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const LOG_INGEST_SERVICE_SERVICE_NAME: &str = "bench.noutf8.v1.LogIngestService";
 /// Server trait for LogIngestService.
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait LogIngestService: Send + Sync + 'static {
     /// Handle the Ingest RPC.
-    fn ingest(
-        &self,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn ingest<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::bench::noutf8::v1::__buffa::view::LogRequestView<'static>,
-        >,
+        request: OwnedLogRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::bench::noutf8::v1::LogIngestResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -62,9 +97,15 @@ impl<S: LogIngestService> LogIngestServiceExt for S {
                 "Ingest",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.ingest(ctx, req).await }
+                        async move {
+                            svc.ingest(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::bench::noutf8::v1::LogIngestResponse,
+                                >(format)
+                        }
                     })
                 },
             )

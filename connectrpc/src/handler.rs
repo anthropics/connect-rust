@@ -156,8 +156,9 @@ where
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
 {
-    /// The response body type. Typically `Res`; the [`Encodable`] bound
-    /// lets handlers return a borrowing view in a follow-up.
+    /// The response body type. Typically `Res`, or any
+    /// [`Encodable<Res>`](Encodable) (e.g.
+    /// [`MaybeBorrowed`](crate::MaybeBorrowed)).
     type Body: Encodable<Res> + Send + 'static;
 
     /// Handle a unary RPC request.
@@ -625,20 +626,22 @@ where
 }
 
 /// Trait for unary RPC handlers using zero-copy request views.
-pub trait ViewHandler<ReqView, Res>: Send + Sync + 'static
+///
+/// `call` returns the response **already encoded** so the body's
+/// lifetime can be tied to data the handler borrows from `&self` (or
+/// from the request) without surfacing in the trait object boundary.
+pub trait ViewHandler<ReqView>: Send + Sync + 'static
 where
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
 {
-    /// The response body type. Typically `Res`.
-    type Body: Encodable<Res> + Send + 'static;
-
-    /// Handle a unary RPC request with a zero-copy view.
+    /// Handle a unary RPC request with a zero-copy view, encoding the
+    /// response in `format`.
     fn call(
         &self,
         ctx: RequestContext,
         request: OwnedView<ReqView>,
-    ) -> BoxFuture<'static, ServiceResult<Self::Body>>;
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>>;
 }
 
 /// Wrapper that implements [`ViewHandler`] for async functions.
@@ -653,56 +656,64 @@ impl<F> FnViewHandler<F> {
     }
 }
 
-impl<F, Fut, ReqView, Res, B> ViewHandler<ReqView, Res> for FnViewHandler<F>
+impl<F, Fut, ReqView> ViewHandler<ReqView> for FnViewHandler<F>
 where
-    F: Fn(RequestContext, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = ServiceResult<B>> + Send + 'static,
+    F: Fn(RequestContext, OwnedView<ReqView>, CodecFormat) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<EncodedResponse, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
-    B: Encodable<Res> + Send + 'static,
 {
-    type Body = B;
-
     fn call(
         &self,
         ctx: RequestContext,
         request: OwnedView<ReqView>,
-    ) -> BoxFuture<'static, ServiceResult<B>> {
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         let f = Arc::clone(&self.f);
-        Box::pin(async move { f(ctx, request).await })
+        Box::pin(async move { f(ctx, request, format).await })
     }
 }
 
 /// Helper function to create a view handler from an async function.
-pub fn view_handler_fn<F, Fut, ReqView, Res, B>(f: F) -> FnViewHandler<F>
+///
+/// The closure receives the negotiated [`CodecFormat`] and returns the
+/// response **already encoded**, so a body that borrows from `&svc` is
+/// encoded before the borrow ends. For a hand-written router this looks
+/// like:
+///
+/// ```rust,ignore
+/// router.route_view(SERVICE, "Foo", view_handler_fn({
+///     let svc = Arc::clone(&svc);
+///     move |ctx, req, format| {
+///         let svc = Arc::clone(&svc);
+///         async move { svc.foo(ctx, req).await?.encode::<FooResponse>(format) }
+///     }
+/// }))
+/// ```
+pub fn view_handler_fn<F, Fut, ReqView>(f: F) -> FnViewHandler<F>
 where
-    F: Fn(RequestContext, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = ServiceResult<B>> + Send + 'static,
+    F: Fn(RequestContext, OwnedView<ReqView>, CodecFormat) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<EncodedResponse, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
-    B: Encodable<Res> + Send + 'static,
 {
     FnViewHandler::new(f)
 }
 
 /// Wrapper to erase the types from a unary view handler.
-pub(crate) struct UnaryViewHandlerWrapper<H, ReqView, Res>
+pub(crate) struct UnaryViewHandlerWrapper<H, ReqView>
 where
-    H: ViewHandler<ReqView, Res>,
+    H: ViewHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     handler: Arc<H>,
-    _phantom: std::marker::PhantomData<fn(ReqView) -> Res>,
+    _phantom: std::marker::PhantomData<fn(ReqView)>,
 }
 
-impl<H, ReqView, Res> UnaryViewHandlerWrapper<H, ReqView, Res>
+impl<H, ReqView> UnaryViewHandlerWrapper<H, ReqView>
 where
-    H: ViewHandler<ReqView, Res>,
+    H: ViewHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     pub fn new(handler: H) -> Self {
         Self {
@@ -712,12 +723,11 @@ where
     }
 }
 
-impl<H, ReqView, Res> ErasedHandler for UnaryViewHandlerWrapper<H, ReqView, Res>
+impl<H, ReqView> ErasedHandler for UnaryViewHandlerWrapper<H, ReqView>
 where
-    H: ViewHandler<ReqView, Res>,
+    H: ViewHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     fn call_erased(
         &self,
@@ -728,7 +738,7 @@ where
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
             let req = decode_request_view::<ReqView>(request, format)?;
-            handler.call(ctx, req).await?.encode::<Res>(format)
+            handler.call(ctx, req, format).await
         })
     }
 
@@ -841,20 +851,20 @@ where
 }
 
 /// Trait for client streaming RPC handlers using zero-copy request views.
-pub trait ViewClientStreamingHandler<ReqView, Res>: Send + Sync + 'static
+///
+/// `call` returns the response **already encoded**; see [`ViewHandler`].
+pub trait ViewClientStreamingHandler<ReqView>: Send + Sync + 'static
 where
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
 {
-    /// The response body type. Typically `Res`.
-    type Body: Encodable<Res> + Send + 'static;
-
-    /// Handle a client streaming RPC request with zero-copy view items.
+    /// Handle a client streaming RPC request with zero-copy view items,
+    /// encoding the response in `format`.
     fn call(
         &self,
         ctx: RequestContext,
         requests: ServiceStream<OwnedView<ReqView>>,
-    ) -> BoxFuture<'static, ServiceResult<Self::Body>>;
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>>;
 }
 
 /// Wrapper that implements [`ViewClientStreamingHandler`] for async functions.
@@ -869,59 +879,55 @@ impl<F> FnViewClientStreamingHandler<F> {
     }
 }
 
-impl<F, Fut, ReqView, Res, B> ViewClientStreamingHandler<ReqView, Res>
-    for FnViewClientStreamingHandler<F>
+impl<F, Fut, ReqView> ViewClientStreamingHandler<ReqView> for FnViewClientStreamingHandler<F>
 where
-    F: Fn(RequestContext, ServiceStream<OwnedView<ReqView>>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = ServiceResult<B>> + Send + 'static,
+    F: Fn(RequestContext, ServiceStream<OwnedView<ReqView>>, CodecFormat) -> Fut
+        + Send
+        + Sync
+        + 'static,
+    Fut: Future<Output = Result<EncodedResponse, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
-    B: Encodable<Res> + Send + 'static,
 {
-    type Body = B;
-
     fn call(
         &self,
         ctx: RequestContext,
         requests: ServiceStream<OwnedView<ReqView>>,
-    ) -> BoxFuture<'static, ServiceResult<B>> {
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         let f = Arc::clone(&self.f);
-        Box::pin(async move { f(ctx, requests).await })
+        Box::pin(async move { f(ctx, requests, format).await })
     }
 }
 
 /// Helper function to create a view client streaming handler from an async function.
-pub fn view_client_streaming_handler_fn<F, Fut, ReqView, Res, B>(
-    f: F,
-) -> FnViewClientStreamingHandler<F>
+pub fn view_client_streaming_handler_fn<F, Fut, ReqView>(f: F) -> FnViewClientStreamingHandler<F>
 where
-    F: Fn(RequestContext, ServiceStream<OwnedView<ReqView>>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = ServiceResult<B>> + Send + 'static,
+    F: Fn(RequestContext, ServiceStream<OwnedView<ReqView>>, CodecFormat) -> Fut
+        + Send
+        + Sync
+        + 'static,
+    Fut: Future<Output = Result<EncodedResponse, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
-    B: Encodable<Res> + Send + 'static,
 {
     FnViewClientStreamingHandler::new(f)
 }
 
 /// Wrapper to erase the types from a client streaming view handler.
-pub(crate) struct ClientStreamingViewHandlerWrapper<H, ReqView, Res>
+pub(crate) struct ClientStreamingViewHandlerWrapper<H, ReqView>
 where
-    H: ViewClientStreamingHandler<ReqView, Res>,
+    H: ViewClientStreamingHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     handler: Arc<H>,
-    _phantom: std::marker::PhantomData<fn(ReqView) -> Res>,
+    _phantom: std::marker::PhantomData<fn(ReqView)>,
 }
 
-impl<H, ReqView, Res> ClientStreamingViewHandlerWrapper<H, ReqView, Res>
+impl<H, ReqView> ClientStreamingViewHandlerWrapper<H, ReqView>
 where
-    H: ViewClientStreamingHandler<ReqView, Res>,
+    H: ViewClientStreamingHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     pub fn new(handler: H) -> Self {
         Self {
@@ -931,13 +937,11 @@ where
     }
 }
 
-impl<H, ReqView, Res> ErasedClientStreamingHandler
-    for ClientStreamingViewHandlerWrapper<H, ReqView, Res>
+impl<H, ReqView> ErasedClientStreamingHandler for ClientStreamingViewHandlerWrapper<H, ReqView>
 where
-    H: ViewClientStreamingHandler<ReqView, Res>,
+    H: ViewClientStreamingHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     fn call_erased(
         &self,
@@ -952,10 +956,7 @@ where
                 Box::pin(requests.map(move |result| {
                     result.and_then(|raw| decode_request_view::<ReqView>(raw, format))
                 }));
-            handler
-                .call(ctx, request_stream)
-                .await?
-                .encode::<Res>(format)
+            handler.call(ctx, request_stream, format).await
         })
     }
 }

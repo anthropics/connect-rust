@@ -1,3 +1,87 @@
+///Shorthand for `OwnedView<SayRequestView<'static>>`.
+pub type OwnedSayRequestView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::SayRequestView<'static>,
+>;
+///Shorthand for `OwnedView<SayResponseView<'static>>`.
+pub type OwnedSayResponseView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::SayResponseView<'static>,
+>;
+///Shorthand for `OwnedView<ConverseRequestView<'static>>`.
+pub type OwnedConverseRequestView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::ConverseRequestView<'static>,
+>;
+///Shorthand for `OwnedView<ConverseResponseView<'static>>`.
+pub type OwnedConverseResponseView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::ConverseResponseView<'static>,
+>;
+///Shorthand for `OwnedView<IntroduceRequestView<'static>>`.
+pub type OwnedIntroduceRequestView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::IntroduceRequestView<'static>,
+>;
+///Shorthand for `OwnedView<IntroduceResponseView<'static>>`.
+pub type OwnedIntroduceResponseView = ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::IntroduceResponseView<'static>,
+>;
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::SayResponse>
+for crate::proto::connectrpc::eliza::v1::__buffa::view::SayResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::SayResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::SayResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::ConverseResponse>
+for crate::proto::connectrpc::eliza::v1::__buffa::view::ConverseResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::ConverseResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::ConverseResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::IntroduceResponse>
+for crate::proto::connectrpc::eliza::v1::__buffa::view::IntroduceResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::connectrpc::eliza::v1::IntroduceResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::connectrpc::eliza::v1::__buffa::view::IntroduceResponseView<'static>,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const ELIZA_SERVICE_SERVICE_NAME: &str = "connectrpc.eliza.v1.ElizaService";
 /// ElizaService provides a way to talk to Eliza, a port of the DOCTOR script
@@ -9,28 +93,35 @@ pub const ELIZA_SERVICE_SERVICE_NAME: &str = "connectrpc.eliza.v1.ElizaService";
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait ElizaService: Send + Sync + 'static {
     /// Say is a unary RPC. Eliza responds to the prompt with a single sentence.
-    fn say(
-        &self,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn say<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::connectrpc::eliza::v1::__buffa::view::SayRequestView<'static>,
-        >,
+        request: OwnedSayRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::connectrpc::eliza::v1::SayResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
     /// Converse is a bidirectional RPC. The caller may exchange multiple
@@ -39,13 +130,7 @@ pub trait ElizaService: Send + Sync + 'static {
     fn converse(
         &self,
         ctx: ::connectrpc::RequestContext,
-        requests: ::connectrpc::ServiceStream<
-            ::buffa::view::OwnedView<
-                crate::proto::connectrpc::eliza::v1::__buffa::view::ConverseRequestView<
-                    'static,
-                >,
-            >,
-        >,
+        requests: ::connectrpc::ServiceStream<OwnedConverseRequestView>,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             ::connectrpc::ServiceStream<
@@ -58,11 +143,7 @@ pub trait ElizaService: Send + Sync + 'static {
     fn introduce(
         &self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::connectrpc::eliza::v1::__buffa::view::IntroduceRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedIntroduceRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             ::connectrpc::ServiceStream<
@@ -104,9 +185,15 @@ impl<S: ElizaService> ElizaServiceExt for S {
                 "Say",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.say(ctx, req).await }
+                        async move {
+                            svc.say(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::connectrpc::eliza::v1::SayResponse,
+                                >(format)
+                        }
                     })
                 },
             )

@@ -271,39 +271,32 @@ impl Router {
     // ====================================================================
 
     /// Register a unary RPC handler that uses zero-copy request views.
-    pub fn route_view<H, ReqView, Res>(
-        self,
-        service_name: &str,
-        method_name: &str,
-        handler: H,
-    ) -> Self
+    pub fn route_view<H, ReqView>(self, service_name: &str, method_name: &str, handler: H) -> Self
     where
-        H: ViewHandler<ReqView, Res>,
+        H: ViewHandler<ReqView>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
     {
         self.route_view_internal(service_name, method_name, handler, false)
     }
 
     /// Register an idempotent unary RPC handler that uses zero-copy request views.
-    pub fn route_view_idempotent<H, ReqView, Res>(
+    pub fn route_view_idempotent<H, ReqView>(
         self,
         service_name: &str,
         method_name: &str,
         handler: H,
     ) -> Self
     where
-        H: ViewHandler<ReqView, Res>,
+        H: ViewHandler<ReqView>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
     {
         self.route_view_internal(service_name, method_name, handler, true)
     }
 
     /// Internal helper for registering view handlers with configurable idempotency.
-    fn route_view_internal<H, ReqView, Res>(
+    fn route_view_internal<H, ReqView>(
         mut self,
         service_name: &str,
         method_name: &str,
@@ -311,10 +304,9 @@ impl Router {
         idempotent: bool,
     ) -> Self
     where
-        H: ViewHandler<ReqView, Res>,
+        H: ViewHandler<ReqView>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = UnaryViewHandlerWrapper::new(handler);
@@ -354,17 +346,16 @@ impl Router {
     }
 
     /// Register a client streaming RPC handler that uses zero-copy request views.
-    pub fn route_view_client_stream<H, ReqView, Res>(
+    pub fn route_view_client_stream<H, ReqView>(
         mut self,
         service_name: &str,
         method_name: &str,
         handler: H,
     ) -> Self
     where
-        H: ViewClientStreamingHandler<ReqView, Res>,
+        H: ViewClientStreamingHandler<ReqView>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = ClientStreamingViewHandlerWrapper::new(handler);

@@ -1,33 +1,70 @@
+///Shorthand for `OwnedView<AddRequestView<'static>>`.
+pub type OwnedAddRequestView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView<'static>,
+>;
+///Shorthand for `OwnedView<AddResponseView<'static>>`.
+pub type OwnedAddResponseView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<
+        'static,
+    >,
+>;
+impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::math::v1::AddResponse>
+for crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<'_> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(self, codec)
+    }
+}
+impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::math::v1::AddResponse>
+for ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<
+        'static,
+    >,
+> {
+    fn encode(
+        &self,
+        codec: ::connectrpc::CodecFormat,
+    ) -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError> {
+        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+    }
+}
 /// Full service name for this service.
 pub const MATH_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.math.v1.MathService";
 /// MathService provides basic math operations.
 ///
 /// # Implementing handlers
 ///
-/// Handlers receive requests as `OwnedView<FooView<'static>>`, which gives
-/// zero-copy borrowed access to fields (e.g. `request.name` is a `&str`
-/// into the decoded buffer). The view can be held across `.await` points.
+/// Handlers receive requests as `OwnedFooView` (an alias for
+/// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
+/// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
+/// The view can be held across `.await` points.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
 /// [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
+///
+/// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
+/// generated `OutView<'_>` / `OwnedOutView`, or
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
+/// emitted for output types mapped via `extern_path` (the impl would be
+/// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
 pub trait MathService: Send + Sync + 'static {
     /// Add returns the sum of two numbers.
-    fn add(
-        &self,
+    ///
+    /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
+    fn add<'a>(
+        &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::view::OwnedView<
-            crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView<
-                'static,
-            >,
-        >,
+        request: OwnedAddRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
                 crate::proto::anthropic::connectrpc::math::v1::AddResponse,
-            > + Send + 'static + use<Self>,
+            > + Send + use<'a, Self>,
         >,
     > + Send;
 }
@@ -64,9 +101,15 @@ impl<S: MathService> MathServiceExt for S {
                 "Add",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
-                    ::connectrpc::view_handler_fn(move |ctx, req| {
+                    ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
-                        async move { svc.add(ctx, req).await }
+                        async move {
+                            svc.add(ctx, req)
+                                .await?
+                                .encode::<
+                                    crate::proto::anthropic::connectrpc::math::v1::AddResponse,
+                                >(format)
+                        }
                     })
                 },
             )

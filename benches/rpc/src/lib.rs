@@ -1,3 +1,4 @@
+pub mod filter;
 pub mod fortune;
 
 #[path = "generated/connect/mod.rs"]

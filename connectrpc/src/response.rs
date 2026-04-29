@@ -4,13 +4,15 @@
 //! [`RequestContext`] (passed *into* handlers) and a [`Response<B>`]
 //! wrapper (returned *from* handlers). The body type `B` is bounded by
 //! [`Encodable<M>`] in the generated trait so handlers can return either
-//! the owned message `M` or a borrowing view (see the `MaybeBorrowed`
-//! type).
+//! the owned message `M`, a borrowing `MView<'_>` /
+//! [`OwnedView<MView<'static>>`](buffa::view::OwnedView), or
+//! [`MaybeBorrowed`] for the conditional case.
 
 use std::pin::Pin;
 use std::time::Instant;
 
 use buffa::Message;
+use buffa::view::ViewEncode;
 use bytes::Bytes;
 use futures::Stream;
 use http::HeaderMap;
@@ -296,18 +298,22 @@ pub type ServiceStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> +
 /// Encodes to the same wire bytes as proto message `M`.
 ///
 /// This is the bound on the response body in generated trait methods.
-/// The blanket impl for `M: Message + Serialize` covers the owned
-/// message; the `MaybeBorrowed` type covers buffa's `MView<'_>` so
-/// handlers can return borrowed responses.
+/// Provided implementations:
+/// - the owned `M` itself (blanket `M: Message + Serialize` below);
+/// - `MView<'_>` and [`OwnedView<MView<'static>>`](buffa::view::OwnedView),
+///   emitted by codegen per RPC output type;
+/// - [`MaybeBorrowed<M, V>`] for handlers that conditionally return
+///   either.
 ///
 /// # Contract
 ///
 /// Implementations must produce bytes that decode as a valid `M` in
 /// the given format.
 ///
-/// `encode` is fallible: the owned-message impl never errors, but a
-/// view-body impl is proto-only (view types lack `Serialize`) and must
-/// error on `CodecFormat::Json`.
+/// `encode` is fallible: the owned-message impl never errors, but the
+/// view-body impls are proto-only (view types lack `Serialize`) and
+/// return [`ErrorCode::Unimplemented`](crate::ErrorCode::Unimplemented)
+/// for `CodecFormat::Json`.
 pub trait Encodable<M> {
     /// Encode `self` as wire bytes for `M` in the requested format.
     fn encode(&self, codec: CodecFormat) -> Result<Bytes, ConnectError>;
@@ -320,6 +326,89 @@ impl<M: Message + Serialize> Encodable<M> for M {
             CodecFormat::Json => serde_json::to_vec(self).map(Bytes::from).map_err(|e| {
                 ConnectError::internal(format!("failed to encode JSON response: {e}"))
             }),
+        }
+    }
+}
+
+/// Encode a view body via [`ViewEncode`] for [`CodecFormat::Proto`], or
+/// return [`ErrorCode::Unimplemented`](crate::ErrorCode::Unimplemented)
+/// for [`CodecFormat::Json`] (view types don't implement `Serialize`).
+///
+/// Used by codegen-emitted `impl Encodable<Foo> for FooView<'_>` /
+/// `impl Encodable<Foo> for OwnedView<FooView<'static>>` blocks. A
+/// runtime blanket on [`OwnedView`](buffa::view::OwnedView) would
+/// conflict with the `M: Message + Serialize` blanket above (coherence
+/// can't rule out upstream adding `Message`/`Serialize` for
+/// `OwnedView`), so the impls are emitted per output type instead.
+#[doc(hidden)]
+pub fn encode_view_body<'a, V: ViewEncode<'a>>(
+    view: &V,
+    codec: CodecFormat,
+) -> Result<Bytes, ConnectError> {
+    match codec {
+        CodecFormat::Proto => Ok(view.encode_to_bytes()),
+        CodecFormat::Json => Err(ConnectError::unimplemented(
+            "view-body responses do not support the JSON codec; return the owned message type for JSON-serving handlers",
+        )),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MaybeBorrowed
+// ---------------------------------------------------------------------------
+
+/// Either an owned message `M` or a borrowing view `V`, both
+/// [`Encodable<M>`].
+///
+/// Use this when a handler conditionally passes the request through
+/// unchanged (return the view, zero allocations) versus modifying it
+/// (clone to owned, mutate, return owned). The single concrete return
+/// type satisfies the `impl Encodable<M>` bound on the generated trait.
+///
+/// This is not [`std::borrow::Cow`]: `V` is a separate
+/// [`Encodable<M>`] type (e.g. `MView<'a>` or `OwnedView<MView>`),
+/// not a `&M`, and there is no `ToOwned` relationship between the
+/// arms — each encodes independently.
+///
+/// ```rust,ignore
+/// async fn redact(&self, _ctx: RequestContext, req: OwnedRecordView)
+///     -> ServiceResult<MaybeBorrowed<Record, OwnedRecordView>>
+/// {
+///     if req.email.is_empty() && req.ssn.is_empty() {
+///         // pass-through: re-encode straight from the request bytes
+///         return Response::ok(MaybeBorrowed::Borrowed(req));
+///     }
+///     let mut owned = req.to_owned_message();
+///     owned.email.clear();
+///     owned.ssn.clear();
+///     Response::ok(MaybeBorrowed::Owned(owned))
+/// }
+/// ```
+///
+/// # Codec compatibility
+///
+/// The `Borrowed` arm only encodes for [`CodecFormat::Proto`]. JSON
+/// clients receive an `unimplemented` error; if your service must
+/// support JSON, return `Owned` (or just the owned message) on every
+/// path.
+#[derive(Debug, Clone)]
+pub enum MaybeBorrowed<M, V> {
+    /// An owned message body.
+    Owned(M),
+    /// A borrowing body that encodes to the same wire bytes as `M`.
+    Borrowed(V),
+}
+
+impl<M, V> Encodable<M> for MaybeBorrowed<M, V>
+where
+    // satisfied via the blanket impl for M: Message + Serialize
+    M: Encodable<M>,
+    V: Encodable<M>,
+{
+    fn encode(&self, codec: CodecFormat) -> Result<Bytes, ConnectError> {
+        match self {
+            Self::Owned(m) => m.encode(codec),
+            Self::Borrowed(v) => v.encode(codec),
         }
     }
 }
@@ -511,6 +600,67 @@ mod tests {
             .try_with_trailer("x-t", "bad\nvalue")
             .unwrap_err();
         assert!(err.is::<http::header::InvalidHeaderValue>());
+    }
+
+    #[test]
+    fn encode_view_body_proto() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        let v = StringValueView {
+            value: "hi",
+            ..Default::default()
+        };
+        let bytes = encode_view_body(&v, CodecFormat::Proto).unwrap();
+        assert_eq!(StringValue::decode_from_slice(&bytes).unwrap().value, "hi");
+    }
+
+    #[test]
+    fn encode_view_body_json_errors() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        let v = StringValueView::default();
+        let err = encode_view_body(&v, CodecFormat::Json).unwrap_err();
+        assert_eq!(err.code, crate::ErrorCode::Unimplemented);
+        assert!(err.message.as_deref().unwrap().contains("JSON codec"));
+    }
+
+    // Manual Encodable<StringValue> impl modelling what codegen emits
+    // for FooView<'_>. Shared by the MaybeBorrowed tests below.
+    struct V<'a>(buffa_types::google::protobuf::__buffa::view::StringValueView<'a>);
+    impl Encodable<StringValue> for V<'_> {
+        fn encode(&self, c: CodecFormat) -> Result<Bytes, ConnectError> {
+            encode_view_body(&self.0, c)
+        }
+    }
+
+    #[test]
+    fn maybe_borrowed_dispatch() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        let owned: MaybeBorrowed<StringValue, V<'_>> =
+            MaybeBorrowed::Owned(StringValue::from("owned"));
+        let borrowed = MaybeBorrowed::Borrowed(V(StringValueView {
+            value: "view",
+            ..Default::default()
+        }));
+        assert_eq!(
+            StringValue::decode_from_slice(&owned.encode(CodecFormat::Proto).unwrap())
+                .unwrap()
+                .value,
+            "owned"
+        );
+        assert_eq!(
+            StringValue::decode_from_slice(&borrowed.encode(CodecFormat::Proto).unwrap())
+                .unwrap()
+                .value,
+            "view"
+        );
+    }
+
+    #[test]
+    fn maybe_borrowed_borrowed_json_unimplemented() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        let borrowed: MaybeBorrowed<StringValue, V<'_>> =
+            MaybeBorrowed::Borrowed(V(StringValueView::default()));
+        let err = borrowed.encode(CodecFormat::Json).unwrap_err();
+        assert_eq!(err.code, crate::ErrorCode::Unimplemented);
     }
 
     #[test]

@@ -85,6 +85,12 @@ fn emit_service_files(
     resolver: &TypeResolver<'_>,
 ) -> Result<Vec<GeneratedFile>> {
     let mut out = Vec::new();
+    // Dedup state shared across the whole batch, not per file:
+    // - output-type Encodable impls (else two files sharing an output
+    //   type collide with E0119);
+    // - OwnedFooView aliases keyed on (package, fqn) (else two files in
+    //   the same package collide with E0428).
+    let mut batch = BatchState::default();
     for file_name in file_to_generate {
         let file_desc = proto_file
             .iter()
@@ -93,7 +99,7 @@ fn emit_service_files(
         if let Some(file) = file_desc
             && !file.service.is_empty()
         {
-            let service_tokens = generate_connect_services(file, resolver)?;
+            let service_tokens = generate_connect_services(file, resolver, &mut batch)?;
             let service_code = format_token_stream(&service_tokens)?;
             // In the unified path the service code is appended to buffa's
             // `<stem>.rs` (Owned) file by [`generate_files`], so name and
@@ -493,9 +499,22 @@ fn bare_type_name(proto_fqn: &str) -> &str {
 // ---------------------------------------------------------------------------
 
 /// Generate ConnectRPC service bindings for a file.
+/// Per-batch dedup state passed through the per-file emission loop.
+#[derive(Default)]
+struct BatchState {
+    /// Proto FQNs of output types whose `Encodable<M>` view impls have
+    /// already been emitted (global; impls are not module-scoped).
+    encodable_seen: std::collections::BTreeSet<String>,
+    /// `(package, proto FQN)` of input/output types whose
+    /// `Owned#{Msg}View` alias has already been emitted (per package
+    /// module; aliases are module-scoped).
+    alias_seen: std::collections::BTreeSet<(String, String)>,
+}
+
 fn generate_connect_services(
     file: &FileDescriptorProto,
     resolver: &TypeResolver<'_>,
+    batch: &mut BatchState,
 ) -> Result<TokenStream> {
     let mut tokens = TokenStream::new();
 
@@ -504,11 +523,119 @@ fn generate_connect_services(
     // files can be `include!`d into the same module without E0252 duplicate
     // import errors.
 
+    tokens.extend(generate_owned_view_aliases(file, resolver, batch)?);
+    tokens.extend(generate_encodable_view_impls(file, resolver, batch)?);
+
     for service in &file.service {
         tokens.extend(generate_service(file, service, resolver)?);
     }
 
     Ok(tokens)
+}
+
+/// `Owned#{Msg}View` alias name for a proto FQN, e.g.
+/// `.example.v1.Record` → `OwnedRecordView`.
+fn owned_view_alias_ident(fqn: &str) -> Ident {
+    format_ident!("Owned{}View", bare_type_name(fqn).to_upper_camel_case())
+}
+
+/// Emit `pub type Owned#{Msg}View = OwnedView<#{Msg}View<'static>>;` for
+/// every distinct RPC input/output type referenced by services in this
+/// file. The alias is what handlers see in trait method signatures and
+/// what users write in their `impl` blocks.
+///
+/// Deduped on `(package, fqn)` across the batch so two files in the same
+/// package don't both emit the alias (E0428).
+fn generate_owned_view_aliases(
+    file: &FileDescriptorProto,
+    resolver: &TypeResolver<'_>,
+    batch: &mut BatchState,
+) -> Result<TokenStream> {
+    let package = file.package.as_deref().unwrap_or("");
+    let mut out = TokenStream::new();
+    for service in &file.service {
+        for m in &service.method {
+            for fqn in [m.input_type.as_deref(), m.output_type.as_deref()]
+                .into_iter()
+                .flatten()
+            {
+                if !batch
+                    .alias_seen
+                    .insert((package.to_string(), fqn.to_string()))
+                {
+                    continue;
+                }
+                let alias = owned_view_alias_ident(fqn);
+                let view = resolver.rust_view_type(fqn, package)?;
+                let doc = format!(
+                    "Shorthand for `OwnedView<{}View<'static>>`.",
+                    bare_type_name(fqn).to_upper_camel_case()
+                );
+                out.extend(quote! {
+                    #[doc = #doc]
+                    pub type #alias = ::buffa::view::OwnedView<#view<'static>>;
+                });
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Emit `impl Encodable<M> for MView<'_>` and
+/// `impl Encodable<M> for OwnedView<MView<'static>>` for every distinct
+/// RPC output type not already in `batch.encodable_seen` (proto FQN).
+///
+/// These can't be runtime blankets (the `M: Message + Serialize` blanket
+/// in `connectrpc::response` would conflict by coherence), so they're
+/// emitted per concrete type. Orphan rules allow it because `M` (a local
+/// type) appears in the trait parameters.
+///
+/// `batch.encodable_seen` is owned by the caller's batch loop so an
+/// output type referenced from multiple input files only gets one impl
+/// pair (the stitcher would otherwise hit E0119).
+///
+/// Skipped for output types that resolve to an absolute (`::`) extern
+/// path, since those are foreign and would violate orphan rules.
+fn generate_encodable_view_impls(
+    file: &FileDescriptorProto,
+    resolver: &TypeResolver<'_>,
+    batch: &mut BatchState,
+) -> Result<TokenStream> {
+    let package = file.package.as_deref().unwrap_or("");
+    let mut out = TokenStream::new();
+    for service in &file.service {
+        for m in &service.method {
+            let fqn = m.output_type.as_deref().unwrap_or("");
+            if !batch.encodable_seen.insert(fqn.to_string()) {
+                continue;
+            }
+            let path = resolver.resolve_path(fqn, package)?;
+            // Skip foreign types (extern_path → `::crate_name::...`): the
+            // impl would be an orphan in the user's crate.
+            if path.starts_with("::") {
+                continue;
+            }
+            let owned = resolver.rust_type(fqn, package)?;
+            let view = resolver.rust_view_type(fqn, package)?;
+            out.extend(quote! {
+                impl ::connectrpc::Encodable<#owned> for #view<'_> {
+                    fn encode(&self, codec: ::connectrpc::CodecFormat)
+                        -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError>
+                    {
+                        ::connectrpc::__codegen::encode_view_body(self, codec)
+                    }
+                }
+                impl ::connectrpc::Encodable<#owned> for ::buffa::view::OwnedView<#view<'static>> {
+                    fn encode(&self, codec: ::connectrpc::CodecFormat)
+                        -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError>
+                    {
+                        ::connectrpc::__codegen::encode_view_body(&**self, codec)
+                    }
+                }
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// Generate code for a single service.
@@ -581,13 +708,19 @@ fn generate_service(
     let full_doc = format!(
         "{base_doc}\n\n\
          # Implementing handlers\n\n\
-         Handlers receive requests as `OwnedView<FooView<'static>>`, which gives\n\
-         zero-copy borrowed access to fields (e.g. `request.name` is a `&str`\n\
-         into the decoded buffer). The view can be held across `.await` points.\n\n\
+         Handlers receive requests as `OwnedFooView` (an alias for\n\
+         `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access\n\
+         to fields (e.g. `request.name` is a `&str` into the decoded buffer).\n\
+         The view can be held across `.await` points.\n\n\
          Implement methods with plain `async fn`; the returned future satisfies\n\
          the `Send` bound automatically. See the\n\
          [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)\n\
-         for zero-copy access patterns and when `to_owned_message()` is needed."
+         for zero-copy access patterns and when `to_owned_message()` is needed.\n\n\
+         The `impl Encodable<Out>` return bound accepts the owned `Out`, the\n\
+         generated `OutView<'_>` / `OwnedOutView`, or\n\
+         [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not\n\
+         emitted for output types mapped via `extern_path` (the impl would be\n\
+         an orphan); return owned for WKT/extern outputs."
     );
     let service_doc_tokens = doc_attrs(&full_doc);
 
@@ -626,15 +759,20 @@ fn generate_service(
                 }
             } else if client_streaming && !server_streaming {
                 // Client streaming method
+                let output_type = resolver
+                    .rust_type(m.output_type.as_deref().unwrap_or(""), package)
+                    .unwrap();
                 quote! {
                     .route_view_client_stream(
                         #service_name_const,
                         #method_name,
                         ::connectrpc::view_client_streaming_handler_fn({
                             let svc = ::std::sync::Arc::clone(&self);
-                            move |ctx, req| {
+                            move |ctx, req, format| {
                                 let svc = ::std::sync::Arc::clone(&svc);
-                                async move { svc.#method_snake(ctx, req).await }
+                                async move {
+                                    svc.#method_snake(ctx, req).await?.encode::<#output_type>(format)
+                                }
                             }
                         }),
                     )
@@ -667,6 +805,9 @@ fn generate_service(
                 } else {
                     quote! { route_view }
                 };
+                let output_type = resolver
+                    .rust_type(m.output_type.as_deref().unwrap_or(""), package)
+                    .unwrap();
 
                 quote! {
                     .#route_method(
@@ -674,9 +815,11 @@ fn generate_service(
                         #method_name,
                         {
                             let svc = ::std::sync::Arc::clone(&self);
-                            ::connectrpc::view_handler_fn(move |ctx, req| {
+                            ::connectrpc::view_handler_fn(move |ctx, req, format| {
                                 let svc = ::std::sync::Arc::clone(&svc);
-                                async move { svc.#method_snake(ctx, req).await }
+                                async move {
+                                    svc.#method_snake(ctx, req).await?.encode::<#output_type>(format)
+                                }
                             })
                         },
                     )
@@ -1095,8 +1238,7 @@ fn generate_trait_method(
 ) -> Result<TokenStream> {
     let method_name = method.name.as_deref().unwrap_or("");
     let method_snake = make_field_ident(&method_name.to_snake_case());
-    let input_view_type =
-        resolver.rust_view_type(method.input_type.as_deref().unwrap_or(""), package)?;
+    let input_alias = owned_view_alias_ident(method.input_type.as_deref().unwrap_or(""));
     let output_type = resolver.rust_type(method.output_type.as_deref().unwrap_or(""), package)?;
 
     // Get method documentation
@@ -1108,6 +1250,11 @@ fn generate_trait_method(
     let client_streaming = method.client_streaming.unwrap_or(false);
     let server_streaming = method.server_streaming.unwrap_or(false);
 
+    let borrow_doc = quote! {
+        #[doc = ""]
+        #[doc = " `'a` lets the response body borrow from `&self` (e.g. server-resident state)."]
+    };
+
     if server_streaming && !client_streaming {
         // Server streaming method
         Ok(quote! {
@@ -1115,18 +1262,19 @@ fn generate_trait_method(
             fn #method_snake(
                 &self,
                 ctx: ::connectrpc::RequestContext,
-                request: ::buffa::view::OwnedView<#input_view_type<'static>>,
+                request: #input_alias,
             ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<#output_type>>> + Send;
         })
     } else if client_streaming && !server_streaming {
         // Client streaming method
         Ok(quote! {
             #method_doc_tokens
-            fn #method_snake(
-                &self,
+            #borrow_doc
+            fn #method_snake<'a>(
+                &'a self,
                 ctx: ::connectrpc::RequestContext,
-                requests: ::connectrpc::ServiceStream<::buffa::view::OwnedView<#input_view_type<'static>>>,
-            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + 'static + use<Self>>> + Send;
+                requests: ::connectrpc::ServiceStream<#input_alias>,
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + use<'a, Self>>> + Send;
         })
     } else if client_streaming && server_streaming {
         // Bidi streaming method
@@ -1135,18 +1283,19 @@ fn generate_trait_method(
             fn #method_snake(
                 &self,
                 ctx: ::connectrpc::RequestContext,
-                requests: ::connectrpc::ServiceStream<::buffa::view::OwnedView<#input_view_type<'static>>>,
+                requests: ::connectrpc::ServiceStream<#input_alias>,
             ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<#output_type>>> + Send;
         })
     } else {
         // Unary method
         Ok(quote! {
             #method_doc_tokens
-            fn #method_snake(
-                &self,
+            #borrow_doc
+            fn #method_snake<'a>(
+                &'a self,
                 ctx: ::connectrpc::RequestContext,
-                request: ::buffa::view::OwnedView<#input_view_type<'static>>,
-            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + 'static + use<Self>>> + Send;
+                request: #input_alias,
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + use<'a, Self>>> + Send;
         })
     }
 }
@@ -1503,6 +1652,184 @@ mod tests {
         assert!(
             offenders.is_empty(),
             "{label} contains top-level use statement(s): {offenders:?}\nFull source:\n{formatted}"
+        );
+    }
+
+    fn gen_file(
+        files: &[FileDescriptorProto],
+        target_idx: usize,
+        extern_paths: &[(String, String)],
+        require_extern: bool,
+    ) -> Result<String> {
+        let mut config = buffa_codegen::CodeGenConfig::default();
+        config.extern_paths = extern_paths.to_vec();
+        let target_name = files[target_idx]
+            .name
+            .clone()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let resolver = TypeResolver::new(files, &target_name, &config, require_extern);
+        let mut batch = BatchState::default();
+        Ok(generate_connect_services(&files[target_idx], &resolver, &mut batch)?.to_string())
+    }
+
+    #[test]
+    fn unary_response_body_captures_self_lifetime() {
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let code = gen_service(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(code.contains("< 'a >"), "trait method missing 'a: {code}");
+        assert!(code.contains("& 'a self"), "missing &'a self: {code}");
+        assert!(
+            code.contains("use < 'a , Self >"),
+            "missing use<'a, Self> capture: {code}"
+        );
+        assert!(
+            !code.contains("'static + use"),
+            "'static bound on body should be dropped: {code}"
+        );
+    }
+
+    #[test]
+    fn owned_view_aliases_emitted_for_input_and_output() {
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let code = gen_file(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(
+            code.contains("pub type OwnedPingReqView = :: buffa :: view :: OwnedView"),
+            "missing OwnedPingReqView alias: {code}"
+        );
+        assert!(
+            code.contains("pub type OwnedPingRespView = :: buffa :: view :: OwnedView"),
+            "missing OwnedPingRespView alias: {code}"
+        );
+        // Trait method uses the alias for the request param.
+        assert!(
+            code.contains("request : OwnedPingReqView ,"),
+            "trait method should take request: OwnedPingReqView: {code}"
+        );
+    }
+
+    #[test]
+    fn encodable_view_impls_emitted_per_output_type() {
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let code = gen_file(std::slice::from_ref(&file), 0, &[], false).unwrap();
+        assert!(
+            code.contains(
+                ":: connectrpc :: Encodable < PingResp > for __buffa :: view :: PingRespView"
+            ),
+            "missing Encodable<PingResp> for PingRespView: {code}"
+        );
+        assert!(
+            code.contains(
+                ":: connectrpc :: Encodable < PingResp > for :: buffa :: view :: OwnedView"
+            ),
+            "missing Encodable<PingResp> for OwnedView<PingRespView>: {code}"
+        );
+        // Input type should NOT get an impl (only output types).
+        assert!(!code.contains("Encodable < PingReq >"), "got: {code}");
+    }
+
+    #[test]
+    fn encodable_view_impls_skipped_for_extern_output() {
+        // Output type resolves via the WKT extern_path → ::buffa_types::...
+        // so the impl would be an orphan; verify it's skipped.
+        let wkt = FileDescriptorProto {
+            name: Some("google/protobuf/empty.proto".into()),
+            package: Some("google.protobuf".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Empty".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".google.protobuf.Empty",
+            &["PingReq"],
+        );
+        let code = gen_file(&[wkt, file], 1, &[], false).unwrap();
+        // The impl bodies call encode_view_body; the trait method's
+        // `impl Encodable<M>` RPITIT bound doesn't.
+        assert!(
+            !code.contains("encode_view_body"),
+            "extern output type must not get Encodable impl: {code}"
+        );
+    }
+
+    #[test]
+    fn encodable_view_impls_deduped_across_files() {
+        // Two service files in different packages both return
+        // `.common.v1.Reply`. The stitcher mounts both files into one
+        // module tree, so the Encodable<Reply> impls must be emitted
+        // exactly once across the batch (else E0119).
+        let common = FileDescriptorProto {
+            name: Some("common.proto".into()),
+            package: Some("common.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Reply".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let svc = |name: &str, pkg: &str| FileDescriptorProto {
+            name: Some(name.into()),
+            package: Some(pkg.into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Req".into()),
+                ..Default::default()
+            }],
+            service: vec![ServiceDescriptorProto {
+                name: Some("S".into()),
+                method: vec![MethodDescriptorProto {
+                    name: Some("Call".into()),
+                    input_type: Some(format!(".{pkg}.Req")),
+                    output_type: Some(".common.v1.Reply".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let files = vec![common, svc("a.proto", "a.v1"), svc("b.proto", "b.v1")];
+
+        let generated = generate_files(
+            &files,
+            &["a.proto".into(), "b.proto".into()],
+            &Options::default(),
+        )
+        .unwrap();
+        let combined: String = generated
+            .iter()
+            .filter(|f| f.kind == GeneratedFileKind::Owned)
+            .map(|f| f.content.as_str())
+            .collect();
+
+        let view_impl = "impl ::connectrpc::Encodable<super::super::common::v1::Reply>\nfor super::super::common::v1::__buffa::view::ReplyView<'_>";
+        let owned_view_impl = "impl ::connectrpc::Encodable<super::super::common::v1::Reply>\nfor ::buffa::view::OwnedView<";
+        assert_eq!(
+            combined.matches(view_impl).count(),
+            1,
+            "Encodable<Reply> for ReplyView<'_> must appear once: {combined}"
+        );
+        assert_eq!(
+            combined.matches(owned_view_impl).count(),
+            1,
+            "Encodable<Reply> for OwnedView<ReplyView> must appear once: {combined}"
         );
     }
 
@@ -2012,8 +2339,9 @@ mod tests {
         let targets = vec!["alpha.proto".to_string(), "beta.proto".to_string()];
         let resolver = TypeResolver::new(&files, &targets, &config, false);
 
-        let code_a = generate_connect_services(&files[0], &resolver).unwrap();
-        let code_b = generate_connect_services(&files[1], &resolver).unwrap();
+        let mut batch = BatchState::default();
+        let code_a = generate_connect_services(&files[0], &resolver, &mut batch).unwrap();
+        let code_b = generate_connect_services(&files[1], &resolver, &mut batch).unwrap();
 
         let formatted_a = format_token_stream(&code_a).unwrap();
         let formatted_b = format_token_stream(&code_b).unwrap();
