@@ -1,13 +1,9 @@
-///Shorthand for `OwnedView<GetFortunesRequestView<'static>>`.
-pub type OwnedGetFortunesRequestView = ::buffa::view::OwnedView<
-    crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView<'static>,
+///Shorthand for `OwnedView<RecordView<'static>>`.
+pub type OwnedRecordView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<'static>,
 >;
-///Shorthand for `OwnedView<GetFortunesResponseView<'static>>`.
-pub type OwnedGetFortunesResponseView = ::buffa::view::OwnedView<
-    crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'static>,
->;
-impl ::connectrpc::Encodable<crate::proto::fortune::v1::GetFortunesResponse>
-for crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'_> {
+impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::filter::v1::Record>
+for crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<'_> {
     fn encode(
         &self,
         codec: ::connectrpc::CodecFormat,
@@ -15,9 +11,9 @@ for crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'_> {
         ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
-impl ::connectrpc::Encodable<crate::proto::fortune::v1::GetFortunesResponse>
+impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::filter::v1::Record>
 for ::buffa::view::OwnedView<
-    crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'static>,
+    crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<'static>,
 > {
     fn encode(
         &self,
@@ -27,8 +23,10 @@ for ::buffa::view::OwnedView<
     }
 }
 /// Full service name for this service.
-pub const FORTUNE_SERVICE_SERVICE_NAME: &str = "fortune.v1.FortuneService";
-/// Server trait for FortuneService.
+pub const FILTER_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.filter.v1.FilterService";
+/// A redaction proxy: returns the input record with sensitive fields
+/// scrubbed. Models a filtering/mutating handler where the common case
+/// (no sensitive data present) can return the request view unchanged.
 ///
 /// # Implementing handlers
 ///
@@ -48,18 +46,18 @@ pub const FORTUNE_SERVICE_SERVICE_NAME: &str = "fortune.v1.FortuneService";
 /// emitted for output types mapped via `extern_path` (the impl would be
 /// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
-pub trait FortuneService: Send + Sync + 'static {
-    /// Handle the GetFortunes RPC.
+pub trait FilterService: Send + Sync + 'static {
+    /// Handle the Redact RPC.
     ///
     /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
-    fn get_fortunes<'a>(
+    fn redact<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: OwnedGetFortunesRequestView,
+        request: OwnedRecordView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
-                crate::proto::fortune::v1::GetFortunesResponse,
+                crate::proto::anthropic::connectrpc::filter::v1::Record,
             > + Send + use<'a, Self>,
         >,
     > + Send;
@@ -76,7 +74,7 @@ pub trait FortuneService: Send + Sync + 'static {
 /// let service = Arc::new(MyServiceImpl);
 /// let router = service.register(Router::new());
 /// ```
-pub trait FortuneServiceExt: FortuneService {
+pub trait FilterServiceExt: FilterService {
     /// Register this service implementation with a Router.
     ///
     /// Takes ownership of the `Arc<Self>` and returns a new Router with
@@ -86,24 +84,24 @@ pub trait FortuneServiceExt: FortuneService {
         router: ::connectrpc::Router,
     ) -> ::connectrpc::Router;
 }
-impl<S: FortuneService> FortuneServiceExt for S {
+impl<S: FilterService> FilterServiceExt for S {
     fn register(
         self: ::std::sync::Arc<Self>,
         router: ::connectrpc::Router,
     ) -> ::connectrpc::Router {
         router
             .route_view(
-                FORTUNE_SERVICE_SERVICE_NAME,
-                "GetFortunes",
+                FILTER_SERVICE_SERVICE_NAME,
+                "Redact",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
                     ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
                         async move {
-                            svc.get_fortunes(ctx, req)
+                            svc.redact(ctx, req)
                                 .await?
                                 .encode::<
-                                    crate::proto::fortune::v1::GetFortunesResponse,
+                                    crate::proto::anthropic::connectrpc::filter::v1::Record,
                                 >(format)
                         }
                     })
@@ -111,7 +109,7 @@ impl<S: FortuneService> FortuneServiceExt for S {
             )
     }
 }
-/// Monomorphic dispatcher for `FortuneService`.
+/// Monomorphic dispatcher for `FilterService`.
 ///
 /// Unlike `.register(Router)` which type-erases each method into an `Arc<dyn ErasedHandler>` stored in a `HashMap`, this struct dispatches via a compile-time `match` on method name: no vtable, no hash lookup.
 ///
@@ -120,14 +118,14 @@ impl<S: FortuneService> FortuneServiceExt for S {
 /// ```rust,ignore
 /// use connectrpc::ConnectRpcService;
 ///
-/// let server = FortuneServiceServer::new(MyImpl);
+/// let server = FilterServiceServer::new(MyImpl);
 /// let service = ConnectRpcService::new(server);
 /// // hand `service` to axum/hyper as a fallback_service
 /// ```
-pub struct FortuneServiceServer<T> {
+pub struct FilterServiceServer<T> {
     inner: ::std::sync::Arc<T>,
 }
-impl<T: FortuneService> FortuneServiceServer<T> {
+impl<T: FilterService> FilterServiceServer<T> {
     /// Wrap a service implementation in a monomorphic dispatcher.
     pub fn new(service: T) -> Self {
         Self {
@@ -139,22 +137,22 @@ impl<T: FortuneService> FortuneServiceServer<T> {
         Self { inner }
     }
 }
-impl<T> Clone for FortuneServiceServer<T> {
+impl<T> Clone for FilterServiceServer<T> {
     fn clone(&self) -> Self {
         Self {
             inner: ::std::sync::Arc::clone(&self.inner),
         }
     }
 }
-impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
+impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
     #[inline]
     fn lookup(
         &self,
         path: &str,
     ) -> Option<::connectrpc::dispatcher::codegen::MethodDescriptor> {
-        let method = path.strip_prefix("fortune.v1.FortuneService/")?;
+        let method = path.strip_prefix("anthropic.connectrpc.filter.v1.FilterService/")?;
         match method {
-            "GetFortunes" => {
+            "Redact" => {
                 Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
             }
             _ => None,
@@ -167,20 +165,23 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
-        let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
+        let Some(method) = path
+            .strip_prefix("anthropic.connectrpc.filter.v1.FilterService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
-            "GetFortunes" => {
+            "Redact" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
-                        crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView,
+                        crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView,
                     >(request, format)?;
-                    svc.get_fortunes(ctx, req)
+                    svc.redact(ctx, req)
                         .await?
-                        .encode::<crate::proto::fortune::v1::GetFortunesResponse>(format)
+                        .encode::<
+                            crate::proto::anthropic::connectrpc::filter::v1::Record,
+                        >(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -193,7 +194,8 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
-        let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
+        let Some(method) = path
+            .strip_prefix("anthropic.connectrpc.filter.v1.FilterService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &request, &format);
@@ -208,7 +210,8 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
-        let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
+        let Some(method) = path
+            .strip_prefix("anthropic.connectrpc.filter.v1.FilterService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &requests, &format);
@@ -223,7 +226,8 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
-        let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
+        let Some(method) = path
+            .strip_prefix("anthropic.connectrpc.filter.v1.FilterService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &requests, &format);
@@ -249,8 +253,8 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
 /// let conn = Http2Connection::connect_plaintext(uri.clone()).await?.shared(1024);
 /// let config = ClientConfig::new(uri).protocol(Protocol::Grpc);
 ///
-/// let client = FortuneServiceClient::new(conn, config);
-/// let response = client.get_fortunes(request).await?;
+/// let client = FilterServiceClient::new(conn, config);
+/// let response = client.redact(request).await?;
 /// ```
 ///
 /// # Example (Connect / HTTP/1.1 or ALPN)
@@ -261,8 +265,8 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
 /// let http = HttpClient::plaintext();  // cleartext http:// only
 /// let config = ClientConfig::new("http://localhost:8080".parse()?);
 ///
-/// let client = FortuneServiceClient::new(http, config);
-/// let response = client.get_fortunes(request).await?;
+/// let client = FilterServiceClient::new(http, config);
+/// let response = client.redact(request).await?;
 /// ```
 ///
 /// # Working with the response
@@ -271,7 +275,7 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
 /// The `OwnedView` derefs to the view, so field access is zero-copy:
 ///
 /// ```rust,ignore
-/// let resp = client.get_fortunes(request).await?.into_view();
+/// let resp = client.redact(request).await?.into_view();
 /// let name: &str = resp.name;  // borrow into the response buffer
 /// ```
 ///
@@ -279,14 +283,14 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
 /// [`into_owned()`](::connectrpc::client::UnaryResponse::into_owned):
 ///
 /// ```rust,ignore
-/// let owned = client.get_fortunes(request).await?.into_owned();
+/// let owned = client.redact(request).await?.into_owned();
 /// ```
 #[derive(Clone)]
-pub struct FortuneServiceClient<T> {
+pub struct FilterServiceClient<T> {
     transport: T,
     config: ::connectrpc::client::ClientConfig,
 }
-impl<T> FortuneServiceClient<T>
+impl<T> FilterServiceClient<T>
 where
     T: ::connectrpc::client::ClientTransport,
     <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
@@ -303,35 +307,32 @@ where
     pub fn config_mut(&mut self) -> &mut ::connectrpc::client::ClientConfig {
         &mut self.config
     }
-    /// Call the GetFortunes RPC. Sends a request to /fortune.v1.FortuneService/GetFortunes.
-    pub async fn get_fortunes(
+    /// Call the Redact RPC. Sends a request to /anthropic.connectrpc.filter.v1.FilterService/Redact.
+    pub async fn redact(
         &self,
-        request: crate::proto::fortune::v1::GetFortunesRequest,
+        request: crate::proto::anthropic::connectrpc::filter::v1::Record,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
             ::buffa::view::OwnedView<
-                crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<
+                crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<
                     'static,
                 >,
             >,
         >,
         ::connectrpc::ConnectError,
     > {
-        self.get_fortunes_with_options(
-                request,
-                ::connectrpc::client::CallOptions::default(),
-            )
+        self.redact_with_options(request, ::connectrpc::client::CallOptions::default())
             .await
     }
-    /// Call the GetFortunes RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
-    pub async fn get_fortunes_with_options(
+    /// Call the Redact RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
+    pub async fn redact_with_options(
         &self,
-        request: crate::proto::fortune::v1::GetFortunesRequest,
+        request: crate::proto::anthropic::connectrpc::filter::v1::Record,
         options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
             ::buffa::view::OwnedView<
-                crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<
+                crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<
                     'static,
                 >,
             >,
@@ -341,8 +342,8 @@ where
         ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                FORTUNE_SERVICE_SERVICE_NAME,
-                "GetFortunes",
+                FILTER_SERVICE_SERVICE_NAME,
+                "Redact",
                 request,
                 options,
             )

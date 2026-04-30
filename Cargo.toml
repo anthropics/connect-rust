@@ -68,7 +68,7 @@ tokio-rustls = "0.26"
 hyper-rustls = { version = "0.27", default-features = false, features = ["http1", "http2", "tls12"] }
 
 # Framework integration
-axum = { version = "0.8", features = ["http2"] }
+axum = { version = "0.8", default-features = false, features = ["http2"] }
 
 # OS types
 libc = "0.2"
@@ -95,6 +95,9 @@ dead_code = "warn"
 explicit_outlives_requirements = "warn"
 unused_imports = "warn"
 unused_lifetimes = "warn"
+# Generated trait methods return `ServiceResult<impl Encodable<M>>`; impls
+# intentionally refine to a concrete body type (e.g. `ServiceResult<M>`).
+refining_impl_trait = { level = "allow", priority = -1 }
 
 [workspace.lints.clippy]
 dbg_macro = "warn"

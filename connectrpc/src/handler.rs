@@ -1,7 +1,26 @@
 //! Handler traits for implementing RPC methods.
 //!
-//! This module defines the traits that RPC method implementations must satisfy,
-//! supporting both unary and streaming RPC patterns.
+//! This module defines the traits that RPC method implementations must
+//! satisfy. Generated `FooService` traits are the primary surface; these
+//! lower-level traits exist for the [`Router`](crate::Router) path that
+//! registers handlers without codegen.
+//!
+//! Handlers receive a read-only [`RequestContext`] and return a
+//! [`Response<B>`](crate::Response) carrying the body plus any response
+//! headers/trailers/compression hint. See [`crate::response`] for the
+//! type definitions.
+//!
+//! # Why response metadata lives on `Response<B>`
+//!
+//! The earlier `Context` design conflated request-side reads
+//! (`headers`, `deadline`, `extensions`) with response-side writes
+//! (`response_headers`, `trailers`, `compress_response`) on one struct
+//! that the handler took ownership of and threaded back. Splitting it
+//! gives a clean in/out separation: handlers that don't touch response
+//! metadata bind `_ctx` and return `Ok(body.into())` with no `mut`
+//! ceremony, while handlers that do attach metadata get a fluent
+//! builder (`Response::new(body).with_header(..).with_trailer(..)`)
+//! instead of field-mutation followed by `Ok((body, ctx))`.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -16,10 +35,11 @@ use serde::de::DeserializeOwned;
 
 use crate::codec::CodecFormat;
 use crate::error::ConnectError;
+use crate::response::{
+    Encodable, EncodedResponse, RequestContext, Response, ServiceResult, ServiceStream,
+};
 
 /// Decode a request message from bytes using the specified codec format.
-///
-/// This helper is used by both unary and streaming handler wrappers to avoid duplication.
 pub(crate) fn decode_request<Req>(request: &Bytes, format: CodecFormat) -> Result<Req, ConnectError>
 where
     Req: Message + DeserializeOwned,
@@ -34,133 +54,122 @@ where
     }
 }
 
-/// Encode a response message to bytes using the specified codec format.
-///
-/// This helper is used by both unary and streaming handler wrappers to avoid duplication.
-#[doc(hidden)] // exposed only for dispatcher::codegen (generated code)
-pub fn encode_response<Res>(res: &Res, format: CodecFormat) -> Result<Bytes, ConnectError>
-where
-    Res: Message + Serialize,
-{
-    match format {
-        CodecFormat::Proto => Ok(res.encode_to_bytes()),
-        CodecFormat::Json => serde_json::to_vec(res)
-            .map(Bytes::from)
-            .map_err(|e| ConnectError::internal(format!("failed to encode JSON response: {e}"))),
-    }
-}
-
-/// Context passed to RPC handlers.
-#[derive(Debug, Clone, Default)]
-pub struct Context {
-    /// Request headers.
-    pub headers: http::HeaderMap,
-    /// Response headers to be set by the handler.
-    pub response_headers: http::HeaderMap,
-    /// Response trailers to be set by the handler.
-    pub trailers: http::HeaderMap,
-    /// Request timeout/deadline, if specified.
-    pub deadline: Option<std::time::Instant>,
-    /// Whether to compress the response. `None` uses the server's compression
-    /// policy. Set to `Some(false)` to disable compression for this response,
-    /// or `Some(true)` to force it.
-    pub compress_response: Option<bool>,
-    /// Request extensions carried from the underlying `http::Request`.
-    ///
-    /// This is the passthrough for connection-scoped metadata that a
-    /// tower layer in front of the service can attach — TLS peer
-    /// certificates, remote socket address, auth context, etc. The
-    /// dispatch path moves `parts.extensions` here verbatim; handlers
-    /// read it with `ctx.extensions.get::<T>()`.
-    pub extensions: http::Extensions,
-}
-
-impl Context {
-    /// Create a new context with the given headers.
-    pub fn new(headers: http::HeaderMap) -> Self {
-        Self {
-            headers,
-            response_headers: http::HeaderMap::new(),
-            trailers: http::HeaderMap::new(),
-            deadline: None,
-            compress_response: None,
-            extensions: http::Extensions::new(),
-        }
-    }
-
-    /// Set the request deadline (absolute `Instant`).
-    ///
-    /// Used by the server dispatch paths to expose the parsed timeout
-    /// to handlers, allowing deadline propagation to downstream calls.
-    #[must_use]
-    pub fn with_deadline(mut self, deadline: Option<std::time::Instant>) -> Self {
-        self.deadline = deadline;
-        self
-    }
-
-    /// Attach request extensions captured from the underlying `http::Request`.
-    ///
-    /// Used by the server dispatch paths; see [`Context::extensions`].
-    #[must_use]
-    pub fn with_extensions(mut self, extensions: http::Extensions) -> Self {
-        self.extensions = extensions;
-        self
-    }
-
-    /// Set a response trailer.
-    pub fn set_trailer(&mut self, key: http::header::HeaderName, value: http::header::HeaderValue) {
-        self.trailers.insert(key, value);
-    }
-
-    /// Set whether to compress the response for this RPC.
-    pub fn set_compression(&mut self, enabled: bool) {
-        self.compress_response = Some(enabled);
-    }
-
-    /// Get a request header value.
-    pub fn header(&self, key: &http::header::HeaderName) -> Option<&http::header::HeaderValue> {
-        self.headers.get(key)
-    }
-}
-
 /// Type alias for a boxed future used in handlers.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// Trait for unary RPC handlers.
+/// Type alias for a boxed stream of encoded response bytes.
+pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
+
+/// Map a stream of typed responses through [`Encodable`].
+fn encode_body_stream<Res, S>(
+    stream: S,
+    format: CodecFormat,
+) -> BoxStream<Result<Bytes, ConnectError>>
+where
+    Res: Message + Serialize + Send + 'static,
+    S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
+{
+    use futures::StreamExt as _;
+    Box::pin(
+        futures::stream::unfold(
+            (
+                Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<Res, ConnectError>> + Send>>,
+                format,
+            ),
+            async |(mut s, fmt)| match s.next().await {
+                Some(Ok(res)) => Some((Encodable::<Res>::encode(&res, fmt), (s, fmt))),
+                Some(Err(e)) => Some((Err(e), (s, fmt))),
+                None => None,
+            },
+        )
+        .fuse(),
+    )
+}
+
+// ============================================================================
+// Type-erased handler boundaries (Router → service.rs)
+// ============================================================================
+
+/// Type-erased unary handler for use in the router.
+pub(crate) trait ErasedHandler: Send + Sync {
+    /// Handle a request with raw bytes and specified codec format.
+    fn call_erased(
+        &self,
+        ctx: RequestContext,
+        request: Bytes,
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>>;
+
+    /// Check if this is a streaming handler.
+    #[allow(dead_code)]
+    fn is_streaming(&self) -> bool;
+}
+
+/// Result type for erased streaming handlers.
+pub(crate) type StreamingHandlerResult =
+    BoxFuture<'static, Result<Response<BoxStream<Result<Bytes, ConnectError>>>, ConnectError>>;
+
+/// Type-erased server-streaming handler for use in the router.
+pub(crate) trait ErasedStreamingHandler: Send + Sync {
+    /// Handle a streaming request with raw bytes and specified codec format.
+    fn call_erased(
+        &self,
+        ctx: RequestContext,
+        request: Bytes,
+        format: CodecFormat,
+    ) -> StreamingHandlerResult;
+}
+
+/// Type-erased client-streaming handler for use in the router.
+pub(crate) trait ErasedClientStreamingHandler: Send + Sync {
+    /// Handle a client streaming request with a stream of raw message bytes.
+    fn call_erased(
+        &self,
+        ctx: RequestContext,
+        requests: BoxStream<Result<Bytes, ConnectError>>,
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>>;
+}
+
+/// Type-erased bidi-streaming handler for use in the router.
+pub(crate) trait ErasedBidiStreamingHandler: Send + Sync {
+    /// Handle a bidi streaming request with a stream of raw message bytes.
+    fn call_erased(
+        &self,
+        ctx: RequestContext,
+        requests: BoxStream<Result<Bytes, ConnectError>>,
+        format: CodecFormat,
+    ) -> StreamingHandlerResult;
+}
+
+// ============================================================================
+// Unary handler (owned request)
+// ============================================================================
+
+/// Trait for unary RPC handlers (owned request type).
 ///
-/// A unary handler takes a single request message and returns a single response.
-///
-/// # Context Ownership
-///
-/// The handler takes ownership of [`Context`] and returns it along with the response.
-/// This design is intentional for async compatibility:
-///
-/// - The returned future is `'static`, meaning it cannot borrow from external state
-/// - Taking ownership allows the future to move the `Context` into itself
-/// - Using `&mut Context` would require non-`'static` lifetimes, complicating tower integration
-///
-/// Handlers should set response headers/trailers on the context before returning:
-///
-/// ```ignore
-/// async fn my_handler(mut ctx: Context, req: MyRequest) -> Result<(MyResponse, Context), ConnectError> {
-///     ctx.response_headers.insert("x-custom-header", "value".parse().unwrap());
-///     Ok((MyResponse::default(), ctx))
-/// }
-/// ```
+/// Handlers return a [`Response<Self::Body>`](crate::Response) where
+/// `Body` is any type [`Encodable`] as `Res` — typically `Res` itself.
+/// The happy path is `Ok(res.into())`.
 pub trait Handler<Req, Res>: Send + Sync + 'static
 where
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
 {
+    /// The response body type. Typically `Res`, or any
+    /// [`Encodable<Res>`](Encodable) (e.g.
+    /// [`MaybeBorrowed`](crate::MaybeBorrowed)).
+    type Body: Encodable<Res> + Send + 'static;
+
     /// Handle a unary RPC request.
     fn call(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: Req,
-    ) -> BoxFuture<'static, Result<(Res, Context), ConnectError>>;
+    ) -> BoxFuture<'static, ServiceResult<Self::Body>>;
 }
 
-/// Wrapper that implements Handler for async functions.
+/// Wrapper that implements [`Handler`] for async functions.
 pub struct FnHandler<F> {
     f: Arc<F>,
 }
@@ -172,125 +181,35 @@ impl<F> FnHandler<F> {
     }
 }
 
-impl<F, Fut, Req, Res> Handler<Req, Res> for FnHandler<F>
+impl<F, Fut, Req, Res, B> Handler<Req, Res> for FnHandler<F>
 where
-    F: Fn(Context, Req) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, Req) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<B>> + Send + 'static,
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
+    B: Encodable<Res> + Send + 'static,
 {
-    fn call(
-        &self,
-        ctx: Context,
-        request: Req,
-    ) -> BoxFuture<'static, Result<(Res, Context), ConnectError>> {
+    type Body = B;
+
+    fn call(&self, ctx: RequestContext, request: Req) -> BoxFuture<'static, ServiceResult<B>> {
         let f = Arc::clone(&self.f);
         Box::pin(async move { f(ctx, request).await })
     }
 }
 
-/// Trait for server streaming RPC handlers.
-///
-/// A streaming handler takes a single request and returns a stream of responses.
-pub trait StreamingHandler<Req, Res>: Send + Sync + 'static
+/// Helper function to create a handler from an async function.
+pub fn handler_fn<F, Fut, Req, Res, B>(f: F) -> FnHandler<F>
 where
+    F: Fn(RequestContext, Req) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<B>> + Send + 'static,
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
+    B: Encodable<Res> + Send + 'static,
 {
-    /// The stream type returned by this handler.
-    type Stream: Stream<Item = Result<Res, ConnectError>> + Send + 'static;
-
-    /// Handle a server streaming RPC request.
-    fn call(
-        &self,
-        ctx: Context,
-        request: Req,
-    ) -> BoxFuture<'static, Result<(Self::Stream, Context), ConnectError>>;
-}
-
-/// Wrapper that implements StreamingHandler for async functions.
-pub struct FnStreamingHandler<F> {
-    f: Arc<F>,
-}
-
-impl<F> FnStreamingHandler<F> {
-    /// Create a new function streaming handler.
-    pub fn new(f: F) -> Self {
-        Self { f: Arc::new(f) }
-    }
-}
-
-impl<F, Fut, S, Req, Res> StreamingHandler<Req, Res> for FnStreamingHandler<F>
-where
-    F: Fn(Context, Req) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
-    S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
-    Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
-{
-    type Stream = S;
-
-    fn call(
-        &self,
-        ctx: Context,
-        request: Req,
-    ) -> BoxFuture<'static, Result<(Self::Stream, Context), ConnectError>> {
-        let f = Arc::clone(&self.f);
-        Box::pin(async move { f(ctx, request).await })
-    }
-}
-
-/// Helper function to create a streaming handler from an async function.
-///
-/// This is the recommended way to create streaming handlers from async functions.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use connectrpc::{streaming_handler_fn, Context, ConnectError};
-/// use futures::stream;
-///
-/// async fn my_handler(ctx: Context, req: MyRequest) -> Result<(impl Stream<Item = Result<MyResponse, ConnectError>>, Context), ConnectError> {
-///     let responses = stream::iter(vec![
-///         Ok(MyResponse { ... }),
-///         Ok(MyResponse { ... }),
-///     ]);
-///     Ok((responses, ctx))
-/// }
-///
-/// let router = Router::new()
-///     .route_server_stream("my.Service", "Method", streaming_handler_fn(my_handler));
-/// ```
-pub fn streaming_handler_fn<F, Fut, S, Req, Res>(f: F) -> FnStreamingHandler<F>
-where
-    F: Fn(Context, Req) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
-    S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
-    Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
-{
-    FnStreamingHandler::new(f)
-}
-
-/// Type-erased handler for use in the router.
-pub(crate) trait ErasedHandler: Send + Sync {
-    /// Handle a request with raw bytes and specified codec format.
-    fn call_erased(
-        &self,
-        ctx: Context,
-        request: Bytes,
-        format: CodecFormat,
-    ) -> BoxFuture<'static, Result<(Bytes, Context), ConnectError>>;
-
-    /// Check if this is a streaming handler.
-    #[allow(dead_code)]
-    fn is_streaming(&self) -> bool;
+    FnHandler::new(f)
 }
 
 /// Wrapper to erase the types from a unary handler.
-///
-/// The request and response types must implement both buffa::Message (for proto encoding)
-/// and serde traits (for JSON encoding).
 pub(crate) struct UnaryHandlerWrapper<H, Req, Res>
 where
     H: Handler<Req, Res>,
@@ -324,16 +243,14 @@ where
 {
     fn call_erased(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: Bytes,
         format: CodecFormat,
-    ) -> BoxFuture<'static, Result<(Bytes, Context), ConnectError>> {
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
             let req: Req = decode_request(&request, format)?;
-            let (res, ctx) = handler.call(ctx, req).await?;
-            let response_bytes = encode_response(&res, format)?;
-            Ok((response_bytes, ctx))
+            handler.call(ctx, req).await?.encode::<Res>(format)
         })
     }
 
@@ -342,26 +259,65 @@ where
     }
 }
 
-/// Type alias for a boxed stream of encoded response bytes.
-pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
+// ============================================================================
+// Server-streaming handler (owned request)
+// ============================================================================
 
-/// Type-erased streaming handler for use in the router.
-pub(crate) trait ErasedStreamingHandler: Send + Sync {
-    /// Handle a streaming request with raw bytes and specified codec format.
-    ///
-    /// Returns the initial context (with response headers) and a stream of encoded response bytes.
-    /// The stream yields `Result<Bytes, ConnectError>` for each response message.
-    fn call_erased(
+/// Trait for server streaming RPC handlers.
+///
+/// Stream items are the owned `Res` (view-out for streams is a follow-up).
+pub trait StreamingHandler<Req, Res>: Send + Sync + 'static
+where
+    Req: Message + Send + 'static,
+    Res: Message + Send + 'static,
+{
+    /// Handle a server streaming RPC request.
+    fn call(
         &self,
-        ctx: Context,
-        request: Bytes,
-        format: CodecFormat,
-    ) -> StreamingHandlerResult;
+        ctx: RequestContext,
+        request: Req,
+    ) -> BoxFuture<'static, ServiceResult<ServiceStream<Res>>>;
 }
 
-/// Result type for erased streaming handlers.
-pub(crate) type StreamingHandlerResult =
-    BoxFuture<'static, Result<(BoxStream<Result<Bytes, ConnectError>>, Context), ConnectError>>;
+/// Wrapper that implements [`StreamingHandler`] for async functions.
+pub struct FnStreamingHandler<F> {
+    f: Arc<F>,
+}
+
+impl<F> FnStreamingHandler<F> {
+    /// Create a new function streaming handler.
+    pub fn new(f: F) -> Self {
+        Self { f: Arc::new(f) }
+    }
+}
+
+impl<F, Fut, Req, Res> StreamingHandler<Req, Res> for FnStreamingHandler<F>
+where
+    F: Fn(RequestContext, Req) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<ServiceStream<Res>>> + Send + 'static,
+    Req: Message + Send + 'static,
+    Res: Message + Send + 'static,
+{
+    fn call(
+        &self,
+        ctx: RequestContext,
+        request: Req,
+    ) -> BoxFuture<'static, ServiceResult<ServiceStream<Res>>> {
+        let f = Arc::clone(&self.f);
+        Box::pin(async move { f(ctx, request).await })
+    }
+}
+
+/// Helper function to create a streaming handler from an async function.
+pub fn streaming_handler_fn<F, Fut, Req, Res>(f: F) -> FnStreamingHandler<F>
+where
+    F: Fn(RequestContext, Req) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<ServiceStream<Res>>> + Send + 'static,
+    Req: Message + Send + 'static,
+    Res: Message + Send + 'static,
+{
+    FnStreamingHandler::new(f)
+}
 
 /// Wrapper to erase the types from a server streaming handler.
 pub(crate) struct ServerStreamingHandlerWrapper<H, Req, Res>
@@ -397,87 +353,41 @@ where
 {
     fn call_erased(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: Bytes,
         format: CodecFormat,
     ) -> StreamingHandlerResult {
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
             let req: Req = decode_request(&request, format)?;
-            let (stream, ctx) = handler.call(ctx, req).await?;
-
-            // Map the stream to encode each response
-            // Use .fuse() to make the stream safe to poll after returning None
-            let encoded_stream: BoxStream<Result<Bytes, ConnectError>> = {
-                use futures::StreamExt as _;
-                Box::pin(
-                    futures::stream::unfold(
-                        (
-                            Box::pin(stream)
-                                as Pin<Box<dyn Stream<Item = Result<Res, ConnectError>> + Send>>,
-                            format,
-                        ),
-                        async |(mut stream, format)| match stream.next().await {
-                            Some(Ok(res)) => {
-                                let encoded = encode_response(&res, format);
-                                Some((encoded, (stream, format)))
-                            }
-                            Some(Err(e)) => Some((Err(e), (stream, format))),
-                            None => None,
-                        },
-                    )
-                    .fuse(),
-                )
-            };
-
-            Ok((encoded_stream, ctx))
+            let resp = handler.call(ctx, req).await?;
+            Ok(resp.map_body(|s| encode_body_stream(s, format)))
         })
     }
 }
 
-/// Helper function to create a handler from an async function.
-///
-/// This is the recommended way to create handlers from async functions.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use connectrpc::{handler_fn, Context, ConnectError};
-///
-/// async fn my_handler(ctx: Context, req: MyRequest) -> Result<(MyResponse, Context), ConnectError> {
-///     Ok((MyResponse { ... }, ctx))
-/// }
-///
-/// let router = Router::new()
-///     .route("my.Service", "Method", handler_fn(my_handler));
-/// ```
-pub fn handler_fn<F, Fut, Req, Res>(f: F) -> FnHandler<F>
-where
-    F: Fn(Context, Req) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
-    Req: Message + Send + 'static,
-    Res: Message + Send + 'static,
-{
-    FnHandler::new(f)
-}
+// ============================================================================
+// Client-streaming handler (owned request)
+// ============================================================================
 
 /// Trait for client streaming RPC handlers.
-///
-/// A client streaming handler receives a stream of request messages and returns a single response.
 pub trait ClientStreamingHandler<Req, Res>: Send + Sync + 'static
 where
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
 {
+    /// The response body type. Typically `Res`.
+    type Body: Encodable<Res> + Send + 'static;
+
     /// Handle a client streaming RPC request.
     fn call(
         &self,
-        ctx: Context,
-        requests: BoxStream<Result<Req, ConnectError>>,
-    ) -> BoxFuture<'static, Result<(Res, Context), ConnectError>>;
+        ctx: RequestContext,
+        requests: ServiceStream<Req>,
+    ) -> BoxFuture<'static, ServiceResult<Self::Body>>;
 }
 
-/// Wrapper that implements ClientStreamingHandler for async functions.
+/// Wrapper that implements [`ClientStreamingHandler`] for async functions.
 pub struct FnClientStreamingHandler<F> {
     f: Arc<F>,
 }
@@ -489,43 +399,36 @@ impl<F> FnClientStreamingHandler<F> {
     }
 }
 
-impl<F, Fut, Req, Res> ClientStreamingHandler<Req, Res> for FnClientStreamingHandler<F>
+impl<F, Fut, Req, Res, B> ClientStreamingHandler<Req, Res> for FnClientStreamingHandler<F>
 where
-    F: Fn(Context, BoxStream<Result<Req, ConnectError>>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, ServiceStream<Req>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<B>> + Send + 'static,
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
+    B: Encodable<Res> + Send + 'static,
 {
+    type Body = B;
+
     fn call(
         &self,
-        ctx: Context,
-        requests: BoxStream<Result<Req, ConnectError>>,
-    ) -> BoxFuture<'static, Result<(Res, Context), ConnectError>> {
+        ctx: RequestContext,
+        requests: ServiceStream<Req>,
+    ) -> BoxFuture<'static, ServiceResult<B>> {
         let f = Arc::clone(&self.f);
         Box::pin(async move { f(ctx, requests).await })
     }
 }
 
 /// Helper function to create a client streaming handler from an async function.
-pub fn client_streaming_handler_fn<F, Fut, Req, Res>(f: F) -> FnClientStreamingHandler<F>
+pub fn client_streaming_handler_fn<F, Fut, Req, Res, B>(f: F) -> FnClientStreamingHandler<F>
 where
-    F: Fn(Context, BoxStream<Result<Req, ConnectError>>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, ServiceStream<Req>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<B>> + Send + 'static,
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
+    B: Encodable<Res> + Send + 'static,
 {
     FnClientStreamingHandler::new(f)
-}
-
-/// Type-erased client streaming handler for use in the router.
-pub(crate) trait ErasedClientStreamingHandler: Send + Sync {
-    /// Handle a client streaming request with a stream of raw message bytes.
-    fn call_erased(
-        &self,
-        ctx: Context,
-        requests: BoxStream<Result<Bytes, ConnectError>>,
-        format: CodecFormat,
-    ) -> BoxFuture<'static, Result<(Bytes, Context), ConnectError>>;
 }
 
 /// Wrapper to erase the types from a client streaming handler.
@@ -562,46 +465,43 @@ where
 {
     fn call_erased(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         requests: BoxStream<Result<Bytes, ConnectError>>,
         format: CodecFormat,
-    ) -> BoxFuture<'static, Result<(Bytes, Context), ConnectError>> {
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         use futures::StreamExt as _;
-
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
-            // Map the raw bytes stream through decode to create a typed stream
-            let request_stream: BoxStream<Result<Req, ConnectError>> = Box::pin(
+            let request_stream: ServiceStream<Req> = Box::pin(
                 requests.map(move |result| result.and_then(|raw| decode_request(&raw, format))),
             );
-
-            let (res, ctx) = handler.call(ctx, request_stream).await?;
-            let response_bytes = encode_response(&res, format)?;
-            Ok((response_bytes, ctx))
+            handler
+                .call(ctx, request_stream)
+                .await?
+                .encode::<Res>(format)
         })
     }
 }
 
+// ============================================================================
+// Bidi-streaming handler (owned request)
+// ============================================================================
+
 /// Trait for bidirectional streaming RPC handlers.
-///
-/// A bidi streaming handler receives a stream of request messages and returns a stream of responses.
 pub trait BidiStreamingHandler<Req, Res>: Send + Sync + 'static
 where
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
 {
-    /// The stream type returned by this handler.
-    type Stream: Stream<Item = Result<Res, ConnectError>> + Send + 'static;
-
     /// Handle a bidi streaming RPC request.
     fn call(
         &self,
-        ctx: Context,
-        requests: BoxStream<Result<Req, ConnectError>>,
-    ) -> BoxFuture<'static, Result<(Self::Stream, Context), ConnectError>>;
+        ctx: RequestContext,
+        requests: ServiceStream<Req>,
+    ) -> BoxFuture<'static, ServiceResult<ServiceStream<Res>>>;
 }
 
-/// Wrapper that implements BidiStreamingHandler for async functions.
+/// Wrapper that implements [`BidiStreamingHandler`] for async functions.
 pub struct FnBidiStreamingHandler<F> {
     f: Arc<F>,
 }
@@ -613,40 +513,86 @@ impl<F> FnBidiStreamingHandler<F> {
     }
 }
 
-impl<F, Fut, S, Req, Res> BidiStreamingHandler<Req, Res> for FnBidiStreamingHandler<F>
+impl<F, Fut, Req, Res> BidiStreamingHandler<Req, Res> for FnBidiStreamingHandler<F>
 where
-    F: Fn(Context, BoxStream<Result<Req, ConnectError>>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
-    S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, ServiceStream<Req>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<ServiceStream<Res>>> + Send + 'static,
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
 {
-    type Stream = S;
-
     fn call(
         &self,
-        ctx: Context,
-        requests: BoxStream<Result<Req, ConnectError>>,
-    ) -> BoxFuture<'static, Result<(Self::Stream, Context), ConnectError>> {
+        ctx: RequestContext,
+        requests: ServiceStream<Req>,
+    ) -> BoxFuture<'static, ServiceResult<ServiceStream<Res>>> {
         let f = Arc::clone(&self.f);
         Box::pin(async move { f(ctx, requests).await })
     }
 }
 
 /// Helper function to create a bidi streaming handler from an async function.
-pub fn bidi_streaming_handler_fn<F, Fut, S, Req, Res>(f: F) -> FnBidiStreamingHandler<F>
+pub fn bidi_streaming_handler_fn<F, Fut, Req, Res>(f: F) -> FnBidiStreamingHandler<F>
 where
-    F: Fn(Context, BoxStream<Result<Req, ConnectError>>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
-    S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, ServiceStream<Req>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<ServiceStream<Res>>> + Send + 'static,
     Req: Message + Send + 'static,
     Res: Message + Send + 'static,
 {
     FnBidiStreamingHandler::new(f)
 }
 
+/// Wrapper to erase the types from a bidi streaming handler.
+pub(crate) struct BidiStreamingHandlerWrapper<H, Req, Res>
+where
+    H: BidiStreamingHandler<Req, Res>,
+    Req: Message + DeserializeOwned + Send + 'static,
+    Res: Message + Serialize + Send + 'static,
+{
+    handler: Arc<H>,
+    _phantom: std::marker::PhantomData<fn(Req) -> Res>,
+}
+
+impl<H, Req, Res> BidiStreamingHandlerWrapper<H, Req, Res>
+where
+    H: BidiStreamingHandler<Req, Res>,
+    Req: Message + DeserializeOwned + Send + 'static,
+    Res: Message + Serialize + Send + 'static,
+{
+    /// Create a new wrapper around the given bidi streaming handler.
+    pub fn new(handler: H) -> Self {
+        Self {
+            handler: Arc::new(handler),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<H, Req, Res> ErasedBidiStreamingHandler for BidiStreamingHandlerWrapper<H, Req, Res>
+where
+    H: BidiStreamingHandler<Req, Res>,
+    Req: Message + DeserializeOwned + Send + 'static,
+    Res: Message + Serialize + Send + 'static,
+{
+    fn call_erased(
+        &self,
+        ctx: RequestContext,
+        requests: BoxStream<Result<Bytes, ConnectError>>,
+        format: CodecFormat,
+    ) -> StreamingHandlerResult {
+        use futures::StreamExt as _;
+        let handler = Arc::clone(&self.handler);
+        Box::pin(async move {
+            let request_stream: ServiceStream<Req> = Box::pin(
+                requests.map(move |result| result.and_then(|raw| decode_request(&raw, format))),
+            );
+            let resp = handler.call(ctx, request_stream).await?;
+            Ok(resp.map_body(|s| encode_body_stream(s, format)))
+        })
+    }
+}
+
 // ============================================================================
-// View-based handler infrastructure (zero-copy request deserialization)
+// View-based handlers (zero-copy request views)
 // ============================================================================
 
 /// Decode a request as an `OwnedView` from bytes using the specified codec format.
@@ -680,20 +626,25 @@ where
 }
 
 /// Trait for unary RPC handlers using zero-copy request views.
-pub trait ViewHandler<ReqView, Res>: Send + Sync + 'static
+///
+/// `call` returns the response **already encoded** so the body's
+/// lifetime can be tied to data the handler borrows from `&self` (or
+/// from the request) without surfacing in the trait object boundary.
+pub trait ViewHandler<ReqView>: Send + Sync + 'static
 where
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
 {
-    /// Handle a unary RPC request with a zero-copy view.
+    /// Handle a unary RPC request with a zero-copy view, encoding the
+    /// response in `format`.
     fn call(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: OwnedView<ReqView>,
-    ) -> BoxFuture<'static, Result<(Res, Context), ConnectError>>;
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>>;
 }
 
-/// Wrapper that implements ViewHandler for async functions.
+/// Wrapper that implements [`ViewHandler`] for async functions.
 pub struct FnViewHandler<F> {
     f: Arc<F>,
 }
@@ -705,52 +656,64 @@ impl<F> FnViewHandler<F> {
     }
 }
 
-impl<F, Fut, ReqView, Res> ViewHandler<ReqView, Res> for FnViewHandler<F>
+impl<F, Fut, ReqView> ViewHandler<ReqView> for FnViewHandler<F>
 where
-    F: Fn(Context, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, OwnedView<ReqView>, CodecFormat) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<EncodedResponse, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
 {
     fn call(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: OwnedView<ReqView>,
-    ) -> BoxFuture<'static, Result<(Res, Context), ConnectError>> {
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         let f = Arc::clone(&self.f);
-        Box::pin(async move { f(ctx, request).await })
+        Box::pin(async move { f(ctx, request, format).await })
     }
 }
 
 /// Helper function to create a view handler from an async function.
-pub fn view_handler_fn<F, Fut, ReqView, Res>(f: F) -> FnViewHandler<F>
+///
+/// The closure receives the negotiated [`CodecFormat`] and returns the
+/// response **already encoded**, so a body that borrows from `&svc` is
+/// encoded before the borrow ends. For a hand-written router this looks
+/// like:
+///
+/// ```rust,ignore
+/// router.route_view(SERVICE, "Foo", view_handler_fn({
+///     let svc = Arc::clone(&svc);
+///     move |ctx, req, format| {
+///         let svc = Arc::clone(&svc);
+///         async move { svc.foo(ctx, req).await?.encode::<FooResponse>(format) }
+///     }
+/// }))
+/// ```
+pub fn view_handler_fn<F, Fut, ReqView>(f: F) -> FnViewHandler<F>
 where
-    F: Fn(Context, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, OwnedView<ReqView>, CodecFormat) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = Result<EncodedResponse, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
 {
     FnViewHandler::new(f)
 }
 
 /// Wrapper to erase the types from a unary view handler.
-pub(crate) struct UnaryViewHandlerWrapper<H, ReqView, Res>
+pub(crate) struct UnaryViewHandlerWrapper<H, ReqView>
 where
-    H: ViewHandler<ReqView, Res>,
+    H: ViewHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     handler: Arc<H>,
-    _phantom: std::marker::PhantomData<fn(ReqView) -> Res>,
+    _phantom: std::marker::PhantomData<fn(ReqView)>,
 }
 
-impl<H, ReqView, Res> UnaryViewHandlerWrapper<H, ReqView, Res>
+impl<H, ReqView> UnaryViewHandlerWrapper<H, ReqView>
 where
-    H: ViewHandler<ReqView, Res>,
+    H: ViewHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     pub fn new(handler: H) -> Self {
         Self {
@@ -760,25 +723,22 @@ where
     }
 }
 
-impl<H, ReqView, Res> ErasedHandler for UnaryViewHandlerWrapper<H, ReqView, Res>
+impl<H, ReqView> ErasedHandler for UnaryViewHandlerWrapper<H, ReqView>
 where
-    H: ViewHandler<ReqView, Res>,
+    H: ViewHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     fn call_erased(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: Bytes,
         format: CodecFormat,
-    ) -> BoxFuture<'static, Result<(Bytes, Context), ConnectError>> {
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
             let req = decode_request_view::<ReqView>(request, format)?;
-            let (res, ctx) = handler.call(ctx, req).await?;
-            let response_bytes = encode_response(&res, format)?;
-            Ok((response_bytes, ctx))
+            handler.call(ctx, req, format).await
         })
     }
 
@@ -793,18 +753,15 @@ where
     ReqView: MessageView<'static> + Send + Sync + 'static,
     Res: Message + Send + 'static,
 {
-    /// The stream type returned by this handler.
-    type Stream: Stream<Item = Result<Res, ConnectError>> + Send + 'static;
-
     /// Handle a server streaming RPC request with a zero-copy view.
     fn call(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: OwnedView<ReqView>,
-    ) -> BoxFuture<'static, Result<(Self::Stream, Context), ConnectError>>;
+    ) -> BoxFuture<'static, ServiceResult<ServiceStream<Res>>>;
 }
 
-/// Wrapper that implements ViewStreamingHandler for async functions.
+/// Wrapper that implements [`ViewStreamingHandler`] for async functions.
 pub struct FnViewStreamingHandler<F> {
     f: Arc<F>,
 }
@@ -816,32 +773,28 @@ impl<F> FnViewStreamingHandler<F> {
     }
 }
 
-impl<F, Fut, S, ReqView, Res> ViewStreamingHandler<ReqView, Res> for FnViewStreamingHandler<F>
+impl<F, Fut, ReqView, Res> ViewStreamingHandler<ReqView, Res> for FnViewStreamingHandler<F>
 where
-    F: Fn(Context, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
-    S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<ServiceStream<Res>>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     Res: Message + Send + 'static,
 {
-    type Stream = S;
-
     fn call(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: OwnedView<ReqView>,
-    ) -> BoxFuture<'static, Result<(Self::Stream, Context), ConnectError>> {
+    ) -> BoxFuture<'static, ServiceResult<ServiceStream<Res>>> {
         let f = Arc::clone(&self.f);
         Box::pin(async move { f(ctx, request).await })
     }
 }
 
 /// Helper function to create a view streaming handler from an async function.
-pub fn view_streaming_handler_fn<F, Fut, S, ReqView, Res>(f: F) -> FnViewStreamingHandler<F>
+pub fn view_streaming_handler_fn<F, Fut, ReqView, Res>(f: F) -> FnViewStreamingHandler<F>
 where
-    F: Fn(Context, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
-    S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, OwnedView<ReqView>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<ServiceStream<Res>>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     Res: Message + Send + 'static,
 {
@@ -884,57 +837,37 @@ where
 {
     fn call_erased(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         request: Bytes,
         format: CodecFormat,
     ) -> StreamingHandlerResult {
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
             let req = decode_request_view::<ReqView>(request, format)?;
-            let (stream, ctx) = handler.call(ctx, req).await?;
-
-            let encoded_stream: BoxStream<Result<Bytes, ConnectError>> = {
-                use futures::StreamExt as _;
-                Box::pin(
-                    futures::stream::unfold(
-                        (
-                            Box::pin(stream)
-                                as Pin<Box<dyn Stream<Item = Result<Res, ConnectError>> + Send>>,
-                            format,
-                        ),
-                        async |(mut stream, format)| match stream.next().await {
-                            Some(Ok(res)) => {
-                                let encoded = encode_response(&res, format);
-                                Some((encoded, (stream, format)))
-                            }
-                            Some(Err(e)) => Some((Err(e), (stream, format))),
-                            None => None,
-                        },
-                    )
-                    .fuse(),
-                )
-            };
-
-            Ok((encoded_stream, ctx))
+            let resp = handler.call(ctx, req).await?;
+            Ok(resp.map_body(|s| encode_body_stream(s, format)))
         })
     }
 }
 
 /// Trait for client streaming RPC handlers using zero-copy request views.
-pub trait ViewClientStreamingHandler<ReqView, Res>: Send + Sync + 'static
+///
+/// `call` returns the response **already encoded**; see [`ViewHandler`].
+pub trait ViewClientStreamingHandler<ReqView>: Send + Sync + 'static
 where
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
 {
-    /// Handle a client streaming RPC request with zero-copy view items.
+    /// Handle a client streaming RPC request with zero-copy view items,
+    /// encoding the response in `format`.
     fn call(
         &self,
-        ctx: Context,
-        requests: BoxStream<Result<OwnedView<ReqView>, ConnectError>>,
-    ) -> BoxFuture<'static, Result<(Res, Context), ConnectError>>;
+        ctx: RequestContext,
+        requests: ServiceStream<OwnedView<ReqView>>,
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>>;
 }
 
-/// Wrapper that implements ViewClientStreamingHandler for async functions.
+/// Wrapper that implements [`ViewClientStreamingHandler`] for async functions.
 pub struct FnViewClientStreamingHandler<F> {
     f: Arc<F>,
 }
@@ -946,61 +879,55 @@ impl<F> FnViewClientStreamingHandler<F> {
     }
 }
 
-impl<F, Fut, ReqView, Res> ViewClientStreamingHandler<ReqView, Res>
-    for FnViewClientStreamingHandler<F>
+impl<F, Fut, ReqView> ViewClientStreamingHandler<ReqView> for FnViewClientStreamingHandler<F>
 where
-    F: Fn(Context, BoxStream<Result<OwnedView<ReqView>, ConnectError>>) -> Fut
+    F: Fn(RequestContext, ServiceStream<OwnedView<ReqView>>, CodecFormat) -> Fut
         + Send
         + Sync
         + 'static,
-    Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
+    Fut: Future<Output = Result<EncodedResponse, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
 {
     fn call(
         &self,
-        ctx: Context,
-        requests: BoxStream<Result<OwnedView<ReqView>, ConnectError>>,
-    ) -> BoxFuture<'static, Result<(Res, Context), ConnectError>> {
+        ctx: RequestContext,
+        requests: ServiceStream<OwnedView<ReqView>>,
+        format: CodecFormat,
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         let f = Arc::clone(&self.f);
-        Box::pin(async move { f(ctx, requests).await })
+        Box::pin(async move { f(ctx, requests, format).await })
     }
 }
 
 /// Helper function to create a view client streaming handler from an async function.
-pub fn view_client_streaming_handler_fn<F, Fut, ReqView, Res>(
-    f: F,
-) -> FnViewClientStreamingHandler<F>
+pub fn view_client_streaming_handler_fn<F, Fut, ReqView>(f: F) -> FnViewClientStreamingHandler<F>
 where
-    F: Fn(Context, BoxStream<Result<OwnedView<ReqView>, ConnectError>>) -> Fut
+    F: Fn(RequestContext, ServiceStream<OwnedView<ReqView>>, CodecFormat) -> Fut
         + Send
         + Sync
         + 'static,
-    Fut: Future<Output = Result<(Res, Context), ConnectError>> + Send + 'static,
+    Fut: Future<Output = Result<EncodedResponse, ConnectError>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
-    Res: Message + Send + 'static,
 {
     FnViewClientStreamingHandler::new(f)
 }
 
 /// Wrapper to erase the types from a client streaming view handler.
-pub(crate) struct ClientStreamingViewHandlerWrapper<H, ReqView, Res>
+pub(crate) struct ClientStreamingViewHandlerWrapper<H, ReqView>
 where
-    H: ViewClientStreamingHandler<ReqView, Res>,
+    H: ViewClientStreamingHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     handler: Arc<H>,
-    _phantom: std::marker::PhantomData<fn(ReqView) -> Res>,
+    _phantom: std::marker::PhantomData<fn(ReqView)>,
 }
 
-impl<H, ReqView, Res> ClientStreamingViewHandlerWrapper<H, ReqView, Res>
+impl<H, ReqView> ClientStreamingViewHandlerWrapper<H, ReqView>
 where
-    H: ViewClientStreamingHandler<ReqView, Res>,
+    H: ViewClientStreamingHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     pub fn new(handler: H) -> Self {
         Self {
@@ -1010,32 +937,26 @@ where
     }
 }
 
-impl<H, ReqView, Res> ErasedClientStreamingHandler
-    for ClientStreamingViewHandlerWrapper<H, ReqView, Res>
+impl<H, ReqView> ErasedClientStreamingHandler for ClientStreamingViewHandlerWrapper<H, ReqView>
 where
-    H: ViewClientStreamingHandler<ReqView, Res>,
+    H: ViewClientStreamingHandler<ReqView>,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     ReqView::Owned: Message + DeserializeOwned,
-    Res: Message + Serialize + Send + 'static,
 {
     fn call_erased(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         requests: BoxStream<Result<Bytes, ConnectError>>,
         format: CodecFormat,
-    ) -> BoxFuture<'static, Result<(Bytes, Context), ConnectError>> {
+    ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         use futures::StreamExt as _;
-
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
-            let request_stream: BoxStream<Result<OwnedView<ReqView>, ConnectError>> =
+            let request_stream: ServiceStream<OwnedView<ReqView>> =
                 Box::pin(requests.map(move |result| {
                     result.and_then(|raw| decode_request_view::<ReqView>(raw, format))
                 }));
-
-            let (res, ctx) = handler.call(ctx, request_stream).await?;
-            let response_bytes = encode_response(&res, format)?;
-            Ok((response_bytes, ctx))
+            handler.call(ctx, request_stream, format).await
         })
     }
 }
@@ -1046,18 +967,15 @@ where
     ReqView: MessageView<'static> + Send + Sync + 'static,
     Res: Message + Send + 'static,
 {
-    /// The stream type returned by this handler.
-    type Stream: Stream<Item = Result<Res, ConnectError>> + Send + 'static;
-
     /// Handle a bidi streaming RPC request with zero-copy view items.
     fn call(
         &self,
-        ctx: Context,
-        requests: BoxStream<Result<OwnedView<ReqView>, ConnectError>>,
-    ) -> BoxFuture<'static, Result<(Self::Stream, Context), ConnectError>>;
+        ctx: RequestContext,
+        requests: ServiceStream<OwnedView<ReqView>>,
+    ) -> BoxFuture<'static, ServiceResult<ServiceStream<Res>>>;
 }
 
-/// Wrapper that implements ViewBidiStreamingHandler for async functions.
+/// Wrapper that implements [`ViewBidiStreamingHandler`] for async functions.
 pub struct FnViewBidiStreamingHandler<F> {
     f: Arc<F>,
 }
@@ -1069,41 +987,28 @@ impl<F> FnViewBidiStreamingHandler<F> {
     }
 }
 
-impl<F, Fut, S, ReqView, Res> ViewBidiStreamingHandler<ReqView, Res>
-    for FnViewBidiStreamingHandler<F>
+impl<F, Fut, ReqView, Res> ViewBidiStreamingHandler<ReqView, Res> for FnViewBidiStreamingHandler<F>
 where
-    F: Fn(Context, BoxStream<Result<OwnedView<ReqView>, ConnectError>>) -> Fut
-        + Send
-        + Sync
-        + 'static,
-    Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
-    S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, ServiceStream<OwnedView<ReqView>>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<ServiceStream<Res>>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     Res: Message + Send + 'static,
 {
-    type Stream = S;
-
     fn call(
         &self,
-        ctx: Context,
-        requests: BoxStream<Result<OwnedView<ReqView>, ConnectError>>,
-    ) -> BoxFuture<'static, Result<(Self::Stream, Context), ConnectError>> {
+        ctx: RequestContext,
+        requests: ServiceStream<OwnedView<ReqView>>,
+    ) -> BoxFuture<'static, ServiceResult<ServiceStream<Res>>> {
         let f = Arc::clone(&self.f);
         Box::pin(async move { f(ctx, requests).await })
     }
 }
 
 /// Helper function to create a view bidi streaming handler from an async function.
-pub fn view_bidi_streaming_handler_fn<F, Fut, S, ReqView, Res>(
-    f: F,
-) -> FnViewBidiStreamingHandler<F>
+pub fn view_bidi_streaming_handler_fn<F, Fut, ReqView, Res>(f: F) -> FnViewBidiStreamingHandler<F>
 where
-    F: Fn(Context, BoxStream<Result<OwnedView<ReqView>, ConnectError>>) -> Fut
-        + Send
-        + Sync
-        + 'static,
-    Fut: Future<Output = Result<(S, Context), ConnectError>> + Send + 'static,
-    S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
+    F: Fn(RequestContext, ServiceStream<OwnedView<ReqView>>) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ServiceResult<ServiceStream<Res>>> + Send + 'static,
     ReqView: MessageView<'static> + Send + Sync + 'static,
     Res: Message + Send + 'static,
 {
@@ -1147,130 +1052,19 @@ where
 {
     fn call_erased(
         &self,
-        ctx: Context,
+        ctx: RequestContext,
         requests: BoxStream<Result<Bytes, ConnectError>>,
         format: CodecFormat,
     ) -> StreamingHandlerResult {
         use futures::StreamExt as _;
-
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
-            let request_stream: BoxStream<Result<OwnedView<ReqView>, ConnectError>> =
+            let request_stream: ServiceStream<OwnedView<ReqView>> =
                 Box::pin(requests.map(move |result| {
                     result.and_then(|raw| decode_request_view::<ReqView>(raw, format))
                 }));
-
-            let (stream, ctx) = handler.call(ctx, request_stream).await?;
-
-            let encoded_stream: BoxStream<Result<Bytes, ConnectError>> = {
-                Box::pin(
-                    futures::stream::unfold(
-                        (
-                            Box::pin(stream)
-                                as Pin<Box<dyn Stream<Item = Result<Res, ConnectError>> + Send>>,
-                            format,
-                        ),
-                        async |(mut stream, format)| match stream.next().await {
-                            Some(Ok(res)) => {
-                                let encoded = encode_response(&res, format);
-                                Some((encoded, (stream, format)))
-                            }
-                            Some(Err(e)) => Some((Err(e), (stream, format))),
-                            None => None,
-                        },
-                    )
-                    .fuse(),
-                )
-            };
-
-            Ok((encoded_stream, ctx))
-        })
-    }
-}
-
-/// Type-erased bidi streaming handler for use in the router.
-pub(crate) trait ErasedBidiStreamingHandler: Send + Sync {
-    /// Handle a bidi streaming request with a stream of raw message bytes.
-    fn call_erased(
-        &self,
-        ctx: Context,
-        requests: BoxStream<Result<Bytes, ConnectError>>,
-        format: CodecFormat,
-    ) -> StreamingHandlerResult;
-}
-
-/// Wrapper to erase the types from a bidi streaming handler.
-pub(crate) struct BidiStreamingHandlerWrapper<H, Req, Res>
-where
-    H: BidiStreamingHandler<Req, Res>,
-    Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
-{
-    handler: Arc<H>,
-    _phantom: std::marker::PhantomData<fn(Req) -> Res>,
-}
-
-impl<H, Req, Res> BidiStreamingHandlerWrapper<H, Req, Res>
-where
-    H: BidiStreamingHandler<Req, Res>,
-    Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
-{
-    /// Create a new wrapper around the given bidi streaming handler.
-    pub fn new(handler: H) -> Self {
-        Self {
-            handler: Arc::new(handler),
-            _phantom: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<H, Req, Res> ErasedBidiStreamingHandler for BidiStreamingHandlerWrapper<H, Req, Res>
-where
-    H: BidiStreamingHandler<Req, Res>,
-    Req: Message + DeserializeOwned + Send + 'static,
-    Res: Message + Serialize + Send + 'static,
-{
-    fn call_erased(
-        &self,
-        ctx: Context,
-        requests: BoxStream<Result<Bytes, ConnectError>>,
-        format: CodecFormat,
-    ) -> StreamingHandlerResult {
-        use futures::StreamExt as _;
-
-        let handler = Arc::clone(&self.handler);
-        Box::pin(async move {
-            // Map the raw bytes stream through decode to create a typed stream
-            let request_stream: BoxStream<Result<Req, ConnectError>> = Box::pin(
-                requests.map(move |result| result.and_then(|raw| decode_request(&raw, format))),
-            );
-
-            let (stream, ctx) = handler.call(ctx, request_stream).await?;
-
-            // Map the stream to encode each response
-            let encoded_stream: BoxStream<Result<Bytes, ConnectError>> = {
-                Box::pin(
-                    futures::stream::unfold(
-                        (
-                            Box::pin(stream)
-                                as Pin<Box<dyn Stream<Item = Result<Res, ConnectError>> + Send>>,
-                            format,
-                        ),
-                        async |(mut stream, format)| match stream.next().await {
-                            Some(Ok(res)) => {
-                                let encoded = encode_response(&res, format);
-                                Some((encoded, (stream, format)))
-                            }
-                            Some(Err(e)) => Some((Err(e), (stream, format))),
-                            None => None,
-                        },
-                    )
-                    .fuse(),
-                )
-            };
-
-            Ok((encoded_stream, ctx))
+            let resp = handler.call(ctx, request_stream).await?;
+            Ok(resp.map_body(|s| encode_body_stream(s, format)))
         })
     }
 }
@@ -1280,8 +1074,6 @@ mod tests {
     use super::*;
     use buffa_types::google::protobuf::__buffa::view::StringValueView;
     use buffa_types::google::protobuf::StringValue;
-
-    // ── decode_request / encode_response (owned types) ─────────────────
 
     #[test]
     fn test_decode_request_proto() {
@@ -1293,7 +1085,6 @@ mod tests {
 
     #[test]
     fn test_decode_request_json() {
-        // StringValue serializes as a bare JSON string per WKT mapping
         let encoded = Bytes::from_static(b"\"world\"");
         let decoded: StringValue = decode_request(&encoded, CodecFormat::Json).unwrap();
         assert_eq!(decoded.value, "world");
@@ -1314,52 +1105,15 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_response_proto() {
-        let msg = StringValue::from("reply");
-        let encoded = encode_response(&msg, CodecFormat::Proto).unwrap();
-        // Round-trip to verify
-        let decoded = StringValue::decode_from_slice(&encoded).unwrap();
-        assert_eq!(decoded.value, "reply");
-    }
-
-    #[test]
-    fn test_encode_response_json() {
-        let msg = StringValue::from("reply");
-        let encoded = encode_response(&msg, CodecFormat::Json).unwrap();
-        // StringValue serializes as a bare JSON string
-        assert_eq!(&encoded[..], b"\"reply\"");
-    }
-
-    #[test]
-    fn test_proto_roundtrip() {
-        let msg = StringValue::from("roundtrip");
-        let encoded = encode_response(&msg, CodecFormat::Proto).unwrap();
-        let decoded: StringValue = decode_request(&encoded, CodecFormat::Proto).unwrap();
-        assert_eq!(decoded, msg);
-    }
-
-    #[test]
-    fn test_json_roundtrip() {
-        let msg = StringValue::from("roundtrip");
-        let encoded = encode_response(&msg, CodecFormat::Json).unwrap();
-        let decoded: StringValue = decode_request(&encoded, CodecFormat::Json).unwrap();
-        assert_eq!(decoded.value, msg.value);
-    }
-
-    // ── decode_request_view (zero-copy views) ───────────────────────────
-
-    #[test]
     fn test_decode_request_view_proto() {
         let msg = StringValue::from("view-test");
         let encoded = Bytes::from(msg.encode_to_vec());
         let view = decode_request_view::<StringValueView>(encoded, CodecFormat::Proto).unwrap();
-        // OwnedView derefs to the inner view
         assert_eq!(view.value, "view-test");
     }
 
     #[test]
     fn test_decode_request_view_json() {
-        // JSON path: deserialize to owned, re-encode to proto, decode as view
         let encoded = Bytes::from_static(b"\"json-view\"");
         let view = decode_request_view::<StringValueView>(encoded, CodecFormat::Json).unwrap();
         assert_eq!(view.value, "json-view");
@@ -1370,70 +1124,5 @@ mod tests {
         let garbage = Bytes::from_static(&[0xFF, 0xFF, 0xFF]);
         let err = decode_request_view::<StringValueView>(garbage, CodecFormat::Proto).unwrap_err();
         assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
-    }
-
-    // ── Context helpers ────────────────────────────────────────────────
-
-    #[test]
-    fn test_context_new() {
-        let mut headers = http::HeaderMap::new();
-        headers.insert("x-custom", http::HeaderValue::from_static("value"));
-        let ctx = Context::new(headers);
-        assert_eq!(
-            ctx.header(&http::header::HeaderName::from_static("x-custom"))
-                .unwrap(),
-            "value"
-        );
-        assert!(ctx.response_headers.is_empty());
-        assert!(ctx.trailers.is_empty());
-        assert!(ctx.deadline.is_none());
-        assert!(ctx.compress_response.is_none());
-    }
-
-    #[test]
-    fn test_context_set_trailer() {
-        let mut ctx = Context::default();
-        ctx.set_trailer(
-            http::header::HeaderName::from_static("x-trailer"),
-            http::HeaderValue::from_static("trailer-value"),
-        );
-        assert_eq!(ctx.trailers.get("x-trailer").unwrap(), "trailer-value");
-    }
-
-    #[test]
-    fn test_context_set_compression() {
-        let mut ctx = Context::default();
-        ctx.set_compression(true);
-        assert_eq!(ctx.compress_response, Some(true));
-        ctx.set_compression(false);
-        assert_eq!(ctx.compress_response, Some(false));
-    }
-
-    #[test]
-    fn test_context_with_deadline() {
-        // Server dispatch paths must populate deadline so handlers can
-        // propagate it to downstream calls (e.g. as a grpc-timeout header).
-        let now = std::time::Instant::now();
-        let deadline = now + std::time::Duration::from_secs(5);
-        let ctx = Context::new(http::HeaderMap::new()).with_deadline(Some(deadline));
-        assert_eq!(ctx.deadline, Some(deadline));
-
-        let ctx = Context::new(http::HeaderMap::new()).with_deadline(None);
-        assert_eq!(ctx.deadline, None);
-    }
-
-    #[test]
-    fn test_context_with_extensions() {
-        #[derive(Clone, Debug, PartialEq)]
-        struct Peer(u32);
-
-        let mut ext = http::Extensions::new();
-        ext.insert(Peer(42));
-        let ctx = Context::new(http::HeaderMap::new()).with_extensions(ext);
-        assert_eq!(ctx.extensions.get::<Peer>(), Some(&Peer(42)));
-
-        // Default-constructed context has empty extensions.
-        let ctx = Context::default();
-        assert!(ctx.extensions.get::<Peer>().is_none());
     }
 }

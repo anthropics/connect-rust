@@ -60,8 +60,8 @@ use crate::dispatcher::Dispatcher;
 use crate::envelope::Envelope;
 use crate::error::ConnectError;
 use crate::handler::BoxStream;
-use crate::handler::Context;
 use crate::protocol::Protocol;
+use crate::response::{EncodedResponse, RequestContext};
 use crate::router::MethodKind;
 use crate::router::Router;
 
@@ -751,12 +751,11 @@ impl StreamingResponseBody {
     /// HEADERS frames.
     fn new(
         response_stream: BoxStream<Result<Bytes, ConnectError>>,
-        ctx: Context,
+        trailers: http::HeaderMap,
         protocol: Protocol,
         compression: Option<(Arc<CompressionRegistry>, &'static str)>,
         compression_policy: CompressionPolicy,
     ) -> Self {
-        let trailers = ctx.trailers.clone();
         let inner: Pin<Box<dyn Stream<Item = Result<Frame<Bytes>, Infallible>> + Send>> =
             match protocol {
                 Protocol::Grpc => Box::pin(create_grpc_envelope_stream(
@@ -1568,12 +1567,12 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers)
+    let ctx = RequestContext::new(metadata.headers)
         .with_deadline(deadline)
         .with_extensions(extensions);
 
     // Call the handler with the appropriate codec format, applying timeout if specified
-    let (response_body, ctx) = if let Some(timeout) = metadata.timeout {
+    let resp: EncodedResponse = if let Some(timeout) = metadata.timeout {
         tokio::time::timeout(
             timeout,
             dispatcher.call_unary(&path, ctx, body, codec_format),
@@ -1591,18 +1590,18 @@ where
     );
 
     // Compress response body if negotiated, respecting the compression policy
-    let effective_policy = compression_policy.with_override(ctx.compress_response);
+    let effective_policy = compression_policy.with_override(resp.compress);
     let (final_body, content_encoding) = if let Some(encoding) = response_encoding {
-        if !effective_policy.should_compress(response_body.len()) {
-            (response_body, None)
+        if !effective_policy.should_compress(resp.body.len()) {
+            (resp.body, None)
         } else {
-            match compression.compress(encoding, &response_body) {
+            match compression.compress(encoding, &resp.body) {
                 Ok(compressed) => (compressed, Some(encoding)),
-                Err(_) => (response_body, None), // Fall back to uncompressed
+                Err(_) => (resp.body, None), // Fall back to uncompressed
             }
         }
     } else {
-        (response_body, None)
+        (resp.body, None)
     };
 
     // Build response with the same content type as the request
@@ -1621,12 +1620,12 @@ where
     }
 
     // Add response headers set by the handler
-    for (key, value) in ctx.response_headers.iter() {
+    for (key, value) in resp.headers.iter() {
         response = response.header(key, value);
     }
 
     // Add trailers as trailer- prefixed headers
-    let response = add_trailers(response, &ctx.trailers);
+    let response = add_trailers(response, &resp.trailers);
 
     response
         .body(Full::new(final_body))
@@ -1780,7 +1779,7 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers)
+    let ctx = RequestContext::new(metadata.headers)
         .with_deadline(deadline)
         .with_extensions(extensions);
 
@@ -1804,7 +1803,7 @@ where
             .await
     };
 
-    let (response_bytes, ctx) = match handler_result {
+    let resp = match handler_result {
         Ok(result) => result,
         Err(e) => return grpc_unary_error(&e),
     };
@@ -1816,20 +1815,20 @@ where
     );
 
     // Encode response into a gRPC envelope (5-byte header + payload)
-    let effective_policy = compression_policy.with_override(ctx.compress_response);
+    let effective_policy = compression_policy.with_override(resp.compress);
     let encoded_data = if let Some(encoding) = response_encoding
-        && effective_policy.should_compress(response_bytes.len())
+        && effective_policy.should_compress(resp.body.len())
     {
-        match compression.compress(encoding, &response_bytes) {
+        match compression.compress(encoding, &resp.body) {
             Ok(compressed) => Envelope::compressed(compressed).encode(),
-            Err(_) => Envelope::data(response_bytes).encode(),
+            Err(_) => Envelope::data(resp.body).encode(),
         }
     } else {
-        Envelope::data(response_bytes).encode()
+        Envelope::data(resp.body).encode()
     };
 
-    // Build gRPC trailers from context
-    let grpc_trailers = build_grpc_trailers(None, &ctx.trailers);
+    // Build gRPC trailers
+    let grpc_trailers = build_grpc_trailers(None, &resp.trailers);
 
     // Build the trailers in the appropriate format for the protocol
     let trailers = match protocol {
@@ -1854,7 +1853,7 @@ where
     }
 
     // Add response headers set by the handler
-    for (key, value) in ctx.response_headers.iter() {
+    for (key, value) in resp.headers.iter() {
         response = response.header(key, value);
     }
 
@@ -2064,56 +2063,53 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers)
+    let ctx = RequestContext::new(metadata.headers)
         .with_deadline(deadline)
         .with_extensions(extensions);
 
     // Call the handler with the appropriate codec format.
     // For gRPC unary handlers, we wrap the single response in a one-item stream.
-    let (response_stream, ctx): (BoxStream<Result<Bytes, ConnectError>>, Context) =
-        match dispatch_kind {
-            StreamingDispatchKind::ServerStreaming => {
-                let fut = dispatcher.call_server_streaming(&path, ctx, request_body, codec_format);
-                let handler_result = if let Some(timeout) = metadata.timeout {
-                    match tokio::time::timeout(timeout, fut).await {
-                        Ok(result) => result,
-                        Err(_) => {
-                            let err = ConnectError::deadline_exceeded("request timeout");
-                            return streaming_error_response(&err, protocol, codec_format);
-                        }
-                    }
-                } else {
-                    fut.await
-                };
-                match handler_result {
+    let resp = match dispatch_kind {
+        StreamingDispatchKind::ServerStreaming => {
+            let fut = dispatcher.call_server_streaming(&path, ctx, request_body, codec_format);
+            let handler_result = if let Some(timeout) = metadata.timeout {
+                match tokio::time::timeout(timeout, fut).await {
                     Ok(result) => result,
-                    Err(e) => return streaming_error_response(&e, protocol, codec_format),
-                }
-            }
-            StreamingDispatchKind::Unary => {
-                let fut = dispatcher.call_unary(&path, ctx, request_body, codec_format);
-                let handler_result = if let Some(timeout) = metadata.timeout {
-                    match tokio::time::timeout(timeout, fut).await {
-                        Ok(result) => result,
-                        Err(_) => {
-                            let err = ConnectError::deadline_exceeded("request timeout");
-                            return streaming_error_response(&err, protocol, codec_format);
-                        }
+                    Err(_) => {
+                        let err = ConnectError::deadline_exceeded("request timeout");
+                        return streaming_error_response(&err, protocol, codec_format);
                     }
-                } else {
-                    fut.await
-                };
-                match handler_result {
-                    Ok((response_bytes, ctx)) => {
-                        // Wrap single response in a one-item stream
-                        let stream: BoxStream<Result<Bytes, ConnectError>> =
-                            Box::pin(futures::stream::once(async move { Ok(response_bytes) }));
-                        (stream, ctx)
-                    }
-                    Err(e) => return streaming_error_response(&e, protocol, codec_format),
                 }
+            } else {
+                fut.await
+            };
+            match handler_result {
+                Ok(result) => result,
+                Err(e) => return streaming_error_response(&e, protocol, codec_format),
             }
-        };
+        }
+        StreamingDispatchKind::Unary => {
+            let fut = dispatcher.call_unary(&path, ctx, request_body, codec_format);
+            let handler_result = if let Some(timeout) = metadata.timeout {
+                match tokio::time::timeout(timeout, fut).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        let err = ConnectError::deadline_exceeded("request timeout");
+                        return streaming_error_response(&err, protocol, codec_format);
+                    }
+                }
+            } else {
+                fut.await
+            };
+            match handler_result {
+                // Wrap single response in a one-item stream
+                Ok(r) => r.map_body(|bytes| -> BoxStream<Result<Bytes, ConnectError>> {
+                    Box::pin(futures::stream::once(async move { Ok(bytes) }))
+                }),
+                Err(e) => return streaming_error_response(&e, protocol, codec_format),
+            }
+        }
+    };
 
     // Negotiate response compression for streaming
     let response_encoding = compression.negotiate_encoding(
@@ -2138,15 +2134,15 @@ where
     }
 
     // Add response headers set by the handler
-    for (key, value) in ctx.response_headers.iter() {
+    for (key, value) in resp.headers.iter() {
         response = response.header(key, value);
     }
 
     let stream_compression = response_encoding.map(|encoding| (compression, encoding));
-    let effective_policy = compression_policy.with_override(ctx.compress_response);
+    let effective_policy = compression_policy.with_override(resp.compress);
     let body = StreamingResponseBody::new(
-        response_stream,
-        ctx,
+        resp.body,
+        resp.trailers,
         protocol,
         stream_compression,
         effective_policy,
@@ -2203,7 +2199,7 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers)
+    let ctx = RequestContext::new(metadata.headers)
         .with_deadline(deadline)
         .with_extensions(extensions);
 
@@ -2231,7 +2227,7 @@ where
             .await
     };
 
-    let (response_bytes, ctx) = match handler_result {
+    let resp = match handler_result {
         Ok(result) => result,
         Err(e) => {
             drop(reader_task);
@@ -2261,17 +2257,17 @@ where
     }
 
     // Add response headers set by the handler
-    for (key, value) in ctx.response_headers.iter() {
+    for (key, value) in resp.headers.iter() {
         response = response.header(key, value);
     }
 
     let stream_compression = response_encoding.map(|encoding| (compression, encoding));
     let response_stream: BoxStream<Result<Bytes, ConnectError>> =
-        Box::pin(futures::stream::once(async { Ok(response_bytes) }));
-    let effective_policy = compression_policy.with_override(ctx.compress_response);
+        Box::pin(futures::stream::once(async { Ok(resp.body) }));
+    let effective_policy = compression_policy.with_override(resp.compress);
     let body = StreamingResponseBody::new(
         response_stream,
-        ctx,
+        resp.trailers,
         protocol,
         stream_compression,
         effective_policy,
@@ -2483,7 +2479,7 @@ where
     let deadline = metadata
         .timeout
         .and_then(|t| std::time::Instant::now().checked_add(t));
-    let ctx = Context::new(metadata.headers)
+    let ctx = RequestContext::new(metadata.headers)
         .with_deadline(deadline)
         .with_extensions(extensions);
 
@@ -2508,7 +2504,7 @@ where
             .await
     };
 
-    let (response_stream, ctx) = match handler_result {
+    let resp = match handler_result {
         Ok(result) => result,
         Err(e) => {
             drop(reader_task);
@@ -2539,15 +2535,15 @@ where
     }
 
     // Add response headers set by the handler
-    for (key, value) in ctx.response_headers.iter() {
+    for (key, value) in resp.headers.iter() {
         response = response.header(key, value);
     }
 
     let stream_compression = response_encoding.map(|encoding| (compression, encoding));
-    let effective_policy = compression_policy.with_override(ctx.compress_response);
+    let effective_policy = compression_policy.with_override(resp.compress);
     let body = StreamingResponseBody::new(
-        response_stream,
-        ctx,
+        resp.body,
+        resp.trailers,
         protocol,
         stream_compression,
         effective_policy,
@@ -3433,11 +3429,11 @@ mod tests {
         let router = Router::new().route(
             "svc",
             "Method",
-            crate::handler_fn(move |ctx: Context, _req: buffa_types::Empty| {
+            crate::handler_fn(move |ctx: RequestContext, _req: buffa_types::Empty| {
                 let cap = Arc::clone(&handler_captured);
                 async move {
                     *cap.lock().unwrap() = ctx.extensions.get::<PeerTag>().cloned();
-                    Ok((buffa_types::Empty::default(), ctx))
+                    crate::Response::ok(buffa_types::Empty::default())
                 }
             }),
         );

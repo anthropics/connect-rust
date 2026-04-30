@@ -1,3 +1,4 @@
+pub mod filter;
 pub mod fortune;
 
 #[path = "generated/connect/mod.rs"]
@@ -19,13 +20,15 @@ pub use proto::bench::v1::__buffa::view::{
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use buffa::view::OwnedView;
 use connectrpc::client::{ClientConfig, HttpClient};
-use connectrpc::{CodecFormat, ConnectError, Context, Protocol, Router};
-use futures::{Stream, StreamExt};
+use connectrpc::{
+    CodecFormat, ConnectError, Protocol, RequestContext, Response, Router, ServiceResult,
+    ServiceStream,
+};
+use futures::StreamExt;
 
 /// Echo-style bench service that reflects payloads back.
 pub struct BenchServiceImpl;
@@ -33,30 +36,21 @@ pub struct BenchServiceImpl;
 impl BenchService for BenchServiceImpl {
     async fn unary(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         req: OwnedView<BenchRequestView<'static>>,
-    ) -> Result<(BenchResponse, Context), ConnectError> {
+    ) -> ServiceResult<BenchResponse> {
         let req = req.to_owned_message();
-        Ok((
-            BenchResponse {
-                payload: req.payload,
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Response::ok(BenchResponse {
+            payload: req.payload,
+            ..Default::default()
+        })
     }
 
     async fn server_stream(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         req: OwnedView<BenchRequestView<'static>>,
-    ) -> Result<
-        (
-            Pin<Box<dyn Stream<Item = Result<BenchResponse, ConnectError>> + Send>>,
-            Context,
-        ),
-        ConnectError,
-    > {
+    ) -> ServiceResult<ServiceStream<BenchResponse>> {
         let req = req.to_owned_message();
         let count = req.response_count;
         let payload = req.payload;
@@ -75,83 +69,58 @@ impl BenchService for BenchServiceImpl {
                 ))
             }
         });
-        Ok((Box::pin(stream), ctx))
+        Response::stream_ok(stream)
     }
 
     async fn client_stream(
         &self,
-        ctx: Context,
-        mut requests: Pin<
-            Box<
-                dyn Stream<Item = Result<OwnedView<BenchRequestView<'static>>, ConnectError>>
-                    + Send,
-            >,
-        >,
-    ) -> Result<(BenchResponse, Context), ConnectError> {
+        _ctx: RequestContext,
+        mut requests: ServiceStream<OwnedView<BenchRequestView<'static>>>,
+    ) -> ServiceResult<BenchResponse> {
         let mut last_payload = Default::default();
         while let Some(req) = requests.next().await {
             let req = req?.to_owned_message();
             last_payload = req.payload;
         }
-        Ok((
-            BenchResponse {
-                payload: last_payload,
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Response::ok(BenchResponse {
+            payload: last_payload,
+            ..Default::default()
+        })
     }
 
     async fn log_unary(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         req: OwnedView<LogRequestView<'static>>,
-    ) -> Result<(LogResponse, Context), ConnectError> {
+    ) -> ServiceResult<LogResponse> {
         // Realistic handler: iterate records, read string fields, compute aggregate.
         // All field access is zero-copy via &str borrows from the request buffer.
         let count = process_log_records_view(&req.records);
-        Ok((
-            LogResponse {
-                count,
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Response::ok(LogResponse {
+            count,
+            ..Default::default()
+        })
     }
 
     async fn log_unary_owned(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         req: OwnedView<LogRequestView<'static>>,
-    ) -> Result<(LogResponse, Context), ConnectError> {
+    ) -> ServiceResult<LogResponse> {
         // Same handler logic but using owned types (pre-OwnedView path).
         let req = req.to_owned_message();
         let count = process_log_records_owned(&req.records);
-        Ok((
-            LogResponse {
-                count,
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Response::ok(LogResponse {
+            count,
+            ..Default::default()
+        })
     }
 
     async fn bidi_stream(
         &self,
-        ctx: Context,
-        requests: Pin<
-            Box<
-                dyn Stream<Item = Result<OwnedView<BenchRequestView<'static>>, ConnectError>>
-                    + Send,
-            >,
-        >,
-    ) -> Result<
-        (
-            Pin<Box<dyn Stream<Item = Result<BenchResponse, ConnectError>> + Send>>,
-            Context,
-        ),
-        ConnectError,
-    > {
+        _ctx: RequestContext,
+        requests: ServiceStream<OwnedView<BenchRequestView<'static>>>,
+    ) -> ServiceResult<ServiceStream<BenchResponse>> {
         // Map stream to owned types before spawning to satisfy Send bounds
         let mut requests = Box::pin(requests.map(|r| r.map(|v| v.to_owned_message())));
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<BenchResponse, ConnectError>>(1);
@@ -175,7 +144,7 @@ impl BenchService for BenchServiceImpl {
             }
         });
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-        Ok((Box::pin(stream), ctx))
+        Response::stream_ok(stream)
     }
 }
 

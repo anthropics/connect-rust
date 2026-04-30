@@ -11,7 +11,7 @@ use axum::middleware::Next;
 use axum::response::Response;
 use buffa::view::OwnedView;
 use connectrpc::client::{ClientConfig, HttpClient};
-use connectrpc::{ConnectError, Context, ErrorCode, Router};
+use connectrpc::{ConnectError, ErrorCode, RequestContext, Router, ServiceResult};
 use http_body_util::BodyExt;
 use tower::ServiceBuilder;
 use tower_http::timeout::TimeoutLayer;
@@ -98,9 +98,9 @@ struct SecretServiceImpl {
 impl SecretService for SecretServiceImpl {
     async fn get_secret(
         &self,
-        mut ctx: Context,
+        ctx: RequestContext,
         request: OwnedView<GetSecretRequestView<'static>>,
-    ) -> Result<(GetSecretResponse, Context), ConnectError> {
+    ) -> ServiceResult<GetSecretResponse> {
         let user = ctx
             .extensions
             .get::<UserId>()
@@ -117,17 +117,11 @@ impl SecretService for SecretServiceImpl {
                 format!("user {:?} cannot read {name:?}", user.0),
             ));
         }
-        ctx.set_trailer(
-            http::header::HeaderName::from_static("x-served-by"),
-            user.0.parse().unwrap(),
-        );
-        Ok((
-            GetSecretResponse {
-                value: Some(value.clone()),
-                ..Default::default()
-            },
-            ctx,
-        ))
+        Ok(connectrpc::Response::new(GetSecretResponse {
+            value: Some(value.clone()),
+            ..Default::default()
+        })
+        .with_trailer("x-served-by", user.0))
     }
 }
 

@@ -5,7 +5,7 @@
 //! the per-request cost of the connectrpc-rs request pipeline.
 
 use buffa::view::OwnedView;
-use connectrpc::{ConnectError, ConnectRpcService, Context};
+use connectrpc::{ConnectRpcService, RequestContext, Response, ServiceResult};
 use rpc_bench::connect::bench::v1::*;
 use rpc_bench::proto::bench::v1::__buffa::view::EchoRequestView;
 use rpc_bench::proto::bench::v1::*;
@@ -15,16 +15,15 @@ struct EchoImpl;
 impl EchoService for EchoImpl {
     async fn echo(
         &self,
-        ctx: Context,
+        _ctx: RequestContext,
         req: OwnedView<EchoRequestView<'static>>,
-    ) -> Result<(EchoResponse, Context), ConnectError> {
+    ) -> ServiceResult<EchoResponse> {
         // One allocation to copy the borrowed &str into the owned response.
         // This is the minimal work a real echo server would do.
-        let resp = EchoResponse {
+        Response::ok(EchoResponse {
             message: req.message.to_string(),
             ..Default::default()
-        };
-        Ok((resp, ctx))
+        })
     }
 }
 
