@@ -784,14 +784,13 @@ impl StreamingResponseBody {
         }
     }
 
-    /// Attach a background reader task to this response body. The handle is held
-    /// only for lifetime association — dropping the response body detaches the
-    /// task (does NOT abort it), allowing the drain to complete. See the
-    /// `_reader_task` field comment for the rationale.
-    ///
-    /// On `wasm32-unknown-unknown` there is no tokio runtime; the reader is spawned
-    /// via `wasm_bindgen_futures::spawn_local`, which doesn't return a join handle,
-    /// so callers pass `None`.
+    /// Attach the background reader-task handle returned by [`spawn_body_reader`].
+    /// The handle is stored but never read or aborted — the task is owned by
+    /// the runtime and runs to completion regardless of what happens to this
+    /// `StreamingResponseBody`. The field exists to make the non-aborting
+    /// policy explicit at the call site (see the `_reader_task` field comment
+    /// for the HTTP/1.1 keep-alive race that motivated it). `task` is `None`
+    /// on platforms without a joinable handle (see [`spawn_detached`]).
     fn with_reader_task(mut self, task: Option<tokio::task::JoinHandle<()>>) -> Self {
         self._reader_task = task;
         self
@@ -2289,6 +2288,39 @@ where
 /// This prevents a malicious client from forcing the server to consume unbounded
 /// data after a size-limit error or other decoder failure.
 const MAX_DRAIN_BYTES: usize = 1024 * 1024; // 1 MiB
+
+/// Spawn a detached background future on the ambient executor.
+///
+/// On native (non-wasm) targets this dispatches via `tokio::spawn` and returns
+/// the join handle. On `wasm32-unknown-unknown` (Cloudflare Workers, browsers,
+/// etc.) there is no tokio runtime, so the future is dispatched via
+/// `wasm_bindgen_futures::spawn_local`, which does not produce a joinable
+/// handle — the function returns `None` in that case.
+///
+/// On both targets the executor takes ownership of the future. Dropping the
+/// returned handle does not cancel the task; callers must not rely on
+/// `.abort()` either (see `_reader_task` for the HTTP/1.1 drain rationale).
+///
+/// The bound on `F` is `Send + 'static` on native (required by `tokio::spawn`)
+/// and `'static` on wasm32 (`spawn_local` runs on a single thread). Avoid
+/// non-`Send` state in futures that must compile on both targets.
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_detached<F>(future: F) -> Option<tokio::task::JoinHandle<()>>
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    Some(tokio::spawn(future))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_detached<F>(future: F) -> Option<tokio::task::JoinHandle<()>>
+where
+    F: std::future::Future<Output = ()> + 'static,
+{
+    wasm_bindgen_futures::spawn_local(future);
+    None
+}
+
 /// Spawn a background task that reads envelope-framed messages from an HTTP
 /// body and forwards them to a channel.
 ///
@@ -2401,17 +2433,8 @@ where
     };
 
     // The reader runs detached — it has to outlive the response stream so it
-    // can finish draining the request body. On native we spawn it onto tokio
-    // and keep the handle for lifetime association; on wasm32 there's no
-    // tokio runtime, so we spawn it onto wasm-bindgen-futures, which doesn't
-    // return a join handle.
-    #[cfg(not(target_arch = "wasm32"))]
-    let reader_task = Some(tokio::spawn(reader_future));
-    #[cfg(target_arch = "wasm32")]
-    let reader_task: Option<tokio::task::JoinHandle<()>> = {
-        wasm_bindgen_futures::spawn_local(reader_future);
-        None
-    };
+    // can finish draining the request body.
+    let reader_task = spawn_detached(reader_future);
 
     let request_stream: BoxStream<Result<Bytes, ConnectError>> =
         Box::pin(futures::stream::unfold(rx, |mut rx| async {
