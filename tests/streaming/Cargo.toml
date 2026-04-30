@@ -19,7 +19,7 @@ bytes = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = "0.1"
 futures = { workspace = true }
-axum = { workspace = true }
+axum = { workspace = true, features = ["tokio", "http1"] }
 
 [build-dependencies]
 connectrpc-build = { path = "../../connectrpc-build" }
