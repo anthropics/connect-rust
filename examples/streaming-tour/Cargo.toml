@@ -34,7 +34,7 @@ tokio = { workspace = true, features = ["full"] }
 futures = { workspace = true }
 
 # Web framework
-axum = { workspace = true }
+axum = { workspace = true, features = ["tokio", "http1"] }
 
 [build-dependencies]
 connectrpc-build = { path = "../../connectrpc-build" }
