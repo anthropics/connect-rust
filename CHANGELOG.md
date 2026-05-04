@@ -107,11 +107,17 @@ increment the patch version.
 
 ### Added
 
+- **`connectrpc::include_generated!()`**: shorthand macro for
+  `include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"))`. An optional
+  filename argument (note: a filename including `.rs`, **not** a proto
+  package name as in `tonic::include_proto!`) supports projects that
+  customise the output via `Config::include_file` ([#50]).
 - **`connectrpc-build`**: `Config::emit_rerun_directives(bool)` to suppress
   the `cargo:rerun-if-changed=` lines when running outside a Cargo
   `build.rs` context (e.g. from a Bazel genrule or standalone host tool).
   Default remains `true`.
 
+[#50]: https://github.com/anthropics/connect-rust/issues/50
 [#7]: https://github.com/anthropics/connect-rust/issues/7
 [#34]: https://github.com/anthropics/connect-rust/issues/34
 [#61]: https://github.com/anthropics/connect-rust/issues/61
