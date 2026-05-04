@@ -22,7 +22,7 @@
 //!
 //! ```rust,ignore
 //! // lib.rs
-//! include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+//! connectrpc::include_generated!();
 //! ```
 //!
 //! # Requirements
@@ -202,7 +202,7 @@ impl Config {
     /// it from your crate root:
     ///
     /// ```rust,ignore
-    /// include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+    /// connectrpc::include_generated!();
     /// ```
     #[must_use]
     pub fn include_file(mut self, name: impl Into<String>) -> Self {

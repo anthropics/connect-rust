@@ -1,5 +1,5 @@
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+    connectrpc::include_generated!();
 }
 pub use proto::test::echo::v1::__buffa::view::*;
 pub use proto::test::echo::v1::*;
