@@ -85,6 +85,26 @@ increment the patch version.
   and return the response already encoded, dropping the `Res` type
   param.
 
+### Changed
+
+- **`GzipProvider` defaults tuned for throughput**: the default
+  compression level is now **1** (was 6), and `flate2` is built with
+  the `zlib-rs` backend (pure-Rust port of zlib-ng) instead of
+  `miniz_oxide`. Together this is ~2.7× throughput on the
+  `unary/large_gzip` bench. Gzip wire format is unchanged; payloads
+  compressed at level 1 are larger than at level 6. Restore the old
+  ratio with `GzipProvider::with_level(6)`. Note that Cargo feature
+  unification means the `zlib-rs` backend also applies to any other
+  `flate2` use in the same dependency graph.
+- `GzipProvider::DEFAULT_LEVEL` and `ZstdProvider::DEFAULT_LEVEL` are
+  now public constants.
+
+### Fixed
+
+- `StreamingCompressionProvider::compress_stream` (gzip and zstd) now
+  honors the provider's configured level; previously it ignored
+  `self.level` and used `async-compression`'s default.
+
 ### Added
 
 - **`connectrpc-build`**: `Config::emit_rerun_directives(bool)` to suppress
