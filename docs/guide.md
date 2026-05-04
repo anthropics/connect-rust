@@ -317,7 +317,11 @@ For handlers that often return the request unchanged (proxies, filters,
 validators), the `Encodable<M>` bound lets you skip the owned-message
 allocation by returning the request view directly. Codegen emits
 `OwnedFooView` aliases and `impl Encodable<Foo> for OwnedFooView` per
-RPC type, and `connectrpc::MaybeBorrowed` covers the conditional case:
+RPC type. (When two RPC types in the same package would alias to the
+same `OwnedFooView` name — e.g. a local `MyMessage` plus an imported
+`api.v1.foo.bar.MyMessage` — the alias is suppressed for both and the
+trait signature uses the inlined `OwnedView<…View<'static>>` form
+instead.) `connectrpc::MaybeBorrowed` covers the conditional case:
 
 ```rust
 use connectrpc::{MaybeBorrowed, RequestContext, Response, ServiceResult};
