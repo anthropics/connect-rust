@@ -180,7 +180,9 @@ fn main() {
 
 ```rust
 // lib.rs
-include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+pub mod proto {
+    connectrpc::include_generated!();
+}
 ```
 
 ### Implement the server
