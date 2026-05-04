@@ -20,7 +20,7 @@ use connectrpc::{RequestContext, Response, Router, ServiceResult, ServiceStream}
 use futures::StreamExt;
 
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+    connectrpc::include_generated!();
 }
 
 use proto::anthropic::connectrpc::tour::v1::__buffa::view::*;

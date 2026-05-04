@@ -85,13 +85,39 @@ increment the patch version.
   and return the response already encoded, dropping the `Res` type
   param.
 
+### Changed
+
+- **`GzipProvider` defaults tuned for throughput**: the default
+  compression level is now **1** (was 6), and `flate2` is built with
+  the `zlib-rs` backend (pure-Rust port of zlib-ng) instead of
+  `miniz_oxide`. Together this is ~2.7× throughput on the
+  `unary/large_gzip` bench. Gzip wire format is unchanged; payloads
+  compressed at level 1 are larger than at level 6. Restore the old
+  ratio with `GzipProvider::with_level(6)`. Note that Cargo feature
+  unification means the `zlib-rs` backend also applies to any other
+  `flate2` use in the same dependency graph.
+- `GzipProvider::DEFAULT_LEVEL` and `ZstdProvider::DEFAULT_LEVEL` are
+  now public constants.
+
+### Fixed
+
+- `StreamingCompressionProvider::compress_stream` (gzip and zstd) now
+  honors the provider's configured level; previously it ignored
+  `self.level` and used `async-compression`'s default.
+
 ### Added
 
+- **`connectrpc::include_generated!()`**: shorthand macro for
+  `include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"))`. An optional
+  filename argument (note: a filename including `.rs`, **not** a proto
+  package name as in `tonic::include_proto!`) supports projects that
+  customise the output via `Config::include_file` ([#50]).
 - **`connectrpc-build`**: `Config::emit_rerun_directives(bool)` to suppress
   the `cargo:rerun-if-changed=` lines when running outside a Cargo
   `build.rs` context (e.g. from a Bazel genrule or standalone host tool).
   Default remains `true`.
 
+[#50]: https://github.com/anthropics/connect-rust/issues/50
 [#7]: https://github.com/anthropics/connect-rust/issues/7
 [#34]: https://github.com/anthropics/connect-rust/issues/34
 [#61]: https://github.com/anthropics/connect-rust/issues/61

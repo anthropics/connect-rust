@@ -284,3 +284,81 @@ pub use server::PeerCerts;
 /// / [`Http2Connection::connect_tls`](client::Http2Connection::connect_tls).
 #[cfg(any(feature = "server-tls", feature = "client-tls"))]
 pub use rustls;
+
+/// Include the generated ConnectRPC file from `$OUT_DIR`.
+///
+/// Shorthand for `include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"))`.
+///
+/// Requires `Config::include_file` in `build.rs` (the no-arg form assumes
+/// the filename `"_connectrpc.rs"`):
+///
+/// ```rust,ignore
+/// // build.rs
+/// connectrpc_build::Config::new()
+///     .files(&["proto/my_service.proto"])
+///     .includes(&["proto/"])
+///     .include_file("_connectrpc.rs")
+///     .compile()
+///     .unwrap();
+/// ```
+///
+/// ```rust,ignore
+/// // src/lib.rs
+/// pub mod proto {
+///     connectrpc::include_generated!();
+/// }
+/// ```
+///
+/// `OUT_DIR` is resolved in the **calling crate's** compilation context.
+///
+/// If you customised the output filename via `Config::include_file`, pass the
+/// **filename** (including the `.rs` extension) as a string literal. Unlike
+/// `tonic::include_proto!`, this argument is a filename, not a proto package
+/// name:
+///
+/// ```rust,ignore
+/// pub mod proto {
+///     connectrpc::include_generated!("my_output.rs");
+/// }
+/// ```
+///
+/// # Notes
+///
+/// - This macro is only for the `build.rs`/`OUT_DIR` workflow. If you use
+///   `buf generate` to write files into `src/generated/`, use `#[path]`:
+///
+///   ```rust,ignore
+///   #[path = "generated/proto/mod.rs"]
+///   pub mod proto;
+///   ```
+///
+/// - If `Config::out_dir` was used to redirect output away from `$OUT_DIR`,
+///   this macro does not apply; use `#[path]` or raw `include!` instead.
+///
+/// - If your proto package hierarchy contains a module named `connectrpc`,
+///   the crate name may be shadowed in scope. Use the absolute path to avoid
+///   the ambiguity:
+///
+///   ```rust,ignore
+///   mod proto {
+///       ::connectrpc::include_generated!();
+///   }
+///   ```
+///
+/// # Compile errors
+///
+/// This macro produces a compile error (not a runtime panic) if:
+///
+/// - `OUT_DIR` is not set — the crate is not being built by Cargo.
+/// - The generated file does not exist — `Config::include_file` was not
+///   called in `build.rs`, or the filename passed to the one-arg form does
+///   not match what was passed to `Config::include_file`.
+#[macro_export]
+macro_rules! include_generated {
+    () => {
+        include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+    };
+    ($file:literal) => {
+        include!(concat!(env!("OUT_DIR"), "/", $file));
+    };
+}

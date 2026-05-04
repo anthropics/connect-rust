@@ -13,7 +13,9 @@
 mod transport;
 
 mod proto {
-    include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+    // `::connectrpc` required: the generated file declares `pub mod connectrpc`
+    // inside this module, which would shadow the crate name if the path were relative.
+    ::connectrpc::include_generated!();
 }
 
 use ::connectrpc::client::ClientConfig;
