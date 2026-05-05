@@ -4,7 +4,7 @@
 use connectrpc::client::{ClientConfig, HttpClient};
 
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+    connectrpc::include_generated!();
 }
 
 use proto::anthropic::connectrpc::tour::v1::*;

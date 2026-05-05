@@ -7,7 +7,7 @@ use std::time::Duration;
 use connectrpc::client::{CallOptions, ClientConfig, HttpClient};
 
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+    connectrpc::include_generated!();
 }
 
 use proto::anthropic::connectrpc::middleware_demo::v1::*;

@@ -89,8 +89,13 @@ fn emit_service_files(
     // - output-type Encodable impls (else two files sharing an output
     //   type collide with E0119);
     // - OwnedFooView aliases keyed on (package, fqn) (else two files in
-    //   the same package collide with E0428).
-    let mut batch = BatchState::default();
+    //   the same package collide with E0428);
+    // - colliding-alias detection (issue #75) needs full-batch visibility
+    //   because the stitcher mounts sibling files into one module.
+    let mut batch = BatchState {
+        colliding_aliases: collect_alias_collisions(proto_file, file_to_generate),
+        ..BatchState::default()
+    };
     for file_name in file_to_generate {
         let file_desc = proto_file
             .iter()
@@ -509,6 +514,19 @@ struct BatchState {
     /// `Owned#{Msg}View` alias has already been emitted (per package
     /// module; aliases are module-scoped).
     alias_seen: std::collections::BTreeSet<(String, String)>,
+    /// `(package, alias_name)` pairs where two or more distinct FQNs would
+    /// produce the same `Owned<Msg>View` alias in the same target Rust
+    /// module — e.g. a service file that defines its own `MyMessage` and
+    /// also references an imported `.api.v1.foo.bar.MyMessage` (issue
+    /// [#75]). The alias is suppressed for every member of a colliding
+    /// set; trait method signatures inline the
+    /// `::buffa::view::OwnedView<…<'static>>` form for those types
+    /// instead. Aliases for non-colliding types (the common case,
+    /// including same-package and well-known types like
+    /// `.google.protobuf.Empty`) are unaffected.
+    ///
+    /// [#75]: https://github.com/anthropics/connect-rust/issues/75
+    colliding_aliases: std::collections::BTreeSet<(String, String)>,
 }
 
 fn generate_connect_services(
@@ -527,7 +545,7 @@ fn generate_connect_services(
     tokens.extend(generate_encodable_view_impls(file, resolver, batch)?);
 
     for service in &file.service {
-        tokens.extend(generate_service(file, service, resolver)?);
+        tokens.extend(generate_service(file, service, resolver, batch)?);
     }
 
     Ok(tokens)
@@ -539,13 +557,112 @@ fn owned_view_alias_ident(fqn: &str) -> Ident {
     format_ident!("Owned{}View", bare_type_name(fqn).to_upper_camel_case())
 }
 
+/// True iff emitting `Owned<Msg>View` for `proto_fqn` in `current_package`
+/// would collide with another distinct FQN's alias in the same module
+/// (issue [#75]). Cross-package types whose short name is unique in this
+/// package's alias set keep their alias; only the colliding set is
+/// suppressed in favour of the inlined `OwnedView<…<'static>>` form.
+///
+/// [#75]: https://github.com/anthropics/connect-rust/issues/75
+fn alias_collides(batch: &BatchState, current_package: &str, proto_fqn: &str) -> bool {
+    let alias = owned_view_alias_ident(proto_fqn).to_string();
+    batch
+        .colliding_aliases
+        .contains(&(current_package.to_string(), alias))
+}
+
+/// Trait-method input-type tokens for an RPC: either the local
+/// `Owned<Msg>View` alias (the common case) or the inlined
+/// `::buffa::view::OwnedView<Path::To::<Msg>View<'static>>` form for
+/// types whose alias would collide with another type in the same target
+/// Rust module (issue #75). The inlined form mirrors what the generated
+/// client method signatures already emit for response types.
+fn owned_view_input_arg_type(
+    resolver: &TypeResolver<'_>,
+    batch: &BatchState,
+    proto_fqn: &str,
+    current_package: &str,
+) -> Result<TokenStream> {
+    if alias_collides(batch, current_package, proto_fqn) {
+        let view = resolver.rust_view_type(proto_fqn, current_package)?;
+        Ok(quote!(::buffa::view::OwnedView<#view<'static>>))
+    } else {
+        let alias = owned_view_alias_ident(proto_fqn);
+        Ok(quote!(#alias))
+    }
+}
+
+/// Walk every service's method input/output FQNs across `file_to_generate`
+/// and identify `(package, alias_ident)` pairs where two or more distinct
+/// FQNs would produce the same `Owned<Msg>View` alias in the same target
+/// Rust module. Caller stores the result in [`BatchState::colliding_aliases`].
+///
+/// This pre-pass is what makes the alias emission collision-aware: a
+/// per-file walk can't see same-short-name FQNs from sibling files in the
+/// same package, but the stitcher mounts both into one module so the
+/// collision is real (issue [#75]).
+///
+/// [#75]: https://github.com/anthropics/connect-rust/issues/75
+fn collect_alias_collisions(
+    proto_file: &[FileDescriptorProto],
+    file_to_generate: &[String],
+) -> std::collections::BTreeSet<(String, String)> {
+    use std::collections::BTreeMap;
+    // (package, alias_name) -> first FQN seen; subsequent distinct FQNs
+    // mark the key as colliding.
+    let mut first_seen: BTreeMap<(String, String), String> = BTreeMap::new();
+    let mut colliding: std::collections::BTreeSet<(String, String)> =
+        std::collections::BTreeSet::new();
+
+    for file_name in file_to_generate {
+        let Some(file) = proto_file
+            .iter()
+            .find(|f| f.name.as_deref() == Some(file_name.as_str()))
+        else {
+            continue;
+        };
+        let package = file.package.clone().unwrap_or_default();
+        for service in &file.service {
+            for m in &service.method {
+                for fqn in [m.input_type.as_deref(), m.output_type.as_deref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    let alias = owned_view_alias_ident(fqn).to_string();
+                    let key = (package.clone(), alias);
+                    match first_seen.get(&key) {
+                        Some(prev) if prev != fqn => {
+                            colliding.insert(key);
+                        }
+                        Some(_) => {} // same FQN — fine, dedup catches it
+                        None => {
+                            first_seen.insert(key, fqn.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    colliding
+}
+
 /// Emit `pub type Owned#{Msg}View = OwnedView<#{Msg}View<'static>>;` for
 /// every distinct RPC input/output type referenced by services in this
 /// file. The alias is what handlers see in trait method signatures and
 /// what users write in their `impl` blocks.
 ///
+/// Aliases whose name would collide with another distinct type's alias
+/// in the same target package (per [`BatchState::colliding_aliases`]) are
+/// suppressed — the trait method signature inlines the
+/// `OwnedView<…<'static>>` form for those types instead (see
+/// [`owned_view_input_arg_type`]). This is the issue [#75] fix; the
+/// non-colliding common case (including well-known types like
+/// `.google.protobuf.Empty`) keeps its alias.
+///
 /// Deduped on `(package, fqn)` across the batch so two files in the same
 /// package don't both emit the alias (E0428).
+///
+/// [#75]: https://github.com/anthropics/connect-rust/issues/75
 fn generate_owned_view_aliases(
     file: &FileDescriptorProto,
     resolver: &TypeResolver<'_>,
@@ -559,6 +676,9 @@ fn generate_owned_view_aliases(
                 .into_iter()
                 .flatten()
             {
+                if alias_collides(batch, package, fqn) {
+                    continue;
+                }
                 if !batch
                     .alias_seen
                     .insert((package.to_string(), fqn.to_string()))
@@ -670,6 +790,7 @@ fn generate_service(
     file: &FileDescriptorProto,
     service: &ServiceDescriptorProto,
     resolver: &TypeResolver<'_>,
+    batch: &BatchState,
 ) -> Result<TokenStream> {
     let package = file.package.as_deref().unwrap_or("");
     let service_name = service.name.as_deref().unwrap_or("");
@@ -711,7 +832,11 @@ fn generate_service(
          Handlers receive requests as `OwnedFooView` (an alias for\n\
          `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access\n\
          to fields (e.g. `request.name` is a `&str` into the decoded buffer).\n\
-         The view can be held across `.await` points.\n\n\
+         The view can be held across `.await` points. When two RPC types in\n\
+         the same package would alias to the same `Owned<…>View` name (e.g.\n\
+         a local message plus an imported one with the same short name), the\n\
+         alias is suppressed for both and the request type is spelled as\n\
+         `OwnedView<…View<'static>>` directly in the trait signature.\n\n\
          Implement methods with plain `async fn`; the returned future satisfies\n\
          the `Send` bound automatically. See the\n\
          [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)\n\
@@ -728,7 +853,7 @@ fn generate_service(
     let trait_methods: Vec<TokenStream> = service
         .method
         .iter()
-        .map(|m| generate_trait_method(file, service, m, resolver, package))
+        .map(|m| generate_trait_method(file, service, m, resolver, batch, package))
         .collect::<Result<Vec<_>>>()?;
 
     // Generate route registrations for extension trait
@@ -1234,11 +1359,17 @@ fn generate_trait_method(
     service: &ServiceDescriptorProto,
     method: &MethodDescriptorProto,
     resolver: &TypeResolver<'_>,
+    batch: &BatchState,
     package: &str,
 ) -> Result<TokenStream> {
     let method_name = method.name.as_deref().unwrap_or("");
     let method_snake = make_field_ident(&method_name.to_snake_case());
-    let input_alias = owned_view_alias_ident(method.input_type.as_deref().unwrap_or(""));
+    let input_arg = owned_view_input_arg_type(
+        resolver,
+        batch,
+        method.input_type.as_deref().unwrap_or(""),
+        package,
+    )?;
     let output_type = resolver.rust_type(method.output_type.as_deref().unwrap_or(""), package)?;
 
     // Get method documentation
@@ -1262,7 +1393,7 @@ fn generate_trait_method(
             fn #method_snake(
                 &self,
                 ctx: ::connectrpc::RequestContext,
-                request: #input_alias,
+                request: #input_arg,
             ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<#output_type>>> + Send;
         })
     } else if client_streaming && !server_streaming {
@@ -1273,7 +1404,7 @@ fn generate_trait_method(
             fn #method_snake<'a>(
                 &'a self,
                 ctx: ::connectrpc::RequestContext,
-                requests: ::connectrpc::ServiceStream<#input_alias>,
+                requests: ::connectrpc::ServiceStream<#input_arg>,
             ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + use<'a, Self>>> + Send;
         })
     } else if client_streaming && server_streaming {
@@ -1283,7 +1414,7 @@ fn generate_trait_method(
             fn #method_snake(
                 &self,
                 ctx: ::connectrpc::RequestContext,
-                requests: ::connectrpc::ServiceStream<#input_alias>,
+                requests: ::connectrpc::ServiceStream<#input_arg>,
             ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<#output_type>>> + Send;
         })
     } else {
@@ -1294,7 +1425,7 @@ fn generate_trait_method(
             fn #method_snake<'a>(
                 &'a self,
                 ctx: ::connectrpc::RequestContext,
-                request: #input_alias,
+                request: #input_arg,
             ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + use<'a, Self>>> + Send;
         })
     }
@@ -1632,7 +1763,11 @@ mod tests {
         let resolver = TypeResolver::new(files, &target_name, &config, require_extern);
         let file = &files[target_idx];
         let service = &file.service[0];
-        Ok(generate_service(file, service, &resolver)?.to_string())
+        let batch = BatchState {
+            colliding_aliases: collect_alias_collisions(files, &target_name),
+            ..BatchState::default()
+        };
+        Ok(generate_service(file, service, &resolver, &batch)?.to_string())
     }
 
     /// Assert that `formatted` (a Rust source string) contains no `use`
@@ -1669,7 +1804,10 @@ mod tests {
             .into_iter()
             .collect::<Vec<_>>();
         let resolver = TypeResolver::new(files, &target_name, &config, require_extern);
-        let mut batch = BatchState::default();
+        let mut batch = BatchState {
+            colliding_aliases: collect_alias_collisions(files, &target_name),
+            ..BatchState::default()
+        };
         Ok(generate_connect_services(&files[target_idx], &resolver, &mut batch)?.to_string())
     }
 
@@ -1715,6 +1853,172 @@ mod tests {
         assert!(
             code.contains("request : OwnedPingReqView ,"),
             "trait method should take request: OwnedPingReqView: {code}"
+        );
+    }
+
+    #[test]
+    fn cross_package_input_collision_suppresses_alias_for_both_sides() {
+        // Regression test for #75. A service file that defines its own
+        // `MyMessage` and also uses an imported `.api.v1.foo.bar.MyMessage`
+        // as an RPC input previously emitted `pub type OwnedMyMessageView`
+        // twice (once for the local output, once for the cross-package
+        // input), failing to compile with E0428. The fix detects the
+        // colliding alias name and inlines the `OwnedView<…<'static>>`
+        // form for both members of the colliding set.
+        let v1 = FileDescriptorProto {
+            name: Some("api/v1/foo/bar/foobar.proto".into()),
+            package: Some("api.v1.foo.bar".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("MyMessage".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let v2 = minimal_file(
+            Some("api.v2.foo.bar"),
+            ".api.v1.foo.bar.MyMessage",
+            ".api.v2.foo.bar.MyMessage",
+            &["MyMessage"],
+        );
+        let code = gen_file(&[v1, v2], 1, &[], false).unwrap();
+
+        // Neither side gets an alias because both would land at the same
+        // identifier in the same module.
+        let alias_count = code.matches("pub type OwnedMyMessageView").count();
+        assert_eq!(
+            alias_count, 0,
+            "expected zero OwnedMyMessageView aliases when both sides collide; got {alias_count}: {code}"
+        );
+
+        // Both colliding sides reach the trait sig as the inlined
+        // `OwnedView<…<'static>>` form.
+        assert!(
+            !code.contains("request : OwnedMyMessageView"),
+            "colliding input must not reference the suppressed alias: {code}"
+        );
+        assert!(
+            code.contains("request : :: buffa :: view :: OwnedView <"),
+            "colliding input should be inlined as OwnedView<…<'static>>: {code}"
+        );
+    }
+
+    #[test]
+    fn cross_package_input_without_collision_keeps_alias() {
+        // The #75 fix only suppresses aliases when two distinct FQNs in
+        // the same target package would produce the same alias name. A
+        // cross-package input with a unique short name (e.g. WKT inputs
+        // like `.google.protobuf.Empty`) keeps its `OwnedEmptyView`
+        // alias — generated handler code that previously read
+        // `request: OwnedEmptyView` keeps working.
+        let wkt = FileDescriptorProto {
+            name: Some("google/protobuf/empty.proto".into()),
+            package: Some("google.protobuf".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Empty".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let svc = minimal_file(
+            Some("example.v1"),
+            ".google.protobuf.Empty",
+            ".example.v1.PingResp",
+            &["PingResp"],
+        );
+        let code = gen_file(&[wkt, svc], 1, &[], false).unwrap();
+        assert!(
+            code.contains("pub type OwnedEmptyView = :: buffa :: view :: OwnedView"),
+            "WKT cross-package input should keep its alias: {code}"
+        );
+        assert!(
+            code.contains("request : OwnedEmptyView ,"),
+            "trait method should still use OwnedEmptyView for non-colliding cross-package input: {code}"
+        );
+    }
+
+    #[test]
+    fn collision_inlines_in_all_streaming_method_shapes() {
+        // The #75 fix substitutes `#input_arg` at four interpolation
+        // sites in `generate_trait_method` (server-streaming, client-
+        // streaming, bidi, unary). This drives all four shapes through
+        // a colliding cross-package input to catch any regression that
+        // accidentally drops the substitution from one branch.
+        let v1 = FileDescriptorProto {
+            name: Some("api/v1/foo/bar/foobar.proto".into()),
+            package: Some("api.v1.foo.bar".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("MyMessage".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let v2 = FileDescriptorProto {
+            name: Some("api/v2/foo/bar/foobar.proto".into()),
+            package: Some("api.v2.foo.bar".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("MyMessage".into()),
+                ..Default::default()
+            }],
+            service: vec![ServiceDescriptorProto {
+                name: Some("FooBar".into()),
+                method: vec![
+                    MethodDescriptorProto {
+                        name: Some("Unary".into()),
+                        input_type: Some(".api.v1.foo.bar.MyMessage".into()),
+                        output_type: Some(".api.v2.foo.bar.MyMessage".into()),
+                        ..Default::default()
+                    },
+                    MethodDescriptorProto {
+                        name: Some("ServerStream".into()),
+                        input_type: Some(".api.v1.foo.bar.MyMessage".into()),
+                        output_type: Some(".api.v2.foo.bar.MyMessage".into()),
+                        server_streaming: Some(true),
+                        ..Default::default()
+                    },
+                    MethodDescriptorProto {
+                        name: Some("ClientStream".into()),
+                        input_type: Some(".api.v1.foo.bar.MyMessage".into()),
+                        output_type: Some(".api.v2.foo.bar.MyMessage".into()),
+                        client_streaming: Some(true),
+                        ..Default::default()
+                    },
+                    MethodDescriptorProto {
+                        name: Some("Bidi".into()),
+                        input_type: Some(".api.v1.foo.bar.MyMessage".into()),
+                        output_type: Some(".api.v2.foo.bar.MyMessage".into()),
+                        client_streaming: Some(true),
+                        server_streaming: Some(true),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let code = gen_file(&[v1, v2], 1, &[], false).unwrap();
+
+        // None of the four method shapes reference the suppressed alias.
+        assert!(
+            !code.contains("OwnedMyMessageView"),
+            "no method shape should reference the suppressed alias: {code}"
+        );
+
+        // Each method shape uses the inlined OwnedView<…<'static>> form.
+        // Unary + server-streaming take a single request param; client-
+        // streaming + bidi take a ServiceStream<…>.
+        assert!(
+            code.matches("request : :: buffa :: view :: OwnedView <")
+                .count()
+                >= 2,
+            "unary and server-streaming should both inline the request type: {code}"
+        );
+        assert!(
+            code.matches(
+                "requests : :: connectrpc :: ServiceStream < :: buffa :: view :: OwnedView <"
+            )
+            .count()
+                >= 2,
+            "client-streaming and bidi should both inline the streamed request type: {code}"
         );
     }
 
@@ -2339,7 +2643,10 @@ mod tests {
         let targets = vec!["alpha.proto".to_string(), "beta.proto".to_string()];
         let resolver = TypeResolver::new(&files, &targets, &config, false);
 
-        let mut batch = BatchState::default();
+        let mut batch = BatchState {
+            colliding_aliases: collect_alias_collisions(&files, &targets),
+            ..BatchState::default()
+        };
         let code_a = generate_connect_services(&files[0], &resolver, &mut batch).unwrap();
         let code_b = generate_connect_services(&files[1], &resolver, &mut batch).unwrap();
 

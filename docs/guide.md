@@ -126,7 +126,7 @@ use buffa::view::OwnedView;
 use connectrpc::{RequestContext, Response, Router, ServiceResult};
 
 pub mod proto {
-    include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"));
+    connectrpc::include_generated!();
 }
 use proto::greet::v1::*;
 use proto::greet::v1::__buffa::view::*;
@@ -191,7 +191,8 @@ fn main() {
 ```
 
 Output is unified: message types and service stubs in one file per
-proto, assembled via a single `include!`. Best for simple projects.
+proto, included into your crate with `connectrpc::include_generated!()`.
+Best for simple projects.
 
 ### `buf generate` (checked-in code, production-grade)
 
@@ -206,6 +207,23 @@ See the README's
 [Code generation section](../README.md#generate-rust-code) for plugin
 installation, `buf.gen.yaml` configuration, and the `buffa_module`
 shorthand for cross-tree references.
+
+### Inclusion patterns side-by-side
+
+Both workflows produce the same runtime API. The only difference is how
+you include the generated code into your crate:
+
+```rust
+// connectrpc-build (build.rs) users:
+pub mod proto { connectrpc::include_generated!(); }
+
+// buf generate users:
+#[path = "generated/proto/mod.rs"]
+pub mod proto;
+```
+
+The underlying difference (`OUT_DIR` vs a known source path) is honest
+and visible, but the call-site shape is parallel.
 
 ## Implementing servers
 
@@ -317,7 +335,11 @@ For handlers that often return the request unchanged (proxies, filters,
 validators), the `Encodable<M>` bound lets you skip the owned-message
 allocation by returning the request view directly. Codegen emits
 `OwnedFooView` aliases and `impl Encodable<Foo> for OwnedFooView` per
-RPC type, and `connectrpc::MaybeBorrowed` covers the conditional case:
+RPC type. (When two RPC types in the same package would alias to the
+same `OwnedFooView` name — e.g. a local `MyMessage` plus an imported
+`api.v1.foo.bar.MyMessage` — the alias is suppressed for both and the
+trait signature uses the inlined `OwnedView<…View<'static>>` form
+instead.) `connectrpc::MaybeBorrowed` covers the conditional case:
 
 ```rust
 use connectrpc::{MaybeBorrowed, RequestContext, Response, ServiceResult};

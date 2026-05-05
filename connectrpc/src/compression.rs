@@ -577,10 +577,24 @@ impl Default for CompressionRegistry {
 /// gzip state tables. The pool is shared across all clones of the
 /// `CompressionRegistry` that holds this provider (via `Arc`).
 ///
+/// # Defaults
+///
+/// The default compression level is **1** (fastest). RPC payloads are
+/// latency-sensitive and short-lived; level 1 typically captures most of
+/// the size reduction at a fraction of the CPU cost of level 6. Use
+/// [`GzipProvider::with_level`] for a different speed/ratio trade-off, or
+/// prefer `ZstdProvider` when the peer supports it — zstd at its default
+/// level is typically both faster and smaller than gzip on RPC payloads.
+///
+/// This crate enables `flate2`'s `zlib-rs` backend (a pure-Rust port of
+/// zlib-ng), which is substantially faster than the `miniz_oxide` default.
+/// Because Cargo features are additive, this selection also applies to any
+/// other `flate2` use in the same dependency graph.
+///
 /// Available when the `gzip` feature is enabled (default).
 #[cfg(feature = "gzip")]
 pub struct GzipProvider {
-    /// Compression level (0-9, default is 6).
+    /// Compression level (0-9, default is 1).
     level: u32,
     compressors: std::sync::Mutex<Vec<flate2::Compress>>,
     decompressors: std::sync::Mutex<Vec<flate2::Decompress>>,
@@ -606,17 +620,18 @@ impl std::fmt::Debug for GzipProvider {
 #[cfg(feature = "gzip")]
 impl Default for GzipProvider {
     fn default() -> Self {
-        Self {
-            level: 6,
-            compressors: std::sync::Mutex::new(Vec::new()),
-            decompressors: std::sync::Mutex::new(Vec::new()),
-        }
+        Self::with_level(Self::DEFAULT_LEVEL)
     }
 }
 
 #[cfg(feature = "gzip")]
 impl GzipProvider {
-    /// Create a new Gzip provider with default compression level.
+    /// Default compression level: 1 (fastest).
+    ///
+    /// See the [type-level docs](GzipProvider#defaults) for rationale.
+    pub const DEFAULT_LEVEL: u32 = 1;
+
+    /// Create a new Gzip provider with the default compression level (1).
     pub fn new() -> Self {
         Self::default()
     }
@@ -624,7 +639,14 @@ impl GzipProvider {
     /// Create a new Gzip provider with the specified compression level.
     ///
     /// Level should be 0-9, where 0 is no compression and 9 is maximum.
+    /// The default is 1 (fastest); use 6 for the conventional zlib default
+    /// trade-off, or 9 for maximum compression.
+    ///
+    /// # Panics
+    ///
+    /// `flate2` panics at compress time if `level > 9`.
     pub fn with_level(level: u32) -> Self {
+        debug_assert!(level <= 9, "gzip level must be 0-9, got {level}");
         Self {
             level,
             compressors: std::sync::Mutex::new(Vec::new()),
@@ -880,7 +902,12 @@ impl StreamingCompressionProvider for GzipProvider {
     }
 
     fn compress_stream(&self, reader: BoxedAsyncBufRead) -> BoxedAsyncRead {
-        Box::pin(async_compression::tokio::bufread::GzipEncoder::new(reader))
+        Box::pin(
+            async_compression::tokio::bufread::GzipEncoder::with_quality(
+                reader,
+                async_compression::Level::Precise(self.level as i32),
+            ),
+        )
     }
 }
 
@@ -914,7 +941,8 @@ impl std::fmt::Debug for ZstdProvider {
 
 #[cfg(feature = "zstd")]
 impl ZstdProvider {
-    const DEFAULT_LEVEL: i32 = 3;
+    /// Default compression level: 3 (the zstd library default).
+    pub const DEFAULT_LEVEL: i32 = 3;
 
     /// Create a new Zstd provider with default compression level.
     pub fn new() -> Self {
@@ -1052,7 +1080,12 @@ impl StreamingCompressionProvider for ZstdProvider {
     }
 
     fn compress_stream(&self, reader: BoxedAsyncBufRead) -> BoxedAsyncRead {
-        Box::pin(async_compression::tokio::bufread::ZstdEncoder::new(reader))
+        Box::pin(
+            async_compression::tokio::bufread::ZstdEncoder::with_quality(
+                reader,
+                async_compression::Level::Precise(self.level),
+            ),
+        )
     }
 }
 
@@ -1123,6 +1156,71 @@ mod tests {
             .decompress_with_limit(&compressed, usize::MAX)
             .unwrap();
         assert_eq!(&decompressed[..], &data[..]);
+    }
+
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn test_gzip_default_level_is_fast() {
+        assert_eq!(GzipProvider::DEFAULT_LEVEL, 1);
+        // Round-trip at the default (fastest) level.
+        let provider = GzipProvider::default();
+        let data = vec![b'x'; 50_000];
+        let compressed = provider.compress(&data).unwrap();
+        assert!(compressed.len() < data.len());
+        let decompressed = provider
+            .decompress_with_limit(&compressed, usize::MAX)
+            .unwrap();
+        assert_eq!(&decompressed[..], &data[..]);
+    }
+
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn test_gzip_cross_level_decode() {
+        // Output from any level must decode with any provider instance
+        // (level only affects encode); also exercises pool reuse across
+        // two compress calls on the level-6 provider.
+        let fast = GzipProvider::default();
+        let slow = GzipProvider::with_level(6);
+        let data: Vec<u8> = (0..32_768).map(|i| (i % 251) as u8).collect();
+        for src in [&fast, &slow] {
+            let _ = src.compress(&data).unwrap();
+            let compressed = src.compress(&data).unwrap();
+            for dst in [&fast, &slow] {
+                let out = dst.decompress_with_limit(&compressed, usize::MAX).unwrap();
+                assert_eq!(&out[..], &data[..]);
+            }
+        }
+    }
+
+    #[cfg(all(feature = "gzip", feature = "streaming"))]
+    #[tokio::test]
+    async fn test_gzip_streaming_honors_level() {
+        use tokio::io::AsyncReadExt;
+        async fn stream_compress(p: &GzipProvider, data: &[u8]) -> Vec<u8> {
+            let reader: BoxedAsyncBufRead = Box::pin(std::io::Cursor::new(data.to_vec()));
+            let mut enc = p.compress_stream(reader);
+            let mut out = Vec::new();
+            enc.read_to_end(&mut out).await.unwrap();
+            out
+        }
+        let data = b"hello world, streaming gzip at the configured level".repeat(200);
+        let fast = stream_compress(&GzipProvider::with_level(1), &data).await;
+        let best = stream_compress(&GzipProvider::with_level(9), &data).await;
+        // Both must round-trip via the buffered decoder.
+        for c in [&fast, &best] {
+            let out = GzipProvider::default()
+                .decompress_with_limit(c, usize::MAX)
+                .unwrap();
+            assert_eq!(&out[..], &data[..]);
+        }
+        // Level must actually affect output (previously ignored): level 9 on
+        // highly repetitive input compresses strictly smaller than level 1.
+        assert!(
+            best.len() < fast.len(),
+            "level 9 ({}) should be smaller than level 1 ({})",
+            best.len(),
+            fast.len()
+        );
     }
 
     // ── gzip_header_len tests (RFC 1952 flag parsing) ────────────────
