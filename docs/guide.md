@@ -652,8 +652,23 @@ Server::new(connect_router)
     .await?;
 ```
 
-For the axum path, wrap the listener with `tokio_rustls::TlsAcceptor`
-yourself (this is what the eliza example does).
+For the axum path, `connectrpc::axum::serve_tls` (requires both the
+`axum` and `server-tls` features) is a drop-in replacement for
+`axum::serve` that owns the rustls accept loop and stamps `PeerAddr` /
+`PeerCerts` into request extensions exactly as the standalone `Server`
+does, so handler code that reads `ctx.extensions.get::<PeerCerts>()`
+is portable across both hosting paths:
+
+```rust
+let app = axum::Router::new()
+    .route("/health", axum::routing::get(|| async { "OK" }))
+    .fallback_service(connect_router.into_axum_service());
+
+let listener = tokio::net::TcpListener::bind("0.0.0.0:8443").await?;
+connectrpc::axum::serve_tls(listener, app, server_config)
+    .with_graceful_shutdown(shutdown_signal)
+    .await?;
+```
 
 The eliza example
 ([`examples/eliza/README.md`](../examples/eliza/README.md)) walks
