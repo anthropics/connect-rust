@@ -207,10 +207,30 @@ schema. Requires three plugins: `protoc-gen-buffa` for message types,
 adds `<stem>.__connect.rs` containing the service trait + client. Each
 package gets a `<pkg>.mod.rs` stitcher that `include!`s all of them.
 
+If you'd rather have one file per proto package — the convention that
+[Buf Schema Registry] cargo SDK generation and [`tonic`]-style build
+integrations expect — pass `opt: file_per_package` to **both**
+`protoc-gen-buffa` and `protoc-gen-connect-rust`. That collapses each
+plugin's output to one `<dotted.pkg>.rs` per package with everything
+inlined and no per-file companion files or `<pkg>.mod.rs` stitcher.
+Drop the `protoc-gen-buffa-packaging` invocations under this layout —
+there is nothing for them to wire — and either let your downstream tool
+synthesise the module tree from `<dotted.package>.rs` filenames (BSR
+cargo SDKs do this automatically) or hand-write the `mod.rs`. Keep
+routing each plugin to its own `out:` directory; the filename is shared
+between them and would silently overwrite in a shared one.
+`connectrpc-build` users get the same option as
+`Config::file_per_package(true)`, which inlines the service stubs into
+buffa's `<dotted.pkg>.rs` and is otherwise transparent — the include
+file picks up the new filename automatically.
+
 See the README's
 [Code generation section](../README.md#generate-rust-code) for plugin
 installation, `buf.gen.yaml` configuration, and the `buffa_module`
 shorthand for cross-tree references.
+
+[Buf Schema Registry]: https://buf.build/docs/bsr/generated-sdks/cargo/
+[`tonic`]: https://docs.rs/tonic-build/latest/tonic_build/
 
 ### Inclusion patterns side-by-side
 

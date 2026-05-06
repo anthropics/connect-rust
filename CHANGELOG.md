@@ -155,6 +155,28 @@ rebuilds `OUT_DIR` automatically.
 
 ### Added
 
+- **`file_per_package` output layout** for `protoc-gen-connect-rust` and
+  `connectrpc-build`. When enabled (`opt: file_per_package` in
+  `buf.gen.yaml`, `--connect-rust_opt=file_per_package` with `protoc`, or
+  `Config::file_per_package(true)` from `build.rs`), the per-proto split
+  is collapsed to one `<dotted.pkg>.rs` per proto package with all
+  service stubs inlined and no `<pkg>.mod.rs` stitcher — matching the
+  `<dotted.package>.rs` filename convention `protoc-gen-buffa` produces
+  under its own `file_per_package` option ([buffa#73]) and that BSR cargo
+  SDK generation and `tonic`-style build integrations expect (module tree
+  synthesised from filenames). The two plugins generate disjoint content
+  (buffa: message types, connect-rust: service stubs); set
+  `file_per_package` on both. In the `connectrpc-build` path service
+  stubs are inlined into buffa's per-package `PackageMod` rather than
+  written as `<stem>.__connect.rs` siblings; the include file picks up
+  the new filename automatically and consumer code is unaffected. When
+  using the protoc plugin from `buf generate`, **drop the
+  `protoc-gen-buffa-packaging` invocations** under this layout — there
+  are no per-file content files or stitchers for it to wire — and keep
+  routing `file_per_package` output to its own directory: the filename
+  matches `protoc-gen-buffa`'s and would silently overwrite in a shared
+  one. See [`CodeGenConfig::file_per_package`] for the
+  `strategy: directory` constraint.
 - **`connectrpc::include_generated!()`**: shorthand macro for
   `include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"))`. An optional
   filename argument (note: a filename including `.rs`, **not** a proto
@@ -174,9 +196,11 @@ rebuilds `OUT_DIR` automatically.
 [buffa#22]: https://github.com/anthropics/buffa/pull/22
 [buffa#55]: https://github.com/anthropics/buffa/pull/55
 [buffa#62]: https://github.com/anthropics/buffa/pull/62
+[buffa#73]: https://github.com/anthropics/buffa/pull/73
 [buffa#81]: https://github.com/anthropics/buffa/issues/81
 [buffa#91]: https://github.com/anthropics/buffa/pull/91
 [buffa#97]: https://github.com/anthropics/buffa/pull/97
+[`CodeGenConfig::file_per_package`]: https://docs.rs/buffa-codegen/latest/buffa_codegen/struct.CodeGenConfig.html#structfield.file_per_package
 
 ## [0.3.3] - 2026-04-17
 

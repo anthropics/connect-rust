@@ -138,6 +138,11 @@ fn emit_service_files(
 /// and wire only the [`GeneratedFileKind::PackageMod`] entries into their
 /// module tree (the stitchers `include!` the rest).
 ///
+/// Under [`CodeGenConfig::file_per_package`] no `Companion` files are
+/// emitted: the service stubs are inlined directly into buffa's single
+/// `<dotted.pkg>.rs` `PackageMod` per package, mirroring how buffa
+/// inlines its own ancillary content under that mode.
+///
 /// This is the **unified** path: service stubs reference message types via
 /// `super::`-relative paths, so both must live in the same module tree.
 /// [`CodeGenConfig::extern_paths`] is ignored.
@@ -160,30 +165,87 @@ pub fn generate_files(
     let resolver = TypeResolver::new(proto_file, file_to_generate, &config, false);
     let service_files = emit_service_files(proto_file, file_to_generate, &resolver)?;
 
-    // Wire each `<stem>.__connect.rs` into the matching per-package
-    // stitcher and append the companion files to the output set in one
-    // pass. Every companion's package has a matching PackageMod here
-    // because buffa unconditionally emits one for every package containing
-    // a `file_to_generate` proto, so no companion is ever orphaned.
-    buffa_codegen::apply_companions(&mut files, service_files);
+    if config.file_per_package {
+        // Under `file_per_package` buffa emits one `<dotted.pkg>.rs`
+        // (kind `PackageMod`) per package, inlining what the per-file
+        // stitcher would otherwise `include!`. Inline the service stubs
+        // into it directly so the output stays single-file-per-package —
+        // a sibling `<stem>.__connect.rs` would defeat the layout's
+        // purpose (BSR/`tonic`-style `lib.rs` synthesis from
+        // `<dotted.package>.rs` filenames).
+        inline_companions_into_package_mods(&mut files, service_files);
+    } else {
+        // Wire each `<stem>.__connect.rs` into the matching per-package
+        // stitcher and append the companion files to the output set in one
+        // pass. Every companion's package has a matching PackageMod here
+        // because buffa unconditionally emits one for every package
+        // containing a `file_to_generate` proto, so no companion is ever
+        // orphaned.
+        buffa_codegen::apply_companions(&mut files, service_files);
 
-    // The orphaning safety above is a cross-crate invariant on buffa's
-    // output shape; if a future buffa release stops emitting a PackageMod
-    // for an empty package, `apply_companions` would silently append the
-    // companion without any stitcher wiring it in. Surface that early in
-    // debug builds rather than letting the trait/client vanish at use-site.
-    debug_assert!(
-        files.iter().all(|f| {
-            f.kind != GeneratedFileKind::Companion
-                || files.iter().any(|g| {
-                    g.kind == GeneratedFileKind::PackageMod
-                        && g.content.contains(&format!("include!(\"{}\")", f.name))
-                })
-        }),
-        "a companion service file was not wired into any package stitcher"
-    );
+        // The orphaning safety above is a cross-crate invariant on buffa's
+        // output shape; if a future buffa release stops emitting a
+        // PackageMod for an empty package, `apply_companions` would
+        // silently append the companion without any stitcher wiring it in.
+        // Surface that early in debug builds rather than letting the
+        // trait/client vanish at use-site.
+        debug_assert!(
+            files.iter().all(|f| {
+                f.kind != GeneratedFileKind::Companion
+                    || files.iter().any(|g| {
+                        g.kind == GeneratedFileKind::PackageMod
+                            && g.content.contains(&format!("include!(\"{}\")", f.name))
+                    })
+            }),
+            "a companion service file was not wired into any package stitcher"
+        );
+    }
 
     Ok(files)
+}
+
+/// Append each companion's content directly to the matching `PackageMod`,
+/// dropping the companion entries instead of `apply_companions`-ing them
+/// as separate `include!`d siblings.
+///
+/// Used by [`generate_files`] under [`CodeGenConfig::file_per_package`],
+/// where the `PackageMod` is the *only* per-package output file and a
+/// sibling `<stem>.__connect.rs` would break the single-file convention
+/// that BSR/`tonic`-style `lib.rs` synthesis depends on.
+///
+/// Companions whose package has no `PackageMod` are dropped — that does
+/// not arise in [`generate_files`] (buffa unconditionally emits one per
+/// `file_to_generate` package). Note this differs from `apply_companions`,
+/// which appends-without-wiring (the dangling `.__connect.rs` lands on
+/// disk as a debugging breadcrumb): here the orphan vanishes entirely.
+/// Both paths yield a missing-symbol error at the consumer, but the
+/// `debug_assert!` in [`generate_files`]'s default branch covers the
+/// dangerous half (silent unwired siblings); this branch has no sibling
+/// to leave dangling, so a vanished trait is the only signature.
+fn inline_companions_into_package_mods(
+    // Slice not Vec: this path mutates PackageMod content in place and
+    // never appends — companions are consumed by the loop, not retained.
+    files: &mut [GeneratedFile],
+    companions: Vec<GeneratedFile>,
+) {
+    // Symmetric to the `debug_assert!` in `generate_files`'s default branch:
+    // this branch leaves nothing on disk for an orphan, so the assertion is
+    // the *only* signal if buffa's PackageMod-emission contract changes.
+    debug_assert!(
+        companions.iter().all(|c| files
+            .iter()
+            .any(|f| f.kind == GeneratedFileKind::PackageMod && f.package == c.package)),
+        "a companion service file's package has no PackageMod to inline into"
+    );
+    for comp in companions {
+        if let Some(pkg_mod) = files
+            .iter_mut()
+            .find(|f| f.kind == GeneratedFileKind::PackageMod && f.package == comp.package)
+        {
+            pkg_mod.content.push('\n');
+            pkg_mod.content.push_str(&comp.content);
+        }
+    }
 }
 
 /// Generate **only** ConnectRPC service bindings from proto descriptors.
@@ -197,6 +259,17 @@ pub fn generate_files(
 /// `apply_companions`: the split-path stitcher emitted here `include!`s
 /// them directly. Build integrations filtering on kind should treat
 /// `Companion` as "connect-rust service stub" in both modes.
+///
+/// Under [`CodeGenConfig::file_per_package`] the per-proto split is
+/// collapsed: the output is exactly one `<dotted.pkg>.rs` (kind
+/// [`GeneratedFileKind::PackageMod`]) per package with all service stubs
+/// inlined, and no `<pkg>.mod.rs` stitcher. This matches the file layout
+/// `protoc-gen-buffa` produces under the same option and the convention
+/// that BSR cargo SDK generation and `tonic`-style build integrations
+/// expect (one `<dotted.package>.rs` per package, module tree synthesised
+/// from filenames). Route this output to its own directory — it shares
+/// `protoc-gen-buffa`'s filename per package and would silently overwrite
+/// in a shared one.
 ///
 /// This is the **split** path: service stubs reference message types via
 /// absolute Rust paths derived from [`CodeGenConfig::extern_paths`]. Callers must
@@ -219,6 +292,30 @@ pub fn generate_services(
     let config = options.to_buffa_config();
     let resolver = TypeResolver::new(proto_file, file_to_generate, &config, true);
     let mut files = emit_service_files(proto_file, file_to_generate, &resolver)?;
+
+    if config.file_per_package {
+        // Collapse the per-proto split into one `<dotted.pkg>.rs` per
+        // package (kind `PackageMod`) with all service stubs inlined.
+        // No stitcher — module tree wiring is the consumer's job (BSR
+        // `lib.rs` synthesis, hand-written `mod.rs`, ...).
+        let mut by_package: BTreeMap<String, String> = BTreeMap::new();
+        for f in files {
+            let entry = by_package.entry(f.package).or_insert_with(|| {
+                String::from("// @generated by connectrpc-codegen. DO NOT EDIT.\n")
+            });
+            entry.push('\n');
+            entry.push_str(&f.content);
+        }
+        return Ok(by_package
+            .into_iter()
+            .map(|(package, content)| GeneratedFile {
+                name: buffa_codegen::package_to_filename(&package),
+                package,
+                kind: GeneratedFileKind::PackageMod,
+                content,
+            })
+            .collect());
+    }
 
     // Emit a per-package `<pkg>.mod.rs` stitcher for each package with at
     // least one service-declaring proto, so `protoc-gen-buffa-packaging`
@@ -266,6 +363,38 @@ pub fn generate_services(
 /// `protoc-gen-buffa-packaging` to wire both trees, as shown in this
 /// repo's `buf.gen.yaml` examples.
 ///
+/// Under `file_per_package` the per-proto split is collapsed: one
+/// `<dotted.pkg>.rs` per package with all service stubs inlined, no
+/// per-proto content files, and no stitcher. **Drop the
+/// `protoc-gen-buffa-packaging` invocations from your `buf.gen.yaml`
+/// under this layout** — there are no per-file content files or
+/// stitchers for it to wire, and leaving it in produces dead `mod.rs`
+/// output without an error. Either let your downstream build tool
+/// synthesise the module tree from `<dotted.package>.rs` filenames (BSR
+/// cargo SDKs do this automatically) or hand-write the `mod.rs`. See
+/// [`generate_services`].
+///
+/// A worked `file_per_package` `buf.gen.yaml`:
+///
+/// ```yaml
+/// version: v2
+/// plugins:
+///   - local: protoc-gen-buffa
+///     out: src/gen/buffa
+///     opt: [file_per_package]
+///   - local: protoc-gen-connect-rust
+///     out: src/gen/connect
+///     opt: [file_per_package, buffa_module=crate::gen::buffa]
+/// ```
+///
+/// You then mount each tree with a hand-written `mod.rs` (or let BSR's
+/// cargo SDK pipeline do it):
+///
+/// ```rust,ignore
+/// pub mod buffa { /* one `pub mod <pkg> { include!("<pkg>.rs"); }` per package */ }
+/// pub mod connect { /* same, pointing at src/gen/connect */ }
+/// ```
+///
 /// # Recognized options
 ///
 /// - `buffa_module=<rust_path>` — where you mounted the buffa-generated
@@ -275,6 +404,17 @@ pub fn generate_services(
 ///   to a Rust module path. Repeatable; longest-prefix-match wins.
 ///   `extern_path=.=<path>` is the catch-all (equivalent to `buffa_module`).
 ///   At least one catch-all mapping is required so every type resolves.
+/// - `file_per_package` — emit one `<dotted.pkg>.rs` per proto package
+///   instead of the per-proto split + stitcher. Set `protoc-gen-buffa`'s
+///   own `file_per_package` option to the same value — the BSR/`tonic`
+///   `lib.rs` synthesis assumes both plugins use the same filename
+///   convention; mismatched settings produce a valid but asymmetric
+///   layout you would have to wire by hand. Keep using a dedicated
+///   output directory (the documented split-path setup already does
+///   this) — the filename matches `protoc-gen-buffa`'s and would
+///   silently overwrite in a shared one. See
+///   [`CodeGenConfig::file_per_package`] for the `strategy: directory`
+///   constraint.
 /// - `strict_utf8_mapping` — see [`CodeGenConfig::strict_utf8_mapping`].
 /// - `no_json` — disable `serde` derives on generated message types.
 ///   Ignored in this plugin (no message types emitted); accepted for
@@ -323,6 +463,7 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                 options.buffa.extern_paths.push((proto, rust.to_string()));
             } else {
                 match opt {
+                    "file_per_package" => options.buffa.file_per_package = true,
                     "strict_utf8_mapping" => options.buffa.strict_utf8_mapping = true,
                     "no_json" => options.buffa.generate_json = false,
                     "no_register_fn" => options.buffa.emit_register_fn = false,
@@ -330,7 +471,8 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                         return Err(anyhow::anyhow!(
                             "unknown plugin option: {opt:?}. Supported: \
                              buffa_module=<rust_path>, extern_path=<proto>=<rust>, \
-                             strict_utf8_mapping, no_json, no_register_fn"
+                             file_per_package, strict_utf8_mapping, no_json, \
+                             no_register_fn"
                         ));
                     }
                 }
@@ -2188,6 +2330,247 @@ mod tests {
         );
     }
 
+    /// Two service-declaring protos in the same package, plus one in a
+    /// second package, with a shared dependency proto. Used by the
+    /// `file_per_package` tests to exercise cross-file inlining and
+    /// per-package grouping together.
+    fn file_per_package_fixture() -> Vec<FileDescriptorProto> {
+        let common = FileDescriptorProto {
+            name: Some("common.proto".into()),
+            package: Some("common.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Reply".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // Each service file declares its own request message — proto packages
+        // can't have duplicate FQNs, so two same-package files with the same
+        // message name would be an invalid descriptor set (and inlining both
+        // into one `<dotted.pkg>.rs` under file_per_package would E0428).
+        let svc = |proto_name: &str, pkg: &str, svc_name: &str, req: &str| FileDescriptorProto {
+            name: Some(proto_name.into()),
+            package: Some(pkg.into()),
+            message_type: vec![DescriptorProto {
+                name: Some(req.into()),
+                ..Default::default()
+            }],
+            service: vec![ServiceDescriptorProto {
+                name: Some(svc_name.into()),
+                method: vec![MethodDescriptorProto {
+                    name: Some("Call".into()),
+                    input_type: Some(format!(".{pkg}.{req}")),
+                    output_type: Some(".common.v1.Reply".into()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        vec![
+            common,
+            svc("a/x.proto", "a.v1", "XService", "XReq"),
+            svc("a/y.proto", "a.v1", "YService", "YReq"),
+            svc("b/z.proto", "b.v1", "ZService", "ZReq"),
+        ]
+    }
+
+    #[test]
+    fn generate_files_file_per_package_inlines_companions() {
+        let files = file_per_package_fixture();
+        let mut options = Options::default();
+        options.buffa.file_per_package = true;
+
+        let generated = generate_files(
+            &files,
+            &["a/x.proto".into(), "a/y.proto".into(), "b/z.proto".into()],
+            &options,
+        )
+        .unwrap();
+
+        // No Companion files survive — service stubs are inlined.
+        assert!(
+            !generated
+                .iter()
+                .any(|f| f.kind == GeneratedFileKind::Companion),
+            "file_per_package must not emit sibling Companion files"
+        );
+        assert!(
+            !generated.iter().any(|f| f.name.ends_with(".__connect.rs")),
+            "file_per_package must not emit `<stem>.__connect.rs` files"
+        );
+
+        // Each service-declaring package's PackageMod inlines its services.
+        let a = generated
+            .iter()
+            .find(|f| f.kind == GeneratedFileKind::PackageMod && f.package == "a.v1")
+            .expect("a.v1 PackageMod must exist");
+        assert!(
+            a.content.contains("pub trait XService"),
+            "a.v1 missing XService"
+        );
+        assert!(
+            a.content.contains("pub trait YService"),
+            "a.v1 missing YService"
+        );
+        assert!(
+            !a.content.contains("pub trait ZService"),
+            "a.v1 must not inline ZService"
+        );
+        assert!(
+            !a.content.contains("__connect.rs"),
+            "a.v1 PackageMod must not include! a connect file: {}",
+            a.content
+        );
+
+        let b = generated
+            .iter()
+            .find(|f| f.kind == GeneratedFileKind::PackageMod && f.package == "b.v1")
+            .expect("b.v1 PackageMod must exist");
+        assert!(
+            b.content.contains("pub trait ZService"),
+            "b.v1 missing ZService"
+        );
+        assert!(
+            !b.content.contains("pub trait XService"),
+            "b.v1 must not inline XService"
+        );
+
+        // No PackageMod is emitted for the dependency-only package
+        // `common.v1` — it is not in `file_to_generate`.
+        let pkg_mods = generated
+            .iter()
+            .filter(|f| f.kind == GeneratedFileKind::PackageMod)
+            .count();
+        assert_eq!(
+            pkg_mods, 2,
+            "expected exactly two PackageMods: {generated:#?}"
+        );
+
+        // The cross-file Encodable<Reply> dedup must hold under
+        // file_per_package exactly as it does under the per-proto split:
+        // one impl pair across the whole batch (else E0119 at consumer
+        // compile time). All three services return `.common.v1.Reply`.
+        let combined: String = generated.iter().map(|f| f.content.as_str()).collect();
+        assert_eq!(
+            combined
+                .matches("impl ::connectrpc::Encodable<super::super::common::v1::Reply>")
+                .count(),
+            2,
+            "Encodable<Reply> impls must be deduplicated across packages \
+             (1 for ReplyView, 1 for OwnedView<ReplyView>): {combined}"
+        );
+    }
+
+    #[test]
+    fn generate_services_file_per_package_emits_one_file_per_package() {
+        let files = file_per_package_fixture();
+        let mut options = Options::default();
+        options.buffa.file_per_package = true;
+        options
+            .buffa
+            .extern_paths
+            .push((".".into(), "crate::proto".into()));
+
+        let generated = generate_services(
+            &files,
+            &["a/x.proto".into(), "a/y.proto".into(), "b/z.proto".into()],
+            &options,
+        )
+        .unwrap();
+
+        // Output is exactly one PackageMod per service-declaring package
+        // with all stubs inlined; no companions, no `<pkg>.mod.rs` stitchers.
+        assert_eq!(
+            generated.len(),
+            2,
+            "expected exactly two output files: {generated:#?}"
+        );
+        assert!(
+            generated
+                .iter()
+                .all(|f| f.kind == GeneratedFileKind::PackageMod),
+            "all output files must be PackageMod"
+        );
+        assert!(
+            !generated.iter().any(|f| f.name.ends_with(".mod.rs")),
+            "file_per_package must not emit a separate stitcher"
+        );
+        assert!(
+            !generated.iter().any(|f| f.content.contains("include!")),
+            "file_per_package output must not include! sibling files"
+        );
+
+        let mut names: Vec<&str> = generated.iter().map(|f| f.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            ["a.v1.rs", "b.v1.rs"],
+            "filenames must be `<dotted.pkg>.rs` to match buffa's file_per_package convention"
+        );
+
+        let a = generated.iter().find(|f| f.package == "a.v1").unwrap();
+        assert!(a.content.contains("pub trait XService"));
+        assert!(a.content.contains("pub trait YService"));
+        let b = generated.iter().find(|f| f.package == "b.v1").unwrap();
+        assert!(b.content.contains("pub trait ZService"));
+        assert!(!b.content.contains("pub trait XService"));
+    }
+
+    #[test]
+    fn generate_services_file_per_package_default_layout_unchanged() {
+        // Sanity: when the option is off, the existing per-proto + stitcher
+        // layout is preserved (regression guard for the new branch).
+        let files = file_per_package_fixture();
+        let mut options = Options::default();
+        options
+            .buffa
+            .extern_paths
+            .push((".".into(), "crate::proto".into()));
+
+        let generated = generate_services(
+            &files,
+            &["a/x.proto".into(), "a/y.proto".into(), "b/z.proto".into()],
+            &options,
+        )
+        .unwrap();
+
+        let mut companions: Vec<&str> = generated
+            .iter()
+            .filter(|f| f.kind == GeneratedFileKind::Companion)
+            .map(|f| f.name.as_str())
+            .collect();
+        companions.sort_unstable();
+        assert_eq!(
+            companions,
+            ["a.x.__connect.rs", "a.y.__connect.rs", "b.z.__connect.rs"],
+            "default layout emits one companion per proto"
+        );
+        let mut stitchers: Vec<&str> = generated
+            .iter()
+            .filter(|f| f.kind == GeneratedFileKind::PackageMod)
+            .map(|f| f.name.as_str())
+            .collect();
+        stitchers.sort_unstable();
+        assert_eq!(
+            stitchers,
+            ["a.v1.mod.rs", "b.v1.mod.rs"],
+            "default layout emits one stitcher per package"
+        );
+        // Each stitcher include!s its package's companions.
+        let a_stitcher = generated.iter().find(|f| f.name == "a.v1.mod.rs").unwrap();
+        assert!(
+            a_stitcher
+                .content
+                .contains(r#"include!("a.x.__connect.rs");"#)
+        );
+        assert!(
+            a_stitcher
+                .content
+                .contains(r#"include!("a.y.__connect.rs");"#)
+        );
+    }
+
     #[test]
     fn service_name_with_package() {
         let file = minimal_file(
@@ -2608,6 +2991,37 @@ mod tests {
         // Plugin path emits services only, so we can't observe the buffa
         // config directly — just make sure the option parses without error.
         generate(&request).expect("no_register_fn should be a recognized plugin option");
+    }
+
+    #[test]
+    fn plugin_file_per_package_collapses_output() {
+        // End-to-end through the protoc entry point: one `<dotted.pkg>.rs`
+        // per package, no `<stem>.__connect.rs`, no `<pkg>.mod.rs`.
+        let request = CodeGeneratorRequest {
+            parameter: Some("buffa_module=crate::proto,file_per_package".into()),
+            file_to_generate: vec!["a/x.proto".into(), "a/y.proto".into(), "b/z.proto".into()],
+            proto_file: file_per_package_fixture(),
+            ..Default::default()
+        };
+        let response = generate(&request).expect("file_per_package should parse and generate");
+        let mut names: Vec<&str> = response
+            .file
+            .iter()
+            .filter_map(|f| f.name.as_deref())
+            .collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            ["a.v1.rs", "b.v1.rs"],
+            "expected one file per package: {names:?}"
+        );
+        for f in &response.file {
+            let content = f.content.as_deref().unwrap_or_default();
+            assert!(
+                !content.contains("include!"),
+                "file_per_package output must be self-contained: {content}"
+            );
+        }
     }
 
     #[test]
