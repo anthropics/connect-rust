@@ -10,31 +10,6 @@ increment the patch version.
 
 ## [Unreleased]
 
-### Added
-
-- **`file_per_package` output layout** for `protoc-gen-connect-rust` and
-  `connectrpc-build`. When enabled (`opt: file_per_package` in
-  `buf.gen.yaml`, `--connect-rust_opt=file_per_package` with `protoc`, or
-  `Config::file_per_package(true)` from `build.rs`), the per-proto split
-  is collapsed to one `<dotted.pkg>.rs` per proto package with all
-  service stubs inlined and no `<pkg>.mod.rs` stitcher — matching the
-  `<dotted.package>.rs` filename convention `protoc-gen-buffa` produces
-  under its own `file_per_package` option ([buffa#73]) and that BSR cargo
-  SDK generation and `tonic`-style build integrations expect (module tree
-  synthesised from filenames). The two plugins generate disjoint content
-  (buffa: message types, connect-rust: service stubs); set
-  `file_per_package` on both. In the `connectrpc-build` path service
-  stubs are inlined into buffa's per-package `PackageMod` rather than
-  written as `<stem>.__connect.rs` siblings; the include file picks up
-  the new filename automatically and consumer code is unaffected. When
-  using the protoc plugin from `buf generate`, **drop the
-  `protoc-gen-buffa-packaging` invocations** under this layout — there
-  are no per-file content files or stitchers for it to wire — and keep
-  routing `file_per_package` output to its own directory: the filename
-  matches `protoc-gen-buffa`'s and would silently overwrite in a shared
-  one. See [`CodeGenConfig::file_per_package`] for the
-  `strategy: directory` constraint.
-
 ## [0.4.0] - 2026-05-06
 
 This release tracks buffa 0.5.0. **Consumers with checked-in
@@ -180,6 +155,28 @@ rebuilds `OUT_DIR` automatically.
 
 ### Added
 
+- **`file_per_package` output layout** for `protoc-gen-connect-rust` and
+  `connectrpc-build`. When enabled (`opt: file_per_package` in
+  `buf.gen.yaml`, `--connect-rust_opt=file_per_package` with `protoc`, or
+  `Config::file_per_package(true)` from `build.rs`), the per-proto split
+  is collapsed to one `<dotted.pkg>.rs` per proto package with all
+  service stubs inlined and no `<pkg>.mod.rs` stitcher — matching the
+  `<dotted.package>.rs` filename convention `protoc-gen-buffa` produces
+  under its own `file_per_package` option ([buffa#73]) and that BSR cargo
+  SDK generation and `tonic`-style build integrations expect (module tree
+  synthesised from filenames). The two plugins generate disjoint content
+  (buffa: message types, connect-rust: service stubs); set
+  `file_per_package` on both. In the `connectrpc-build` path service
+  stubs are inlined into buffa's per-package `PackageMod` rather than
+  written as `<stem>.__connect.rs` siblings; the include file picks up
+  the new filename automatically and consumer code is unaffected. When
+  using the protoc plugin from `buf generate`, **drop the
+  `protoc-gen-buffa-packaging` invocations** under this layout — there
+  are no per-file content files or stitchers for it to wire — and keep
+  routing `file_per_package` output to its own directory: the filename
+  matches `protoc-gen-buffa`'s and would silently overwrite in a shared
+  one. See [`CodeGenConfig::file_per_package`] for the
+  `strategy: directory` constraint.
 - **`connectrpc::include_generated!()`**: shorthand macro for
   `include!(concat!(env!("OUT_DIR"), "/_connectrpc.rs"))`. An optional
   filename argument (note: a filename including `.rs`, **not** a proto
