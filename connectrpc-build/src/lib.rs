@@ -147,6 +147,32 @@ impl Config {
         self
     }
 
+    /// Emit one `<dotted.pkg>.rs` per proto package instead of the
+    /// per-proto split + per-package stitcher (default: `false`).
+    ///
+    /// Under this layout the connect service stubs are inlined directly
+    /// into buffa's single `<dotted.pkg>.rs` `PackageMod` per package — no
+    /// `<stem>.__connect.rs` companion files, no per-proto buffa content
+    /// files, and no `<pkg>.mod.rs` stitchers are written. Combine with
+    /// [`Config::include_file`] as usual: the include file wires
+    /// `PackageMod` entries by `file.name`, so the new filename
+    /// (`<dotted.pkg>.rs` instead of `<pkg>.mod.rs`) is picked up
+    /// transparently — your `lib.rs` still reads
+    /// `connectrpc::include_generated!()` with no change. If you instead
+    /// `include!` or `#[path = ...]`-mount per-proto files directly,
+    /// migrate to the include file or to the per-package filenames first;
+    /// the per-proto files no longer exist under this layout.
+    ///
+    /// Match this to the `file_per_package` buf plugin option when
+    /// generating Buf Schema Registry cargo SDKs or any consumer that
+    /// synthesises a module tree from `<dotted.package>.rs` filenames
+    /// (`tonic`'s convention). See [`CodeGenConfig::file_per_package`].
+    #[must_use]
+    pub fn file_per_package(mut self, enabled: bool) -> Self {
+        self.options.buffa.file_per_package = enabled;
+        self
+    }
+
     /// Replace the underlying buffa [`CodeGenConfig`] wholesale.
     ///
     /// Any buffa knob not surfaced as a builder method here can be set this
@@ -681,6 +707,72 @@ mod tests {
             "stitcher should include the connect companion file (requires apply_companions, buffa >= 0.5)"
         );
         assert!(stitcher.contains("pub mod __buffa"));
+    }
+
+    #[test]
+    fn compile_file_per_package_collapses_to_single_file() {
+        let fixture = format!("{}/tests/fixtures/echo.fds.bin", env!("CARGO_MANIFEST_DIR"));
+        let out = tempfile::tempdir().unwrap();
+
+        Config::new()
+            .descriptor_set(&fixture)
+            .files(&["echo.proto"])
+            .out_dir(out.path())
+            .include_file("_inc.rs")
+            .file_per_package(true)
+            .compile()
+            .unwrap();
+
+        // No per-proto split, no companion siblings — everything lands in
+        // the single per-package `<dotted.pkg>.rs` PackageMod.
+        for stale in [
+            "echo.rs",
+            "echo.__connect.rs",
+            "echo.__view.rs",
+            "test.echo.v1.mod.rs",
+        ] {
+            assert!(
+                !out.path().join(stale).exists(),
+                "file_per_package must not emit {stale}"
+            );
+        }
+        let pkg_rs = out.path().join("test.echo.v1.rs");
+        assert!(pkg_rs.exists(), "expected {pkg_rs:?}");
+        let content = std::fs::read_to_string(&pkg_rs).unwrap();
+        assert!(
+            content.contains("pub struct EchoRequest"),
+            "missing message types"
+        );
+        assert!(
+            content.contains("pub trait EchoService"),
+            "missing service trait"
+        );
+        assert!(
+            content.contains("pub struct EchoServiceClient"),
+            "missing service client"
+        );
+        assert!(
+            !content.contains("__connect.rs"),
+            "single-file output must not include! a sibling: {content}"
+        );
+
+        // Include file wires the per-package PackageMod as before — the
+        // `<dotted.pkg>.rs` filename replaces `<pkg>.mod.rs` and the
+        // nested-mod wrapping (which `<dotted.pkg>.rs` doesn't carry
+        // itself) is still synthesised here.
+        let inc = std::fs::read_to_string(out.path().join("_inc.rs")).unwrap();
+        assert!(inc.contains(r#"include!("test.echo.v1.rs");"#));
+        assert_eq!(
+            inc.matches("include!").count(),
+            1,
+            "include file must wire exactly one PackageMod: {inc}"
+        );
+        for m in ["pub mod test {", "pub mod echo {", "pub mod v1 {"] {
+            assert!(
+                inc.contains(m),
+                "include file missing nested mod {m:?}: {inc}"
+            );
+        }
     }
 
     #[test]
