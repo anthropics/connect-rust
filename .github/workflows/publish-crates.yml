@@ -8,10 +8,22 @@ name: Publish to crates.io
 # token. Once Trusted Publishing is configured per crate and the secret is
 # removed, publishes run entirely over OIDC with no stored credentials.
 
-# No `push: tags` trigger — crates.io publish is manual-only. The release
-# workflow (binaries + GitHub release) is tag-triggered; this one is not, so
-# a patch tag can't accidentally publish before you've dry-run-verified.
+# Tag-triggered (`v*`) for releases, mirroring buffa's publish-crates
+# workflow. The `workflow_dispatch` path remains for re-runs and dry-run
+# verification. On a tag push `inputs.dry_run` is undefined → falsy → no
+# `--dry-run` flag, so a tag push is always a real publish.
+#
+# Supply-chain guards: the "release tags" repository ruleset restricts
+# `refs/tags/v*` creation/update/deletion to repository admins and
+# requires signed tags, so a non-admin cannot push a tag that triggers
+# this. The `crates-io` GitHub Environment additionally restricts which
+# refs may run inside it (`v*` tags and `main`), so a feature branch
+# cannot dispatch a publish either. There is no human-approval gate on
+# the publish step itself once a release tag exists; if that is wanted,
+# add a required-reviewer to the `crates-io` environment.
 on:
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       dry_run:
