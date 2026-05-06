@@ -3,8 +3,7 @@
 use std::collections::HashMap;
 
 pub use crate::connect::anthropic::connectrpc::filter::v1::*;
-pub use crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView;
-pub use crate::proto::anthropic::connectrpc::filter::v1::Record;
+pub use crate::proto::anthropic::connectrpc::filter::v1::{Record, RecordView};
 
 /// True if any sensitive field is non-empty.
 pub fn has_sensitive(r: &RecordView<'_>) -> bool {

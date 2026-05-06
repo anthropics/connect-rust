@@ -12,7 +12,6 @@ pub mod proto {
     connectrpc::include_generated!();
 }
 
-use proto::anthropic::connectrpc::tour::v1::__buffa::view::*;
 use proto::anthropic::connectrpc::tour::v1::*;
 
 // Local alias that flattens client/bidi-stream request parameters.

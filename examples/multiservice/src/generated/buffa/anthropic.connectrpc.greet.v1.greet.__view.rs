@@ -79,12 +79,17 @@ impl<'a> ::buffa::MessageView<'a> for GreetRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::GreetRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::GreetRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::GreetRequest {
             name: self.name.to_string(),
             __buffa_unknown_fields: self
@@ -137,6 +142,12 @@ impl<'v> ::buffa::DefaultViewInstance for GreetRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <GreetRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for GreetRequestView<'static> {
+    type Reborrowed<'b> = GreetRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// GreetResponse is the response message for the Greet RPC.
@@ -217,12 +228,17 @@ impl<'a> ::buffa::MessageView<'a> for GreetResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::GreetResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::GreetResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::GreetResponse {
             message: self.message.to_string(),
             __buffa_unknown_fields: self
@@ -275,5 +291,11 @@ impl<'v> ::buffa::DefaultViewInstance for GreetResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <GreetResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for GreetResponseView<'static> {
+    type Reborrowed<'b> = GreetResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }

@@ -96,7 +96,11 @@ pub const ELIZA_SERVICE_SERVICE_NAME: &str = "connectrpc.eliza.v1.ElizaService";
 /// Handlers receive requests as `OwnedFooView` (an alias for
 /// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
 /// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
-/// The view can be held across `.await` points.
+/// The view can be held across `.await` points. When two RPC types in
+/// the same package would alias to the same `Owned<…>View` name (e.g.
+/// a local message plus an imported one with the same short name), the
+/// alias is suppressed for both and the request type is spelled as
+/// `OwnedView<…View<'static>>` directly in the trait signature.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the

@@ -77,12 +77,17 @@ impl<'a> ::buffa::MessageView<'a> for SayRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::SayRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::SayRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::SayRequest {
             sentence: self.sentence.to_string(),
             __buffa_unknown_fields: self
@@ -135,6 +140,12 @@ impl<'v> ::buffa::DefaultViewInstance for SayRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <SayRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for SayRequestView<'static> {
+    type Reborrowed<'b> = SayRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// SayResponse is a single-sentence response.
@@ -213,12 +224,17 @@ impl<'a> ::buffa::MessageView<'a> for SayResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::SayResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::SayResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::SayResponse {
             sentence: self.sentence.to_string(),
             __buffa_unknown_fields: self
@@ -271,6 +287,12 @@ impl<'v> ::buffa::DefaultViewInstance for SayResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <SayResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for SayResponseView<'static> {
+    type Reborrowed<'b> = SayResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// ConverseRequest is a single sentence request sent as part of a
@@ -350,12 +372,17 @@ impl<'a> ::buffa::MessageView<'a> for ConverseRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ConverseRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ConverseRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ConverseRequest {
             sentence: self.sentence.to_string(),
             __buffa_unknown_fields: self
@@ -408,6 +435,12 @@ impl<'v> ::buffa::DefaultViewInstance for ConverseRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <ConverseRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for ConverseRequestView<'static> {
+    type Reborrowed<'b> = ConverseRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// ConverseResponse is a single sentence response sent in answer to a
@@ -487,12 +520,17 @@ impl<'a> ::buffa::MessageView<'a> for ConverseResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ConverseResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ConverseResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ConverseResponse {
             sentence: self.sentence.to_string(),
             __buffa_unknown_fields: self
@@ -545,6 +583,12 @@ impl<'v> ::buffa::DefaultViewInstance for ConverseResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <ConverseResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for ConverseResponseView<'static> {
+    type Reborrowed<'b> = ConverseResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// IntroduceRequest asks Eliza to introduce itself to the named user.
@@ -623,12 +667,17 @@ impl<'a> ::buffa::MessageView<'a> for IntroduceRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::IntroduceRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::IntroduceRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::IntroduceRequest {
             name: self.name.to_string(),
             __buffa_unknown_fields: self
@@ -681,6 +730,12 @@ impl<'v> ::buffa::DefaultViewInstance for IntroduceRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <IntroduceRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for IntroduceRequestView<'static> {
+    type Reborrowed<'b> = IntroduceRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// IntroduceResponse is one sentence of Eliza's introductory monologue.
@@ -759,12 +814,17 @@ impl<'a> ::buffa::MessageView<'a> for IntroduceResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::IntroduceResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::IntroduceResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::IntroduceResponse {
             sentence: self.sentence.to_string(),
             __buffa_unknown_fields: self
@@ -817,5 +877,11 @@ impl<'v> ::buffa::DefaultViewInstance for IntroduceResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <IntroduceResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for IntroduceResponseView<'static> {
+    type Reborrowed<'b> = IntroduceResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }

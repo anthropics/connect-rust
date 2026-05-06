@@ -1,21 +1,15 @@
-///Shorthand for `OwnedView<GreetRequestView<'static>>`.
-pub type OwnedGreetRequestView = ::buffa::view::OwnedView<
-    crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView<
+///Shorthand for `OwnedView<AddRequestView<'static>>`.
+pub type OwnedAddRequestView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView<'static>,
+>;
+///Shorthand for `OwnedView<AddResponseView<'static>>`.
+pub type OwnedAddResponseView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<
         'static,
     >,
 >;
-///Shorthand for `OwnedView<GreetResponseView<'static>>`.
-pub type OwnedGreetResponseView = ::buffa::view::OwnedView<
-    crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
-        'static,
-    >,
->;
-impl ::connectrpc::Encodable<
-    crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
->
-for crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
-    '_,
-> {
+impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::math::v1::AddResponse>
+for crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<'_> {
     fn encode(
         &self,
         codec: ::connectrpc::CodecFormat,
@@ -23,11 +17,9 @@ for crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponse
         ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
-impl ::connectrpc::Encodable<
-    crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
->
+impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::math::v1::AddResponse>
 for ::buffa::view::OwnedView<
-    crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
+    crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<
         'static,
     >,
 > {
@@ -39,15 +31,19 @@ for ::buffa::view::OwnedView<
     }
 }
 /// Full service name for this service.
-pub const GREET_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.greet.v1.GreetService";
-/// GreetService provides greeting functionality.
+pub const MATH_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.math.v1.MathService";
+/// MathService provides basic math operations.
 ///
 /// # Implementing handlers
 ///
 /// Handlers receive requests as `OwnedFooView` (an alias for
 /// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
 /// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
-/// The view can be held across `.await` points.
+/// The view can be held across `.await` points. When two RPC types in
+/// the same package would alias to the same `Owned<…>View` name (e.g.
+/// a local message plus an imported one with the same short name), the
+/// alias is suppressed for both and the request type is spelled as
+/// `OwnedView<…View<'static>>` directly in the trait signature.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
@@ -60,19 +56,18 @@ pub const GREET_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.greet.v1.Gree
 /// emitted for output types mapped via `extern_path` (the impl would be
 /// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
-pub trait GreetService: Send + Sync + 'static {
-    /// Greet returns a greeting message for the given name.
-    /// This method has no side effects and supports GET requests.
+pub trait MathService: Send + Sync + 'static {
+    /// Add returns the sum of two numbers.
     ///
     /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
-    fn greet<'a>(
+    fn add<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: OwnedGreetRequestView,
+        request: OwnedAddRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
-                crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
+                crate::proto::anthropic::connectrpc::math::v1::AddResponse,
             > + Send + use<'a, Self>,
         >,
     > + Send;
@@ -89,7 +84,7 @@ pub trait GreetService: Send + Sync + 'static {
 /// let service = Arc::new(MyServiceImpl);
 /// let router = service.register(Router::new());
 /// ```
-pub trait GreetServiceExt: GreetService {
+pub trait MathServiceExt: MathService {
     /// Register this service implementation with a Router.
     ///
     /// Takes ownership of the `Arc<Self>` and returns a new Router with
@@ -99,24 +94,24 @@ pub trait GreetServiceExt: GreetService {
         router: ::connectrpc::Router,
     ) -> ::connectrpc::Router;
 }
-impl<S: GreetService> GreetServiceExt for S {
+impl<S: MathService> MathServiceExt for S {
     fn register(
         self: ::std::sync::Arc<Self>,
         router: ::connectrpc::Router,
     ) -> ::connectrpc::Router {
         router
-            .route_view_idempotent(
-                GREET_SERVICE_SERVICE_NAME,
-                "Greet",
+            .route_view(
+                MATH_SERVICE_SERVICE_NAME,
+                "Add",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
                     ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
                         async move {
-                            svc.greet(ctx, req)
+                            svc.add(ctx, req)
                                 .await?
                                 .encode::<
-                                    crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
+                                    crate::proto::anthropic::connectrpc::math::v1::AddResponse,
                                 >(format)
                         }
                     })
@@ -124,7 +119,7 @@ impl<S: GreetService> GreetServiceExt for S {
             )
     }
 }
-/// Monomorphic dispatcher for `GreetService`.
+/// Monomorphic dispatcher for `MathService`.
 ///
 /// Unlike `.register(Router)` which type-erases each method into an `Arc<dyn ErasedHandler>` stored in a `HashMap`, this struct dispatches via a compile-time `match` on method name: no vtable, no hash lookup.
 ///
@@ -133,14 +128,14 @@ impl<S: GreetService> GreetServiceExt for S {
 /// ```rust,ignore
 /// use connectrpc::ConnectRpcService;
 ///
-/// let server = GreetServiceServer::new(MyImpl);
+/// let server = MathServiceServer::new(MyImpl);
 /// let service = ConnectRpcService::new(server);
 /// // hand `service` to axum/hyper as a fallback_service
 /// ```
-pub struct GreetServiceServer<T> {
+pub struct MathServiceServer<T> {
     inner: ::std::sync::Arc<T>,
 }
-impl<T: GreetService> GreetServiceServer<T> {
+impl<T: MathService> MathServiceServer<T> {
     /// Wrap a service implementation in a monomorphic dispatcher.
     pub fn new(service: T) -> Self {
         Self {
@@ -152,23 +147,23 @@ impl<T: GreetService> GreetServiceServer<T> {
         Self { inner }
     }
 }
-impl<T> Clone for GreetServiceServer<T> {
+impl<T> Clone for MathServiceServer<T> {
     fn clone(&self) -> Self {
         Self {
             inner: ::std::sync::Arc::clone(&self.inner),
         }
     }
 }
-impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
+impl<T: MathService> ::connectrpc::Dispatcher for MathServiceServer<T> {
     #[inline]
     fn lookup(
         &self,
         path: &str,
     ) -> Option<::connectrpc::dispatcher::codegen::MethodDescriptor> {
-        let method = path.strip_prefix("anthropic.connectrpc.greet.v1.GreetService/")?;
+        let method = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")?;
         match method {
-            "Greet" => {
-                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(true))
+            "Add" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
             }
             _ => None,
         }
@@ -180,22 +175,22 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
-        let Some(method) = path
-            .strip_prefix("anthropic.connectrpc.greet.v1.GreetService/") else {
+        let Some(method) = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")
+        else {
             return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
-            "Greet" => {
+            "Add" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
-                        crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView,
+                        crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView,
                     >(request, format)?;
-                    svc.greet(ctx, req)
+                    svc.add(ctx, req)
                         .await?
                         .encode::<
-                            crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
+                            crate::proto::anthropic::connectrpc::math::v1::AddResponse,
                         >(format)
                 })
             }
@@ -209,8 +204,8 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
-        let Some(method) = path
-            .strip_prefix("anthropic.connectrpc.greet.v1.GreetService/") else {
+        let Some(method) = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")
+        else {
             return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &request, &format);
@@ -225,8 +220,8 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
-        let Some(method) = path
-            .strip_prefix("anthropic.connectrpc.greet.v1.GreetService/") else {
+        let Some(method) = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")
+        else {
             return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &requests, &format);
@@ -241,8 +236,8 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
-        let Some(method) = path
-            .strip_prefix("anthropic.connectrpc.greet.v1.GreetService/") else {
+        let Some(method) = path.strip_prefix("anthropic.connectrpc.math.v1.MathService/")
+        else {
             return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &requests, &format);
@@ -268,8 +263,8 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
 /// let conn = Http2Connection::connect_plaintext(uri.clone()).await?.shared(1024);
 /// let config = ClientConfig::new(uri).protocol(Protocol::Grpc);
 ///
-/// let client = GreetServiceClient::new(conn, config);
-/// let response = client.greet(request).await?;
+/// let client = MathServiceClient::new(conn, config);
+/// let response = client.add(request).await?;
 /// ```
 ///
 /// # Example (Connect / HTTP/1.1 or ALPN)
@@ -280,8 +275,8 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
 /// let http = HttpClient::plaintext();  // cleartext http:// only
 /// let config = ClientConfig::new("http://localhost:8080".parse()?);
 ///
-/// let client = GreetServiceClient::new(http, config);
-/// let response = client.greet(request).await?;
+/// let client = MathServiceClient::new(http, config);
+/// let response = client.add(request).await?;
 /// ```
 ///
 /// # Working with the response
@@ -290,7 +285,7 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
 /// The `OwnedView` derefs to the view, so field access is zero-copy:
 ///
 /// ```rust,ignore
-/// let resp = client.greet(request).await?.into_view();
+/// let resp = client.add(request).await?.into_view();
 /// let name: &str = resp.name;  // borrow into the response buffer
 /// ```
 ///
@@ -298,14 +293,14 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
 /// [`into_owned()`](::connectrpc::client::UnaryResponse::into_owned):
 ///
 /// ```rust,ignore
-/// let owned = client.greet(request).await?.into_owned();
+/// let owned = client.add(request).await?.into_owned();
 /// ```
 #[derive(Clone)]
-pub struct GreetServiceClient<T> {
+pub struct MathServiceClient<T> {
     transport: T,
     config: ::connectrpc::client::ClientConfig,
 }
-impl<T> GreetServiceClient<T>
+impl<T> MathServiceClient<T>
 where
     T: ::connectrpc::client::ClientTransport,
     <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
@@ -322,32 +317,32 @@ where
     pub fn config_mut(&mut self) -> &mut ::connectrpc::client::ClientConfig {
         &mut self.config
     }
-    /// Call the Greet RPC. Sends a request to /anthropic.connectrpc.greet.v1.GreetService/Greet.
-    pub async fn greet(
+    /// Call the Add RPC. Sends a request to /anthropic.connectrpc.math.v1.MathService/Add.
+    pub async fn add(
         &self,
-        request: crate::proto::anthropic::connectrpc::greet::v1::GreetRequest,
+        request: crate::proto::anthropic::connectrpc::math::v1::AddRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
             ::buffa::view::OwnedView<
-                crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
+                crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<
                     'static,
                 >,
             >,
         >,
         ::connectrpc::ConnectError,
     > {
-        self.greet_with_options(request, ::connectrpc::client::CallOptions::default())
+        self.add_with_options(request, ::connectrpc::client::CallOptions::default())
             .await
     }
-    /// Call the Greet RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
-    pub async fn greet_with_options(
+    /// Call the Add RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
+    pub async fn add_with_options(
         &self,
-        request: crate::proto::anthropic::connectrpc::greet::v1::GreetRequest,
+        request: crate::proto::anthropic::connectrpc::math::v1::AddRequest,
         options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
             ::buffa::view::OwnedView<
-                crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
+                crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddResponseView<
                     'static,
                 >,
             >,
@@ -357,8 +352,8 @@ where
         ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                GREET_SERVICE_SERVICE_NAME,
-                "Greet",
+                MATH_SERVICE_SERVICE_NAME,
+                "Add",
                 request,
                 options,
             )

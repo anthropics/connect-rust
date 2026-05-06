@@ -1,9 +1,21 @@
-///Shorthand for `OwnedView<RecordView<'static>>`.
-pub type OwnedRecordView = ::buffa::view::OwnedView<
-    crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<'static>,
+///Shorthand for `OwnedView<GreetRequestView<'static>>`.
+pub type OwnedGreetRequestView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView<
+        'static,
+    >,
 >;
-impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::filter::v1::Record>
-for crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<'_> {
+///Shorthand for `OwnedView<GreetResponseView<'static>>`.
+pub type OwnedGreetResponseView = ::buffa::view::OwnedView<
+    crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
+        'static,
+    >,
+>;
+impl ::connectrpc::Encodable<
+    crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
+>
+for crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
+    '_,
+> {
     fn encode(
         &self,
         codec: ::connectrpc::CodecFormat,
@@ -11,9 +23,13 @@ for crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<'
         ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
-impl ::connectrpc::Encodable<crate::proto::anthropic::connectrpc::filter::v1::Record>
+impl ::connectrpc::Encodable<
+    crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
+>
 for ::buffa::view::OwnedView<
-    crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<'static>,
+    crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
+        'static,
+    >,
 > {
     fn encode(
         &self,
@@ -23,17 +39,19 @@ for ::buffa::view::OwnedView<
     }
 }
 /// Full service name for this service.
-pub const FILTER_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.filter.v1.FilterService";
-/// A redaction proxy: returns the input record with sensitive fields
-/// scrubbed. Models a filtering/mutating handler where the common case
-/// (no sensitive data present) can return the request view unchanged.
+pub const GREET_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.greet.v1.GreetService";
+/// GreetService provides greeting functionality.
 ///
 /// # Implementing handlers
 ///
 /// Handlers receive requests as `OwnedFooView` (an alias for
 /// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
 /// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
-/// The view can be held across `.await` points.
+/// The view can be held across `.await` points. When two RPC types in
+/// the same package would alias to the same `Owned<…>View` name (e.g.
+/// a local message plus an imported one with the same short name), the
+/// alias is suppressed for both and the request type is spelled as
+/// `OwnedView<…View<'static>>` directly in the trait signature.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
@@ -46,18 +64,19 @@ pub const FILTER_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.filter.v1.Fi
 /// emitted for output types mapped via `extern_path` (the impl would be
 /// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
-pub trait FilterService: Send + Sync + 'static {
-    /// Handle the Redact RPC.
+pub trait GreetService: Send + Sync + 'static {
+    /// Greet returns a greeting message for the given name.
+    /// This method has no side effects and supports GET requests.
     ///
     /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
-    fn redact<'a>(
+    fn greet<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: OwnedRecordView,
+        request: OwnedGreetRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
-                crate::proto::anthropic::connectrpc::filter::v1::Record,
+                crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
             > + Send + use<'a, Self>,
         >,
     > + Send;
@@ -74,7 +93,7 @@ pub trait FilterService: Send + Sync + 'static {
 /// let service = Arc::new(MyServiceImpl);
 /// let router = service.register(Router::new());
 /// ```
-pub trait FilterServiceExt: FilterService {
+pub trait GreetServiceExt: GreetService {
     /// Register this service implementation with a Router.
     ///
     /// Takes ownership of the `Arc<Self>` and returns a new Router with
@@ -84,24 +103,24 @@ pub trait FilterServiceExt: FilterService {
         router: ::connectrpc::Router,
     ) -> ::connectrpc::Router;
 }
-impl<S: FilterService> FilterServiceExt for S {
+impl<S: GreetService> GreetServiceExt for S {
     fn register(
         self: ::std::sync::Arc<Self>,
         router: ::connectrpc::Router,
     ) -> ::connectrpc::Router {
         router
-            .route_view(
-                FILTER_SERVICE_SERVICE_NAME,
-                "Redact",
+            .route_view_idempotent(
+                GREET_SERVICE_SERVICE_NAME,
+                "Greet",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
                     ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
                         async move {
-                            svc.redact(ctx, req)
+                            svc.greet(ctx, req)
                                 .await?
                                 .encode::<
-                                    crate::proto::anthropic::connectrpc::filter::v1::Record,
+                                    crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
                                 >(format)
                         }
                     })
@@ -109,7 +128,7 @@ impl<S: FilterService> FilterServiceExt for S {
             )
     }
 }
-/// Monomorphic dispatcher for `FilterService`.
+/// Monomorphic dispatcher for `GreetService`.
 ///
 /// Unlike `.register(Router)` which type-erases each method into an `Arc<dyn ErasedHandler>` stored in a `HashMap`, this struct dispatches via a compile-time `match` on method name: no vtable, no hash lookup.
 ///
@@ -118,14 +137,14 @@ impl<S: FilterService> FilterServiceExt for S {
 /// ```rust,ignore
 /// use connectrpc::ConnectRpcService;
 ///
-/// let server = FilterServiceServer::new(MyImpl);
+/// let server = GreetServiceServer::new(MyImpl);
 /// let service = ConnectRpcService::new(server);
 /// // hand `service` to axum/hyper as a fallback_service
 /// ```
-pub struct FilterServiceServer<T> {
+pub struct GreetServiceServer<T> {
     inner: ::std::sync::Arc<T>,
 }
-impl<T: FilterService> FilterServiceServer<T> {
+impl<T: GreetService> GreetServiceServer<T> {
     /// Wrap a service implementation in a monomorphic dispatcher.
     pub fn new(service: T) -> Self {
         Self {
@@ -137,23 +156,23 @@ impl<T: FilterService> FilterServiceServer<T> {
         Self { inner }
     }
 }
-impl<T> Clone for FilterServiceServer<T> {
+impl<T> Clone for GreetServiceServer<T> {
     fn clone(&self) -> Self {
         Self {
             inner: ::std::sync::Arc::clone(&self.inner),
         }
     }
 }
-impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
+impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
     #[inline]
     fn lookup(
         &self,
         path: &str,
     ) -> Option<::connectrpc::dispatcher::codegen::MethodDescriptor> {
-        let method = path.strip_prefix("anthropic.connectrpc.filter.v1.FilterService/")?;
+        let method = path.strip_prefix("anthropic.connectrpc.greet.v1.GreetService/")?;
         match method {
-            "Redact" => {
-                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
+            "Greet" => {
+                Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(true))
             }
             _ => None,
         }
@@ -166,21 +185,21 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
-            .strip_prefix("anthropic.connectrpc.filter.v1.FilterService/") else {
+            .strip_prefix("anthropic.connectrpc.greet.v1.GreetService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
-            "Redact" => {
+            "Greet" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
-                        crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView,
+                        crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView,
                     >(request, format)?;
-                    svc.redact(ctx, req)
+                    svc.greet(ctx, req)
                         .await?
                         .encode::<
-                            crate::proto::anthropic::connectrpc::filter::v1::Record,
+                            crate::proto::anthropic::connectrpc::greet::v1::GreetResponse,
                         >(format)
                 })
             }
@@ -195,7 +214,7 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path
-            .strip_prefix("anthropic.connectrpc.filter.v1.FilterService/") else {
+            .strip_prefix("anthropic.connectrpc.greet.v1.GreetService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &request, &format);
@@ -211,7 +230,7 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
-            .strip_prefix("anthropic.connectrpc.filter.v1.FilterService/") else {
+            .strip_prefix("anthropic.connectrpc.greet.v1.GreetService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &requests, &format);
@@ -227,7 +246,7 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
         let Some(method) = path
-            .strip_prefix("anthropic.connectrpc.filter.v1.FilterService/") else {
+            .strip_prefix("anthropic.connectrpc.greet.v1.GreetService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &requests, &format);
@@ -253,8 +272,8 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
 /// let conn = Http2Connection::connect_plaintext(uri.clone()).await?.shared(1024);
 /// let config = ClientConfig::new(uri).protocol(Protocol::Grpc);
 ///
-/// let client = FilterServiceClient::new(conn, config);
-/// let response = client.redact(request).await?;
+/// let client = GreetServiceClient::new(conn, config);
+/// let response = client.greet(request).await?;
 /// ```
 ///
 /// # Example (Connect / HTTP/1.1 or ALPN)
@@ -265,8 +284,8 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
 /// let http = HttpClient::plaintext();  // cleartext http:// only
 /// let config = ClientConfig::new("http://localhost:8080".parse()?);
 ///
-/// let client = FilterServiceClient::new(http, config);
-/// let response = client.redact(request).await?;
+/// let client = GreetServiceClient::new(http, config);
+/// let response = client.greet(request).await?;
 /// ```
 ///
 /// # Working with the response
@@ -275,7 +294,7 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
 /// The `OwnedView` derefs to the view, so field access is zero-copy:
 ///
 /// ```rust,ignore
-/// let resp = client.redact(request).await?.into_view();
+/// let resp = client.greet(request).await?.into_view();
 /// let name: &str = resp.name;  // borrow into the response buffer
 /// ```
 ///
@@ -283,14 +302,14 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
 /// [`into_owned()`](::connectrpc::client::UnaryResponse::into_owned):
 ///
 /// ```rust,ignore
-/// let owned = client.redact(request).await?.into_owned();
+/// let owned = client.greet(request).await?.into_owned();
 /// ```
 #[derive(Clone)]
-pub struct FilterServiceClient<T> {
+pub struct GreetServiceClient<T> {
     transport: T,
     config: ::connectrpc::client::ClientConfig,
 }
-impl<T> FilterServiceClient<T>
+impl<T> GreetServiceClient<T>
 where
     T: ::connectrpc::client::ClientTransport,
     <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
@@ -307,32 +326,32 @@ where
     pub fn config_mut(&mut self) -> &mut ::connectrpc::client::ClientConfig {
         &mut self.config
     }
-    /// Call the Redact RPC. Sends a request to /anthropic.connectrpc.filter.v1.FilterService/Redact.
-    pub async fn redact(
+    /// Call the Greet RPC. Sends a request to /anthropic.connectrpc.greet.v1.GreetService/Greet.
+    pub async fn greet(
         &self,
-        request: crate::proto::anthropic::connectrpc::filter::v1::Record,
+        request: crate::proto::anthropic::connectrpc::greet::v1::GreetRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
             ::buffa::view::OwnedView<
-                crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<
+                crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
                     'static,
                 >,
             >,
         >,
         ::connectrpc::ConnectError,
     > {
-        self.redact_with_options(request, ::connectrpc::client::CallOptions::default())
+        self.greet_with_options(request, ::connectrpc::client::CallOptions::default())
             .await
     }
-    /// Call the Redact RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
-    pub async fn redact_with_options(
+    /// Call the Greet RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
+    pub async fn greet_with_options(
         &self,
-        request: crate::proto::anthropic::connectrpc::filter::v1::Record,
+        request: crate::proto::anthropic::connectrpc::greet::v1::GreetRequest,
         options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
             ::buffa::view::OwnedView<
-                crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<
+                crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetResponseView<
                     'static,
                 >,
             >,
@@ -342,8 +361,8 @@ where
         ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                FILTER_SERVICE_SERVICE_NAME,
-                "Redact",
+                GREET_SERVICE_SERVICE_NAME,
+                "Greet",
                 request,
                 options,
             )

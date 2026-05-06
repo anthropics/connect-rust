@@ -41,3 +41,11 @@ pub mod __buffa {
         reg.register_json_any(super::__FORTUNE_JSON_ANY);
     }
 }
+#[doc(inline)]
+pub use self::__buffa::view::GetFortunesRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::GetFortunesResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::FortuneView;
+#[doc(inline)]
+pub use self::__buffa::register_types;

@@ -218,12 +218,17 @@ impl<'a> ::buffa::MessageView<'a> for ServerCompatRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ServerCompatRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ServerCompatRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ServerCompatRequest {
             protocol: self.protocol,
             http_version: self.http_version,
@@ -234,7 +239,7 @@ impl<'a> ::buffa::MessageView<'a> for ServerCompatRequestView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::TLSCreds,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -356,6 +361,12 @@ impl<'v> ::buffa::DefaultViewInstance for ServerCompatRequestView<'v> {
             ))
     }
 }
+impl ::buffa::ViewReborrow for ServerCompatRequestView<'static> {
+    type Reborrowed<'b> = ServerCompatRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
+    }
+}
 /// The outcome of one ServerCompatRequest.
 #[derive(Clone, Debug, Default)]
 pub struct ServerCompatResponseView<'a> {
@@ -466,12 +477,17 @@ impl<'a> ::buffa::MessageView<'a> for ServerCompatResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ServerCompatResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ServerCompatResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ServerCompatResponse {
             host: self.host.to_string(),
             port: self.port,
@@ -545,5 +561,11 @@ impl<'v> ::buffa::DefaultViewInstance for ServerCompatResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <ServerCompatResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for ServerCompatResponseView<'static> {
+    type Reborrowed<'b> = ServerCompatResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }

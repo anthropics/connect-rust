@@ -39,3 +39,7 @@ pub mod __buffa {
         reg.register_json_any(super::__RECORD_JSON_ANY);
     }
 }
+#[doc(inline)]
+pub use self::__buffa::view::RecordView;
+#[doc(inline)]
+pub use self::__buffa::register_types;

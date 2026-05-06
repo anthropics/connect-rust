@@ -212,6 +212,17 @@ impl ::buffa::Message for BloatEcho {
         if self.status_code != 0i32 {
             size += 1u32 + ::buffa::types::int32_encoded_len(self.status_code) as u32;
         }
+        for v in &self.tags {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        #[allow(clippy::for_kv_map)]
+        for (k, v) in &self.labels {
+            let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
+                + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size
+                += 1u32 + ::buffa::encoding::varint_len(entry_size as u64) as u32
+                    + entry_size;
+        }
         if self.auth.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.auth.compute_size(__cache);
@@ -228,9 +239,6 @@ impl ::buffa::Message for BloatEcho {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        for v in &self.tags {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-        }
         for v in &self.extra_headers {
             let __slot = __cache.reserve();
             let inner_size = v.compute_size(__cache);
@@ -238,14 +246,6 @@ impl ::buffa::Message for BloatEcho {
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
-        }
-        #[allow(clippy::for_kv_map)]
-        for (k, v) in &self.labels {
-            let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
-                + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-            size
-                += 1u32 + ::buffa::encoding::varint_len(entry_size as u64) as u32
-                    + entry_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
@@ -331,24 +331,6 @@ impl ::buffa::Message for BloatEcho {
                 .encode(buf);
             ::buffa::types::encode_int32(self.status_code, buf);
         }
-        if self.auth.is_set() {
-            ::buffa::encoding::Tag::new(
-                    13u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            self.auth.write_to(__cache, buf);
-        }
-        if self.origin.is_set() {
-            ::buffa::encoding::Tag::new(
-                    14u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            self.origin.write_to(__cache, buf);
-        }
         for v in &self.tags {
             ::buffa::encoding::Tag::new(
                     11u32,
@@ -356,15 +338,6 @@ impl ::buffa::Message for BloatEcho {
                 )
                 .encode(buf);
             ::buffa::types::encode_string(v, buf);
-        }
-        for v in &self.extra_headers {
-            ::buffa::encoding::Tag::new(
-                    15u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            v.write_to(__cache, buf);
         }
         for (k, v) in &self.labels {
             let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
@@ -387,6 +360,33 @@ impl ::buffa::Message for BloatEcho {
                 )
                 .encode(buf);
             ::buffa::types::encode_string(v, buf);
+        }
+        if self.auth.is_set() {
+            ::buffa::encoding::Tag::new(
+                    13u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.auth.write_to(__cache, buf);
+        }
+        if self.origin.is_set() {
+            ::buffa::encoding::Tag::new(
+                    14u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.origin.write_to(__cache, buf);
+        }
+        for v in &self.extra_headers {
+            ::buffa::encoding::Tag::new(
+                    15u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -501,34 +501,6 @@ impl ::buffa::Message for BloatEcho {
                 }
                 self.status_code = ::buffa::types::decode_int32(buf)?;
             }
-            13u32 => {
-                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                        field_number: 13u32,
-                        expected: 2u8,
-                        actual: tag.wire_type() as u8,
-                    });
-                }
-                ::buffa::Message::merge_length_delimited(
-                    self.auth.get_or_insert_default(),
-                    buf,
-                    depth,
-                )?;
-            }
-            14u32 => {
-                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                        field_number: 14u32,
-                        expected: 2u8,
-                        actual: tag.wire_type() as u8,
-                    });
-                }
-                ::buffa::Message::merge_length_delimited(
-                    self.origin.get_or_insert_default(),
-                    buf,
-                    depth,
-                )?;
-            }
             11u32 => {
                 if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
                     return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
@@ -538,18 +510,6 @@ impl ::buffa::Message for BloatEcho {
                     });
                 }
                 self.tags.push(::buffa::types::decode_string(buf)?);
-            }
-            15u32 => {
-                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
-                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
-                        field_number: 15u32,
-                        expected: 2u8,
-                        actual: tag.wire_type() as u8,
-                    });
-                }
-                let mut elem = ::core::default::Default::default();
-                ::buffa::Message::merge_length_delimited(&mut elem, buf, depth)?;
-                self.extra_headers.push(elem);
             }
             12u32 => {
                 if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
@@ -614,6 +574,46 @@ impl ::buffa::Message for BloatEcho {
                 }
                 self.labels.insert(key, val);
             }
+            13u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 13u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                ::buffa::Message::merge_length_delimited(
+                    self.auth.get_or_insert_default(),
+                    buf,
+                    depth,
+                )?;
+            }
+            14u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 14u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                ::buffa::Message::merge_length_delimited(
+                    self.origin.get_or_insert_default(),
+                    buf,
+                    depth,
+                )?;
+            }
+            15u32 => {
+                if tag.wire_type() != ::buffa::encoding::WireType::LengthDelimited {
+                    return ::core::result::Result::Err(::buffa::DecodeError::WireTypeMismatch {
+                        field_number: 15u32,
+                        expected: 2u8,
+                        actual: tag.wire_type() as u8,
+                    });
+                }
+                let mut elem = ::core::default::Default::default();
+                ::buffa::Message::merge_length_delimited(&mut elem, buf, depth)?;
+                self.extra_headers.push(elem);
+            }
             _ => {
                 self.__buffa_unknown_fields
                     .push(::buffa::encoding::decode_unknown_field(tag, buf, depth)?);
@@ -632,11 +632,11 @@ impl ::buffa::Message for BloatEcho {
         self.user_agent.clear();
         self.timestamp_nanos = 0i64;
         self.status_code = 0i32;
+        self.tags.clear();
+        self.labels.clear();
         self.auth = ::buffa::MessageField::none();
         self.origin = ::buffa::MessageField::none();
-        self.tags.clear();
         self.extra_headers.clear();
-        self.labels.clear();
         self.__buffa_unknown_fields.clear();
     }
 }

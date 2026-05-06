@@ -44,3 +44,17 @@ pub mod __buffa {
         reg.register_json_any(super::__INTRODUCE_RESPONSE_JSON_ANY);
     }
 }
+#[doc(inline)]
+pub use self::__buffa::view::SayRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::SayResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::ConverseRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::ConverseResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::IntroduceRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::IntroduceResponseView;
+#[doc(inline)]
+pub use self::__buffa::register_types;

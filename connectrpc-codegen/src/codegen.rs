@@ -106,14 +106,20 @@ fn emit_service_files(
         {
             let service_tokens = generate_connect_services(file, resolver, &mut batch)?;
             let service_code = format_token_stream(&service_tokens)?;
-            // In the unified path the service code is appended to buffa's
-            // `<stem>.rs` (Owned) file by [`generate_files`], so name and
-            // kind match that file. In the split path this stands alone but
-            // is still wired as a content file.
+            // Companion files are connect-rust's contribution alongside
+            // buffa's per-proto outputs. The `.__connect.rs` suffix avoids
+            // colliding with any of buffa's own filenames in the unified
+            // path (`<stem>.rs`, `<stem>.__view.rs`, ...) per the
+            // `apply_companions` contract; in the split path the plugin
+            // writes to its own output directory so the suffix is just a
+            // visible marker of the file's origin.
             out.push(GeneratedFile {
-                name: format!("{}.rs", buffa_codegen::proto_path_to_stem(file_name)),
+                name: format!(
+                    "{}.__connect.rs",
+                    buffa_codegen::proto_path_to_stem(file_name)
+                ),
                 package: file.package.clone().unwrap_or_default(),
-                kind: GeneratedFileKind::Owned,
+                kind: GeneratedFileKind::Companion,
                 content: service_code,
             });
         }
@@ -124,11 +130,13 @@ fn emit_service_files(
 /// Generate ConnectRPC service bindings + buffa message types from proto
 /// descriptors.
 ///
-/// Returns buffa's six [`GeneratedFile`]s per proto (Owned, View, Oneof,
-/// ViewOneof, Ext, plus one PackageMod stitcher per package), with service
-/// stubs appended to each `<stem>.rs` Owned content file. Callers write
-/// every file to disk and wire only the [`GeneratedFileKind::PackageMod`]
-/// entries into their module tree (the stitchers `include!` the rest).
+/// Returns buffa's per-proto [`GeneratedFile`]s (Owned, View, Oneof,
+/// ViewOneof, Ext, plus one PackageMod stitcher per package), with one
+/// [`GeneratedFileKind::Companion`] file per service-declaring proto
+/// (`<stem>.__connect.rs`) wired into the matching package stitcher via
+/// [`buffa_codegen::apply_companions`]. Callers write every file to disk
+/// and wire only the [`GeneratedFileKind::PackageMod`] entries into their
+/// module tree (the stitchers `include!` the rest).
 ///
 /// This is the **unified** path: service stubs reference message types via
 /// `super::`-relative paths, so both must live in the same module tree.
@@ -152,21 +160,43 @@ pub fn generate_files(
     let resolver = TypeResolver::new(proto_file, file_to_generate, &config, false);
     let service_files = emit_service_files(proto_file, file_to_generate, &resolver)?;
 
-    // Append each service file's content to the matching message file.
-    for svc in service_files {
-        if let Some(out) = files.iter_mut().find(|g| g.name == svc.name) {
-            out.content.push('\n');
-            out.content.push_str(&svc.content);
-        }
-    }
+    // Wire each `<stem>.__connect.rs` into the matching per-package
+    // stitcher and append the companion files to the output set in one
+    // pass. Every companion's package has a matching PackageMod here
+    // because buffa unconditionally emits one for every package containing
+    // a `file_to_generate` proto, so no companion is ever orphaned.
+    buffa_codegen::apply_companions(&mut files, service_files);
+
+    // The orphaning safety above is a cross-crate invariant on buffa's
+    // output shape; if a future buffa release stops emitting a PackageMod
+    // for an empty package, `apply_companions` would silently append the
+    // companion without any stitcher wiring it in. Surface that early in
+    // debug builds rather than letting the trait/client vanish at use-site.
+    debug_assert!(
+        files.iter().all(|f| {
+            f.kind != GeneratedFileKind::Companion
+                || files.iter().any(|g| {
+                    g.kind == GeneratedFileKind::PackageMod
+                        && g.content.contains(&format!("include!(\"{}\")", f.name))
+                })
+        }),
+        "a companion service file was not wired into any package stitcher"
+    );
 
     Ok(files)
 }
 
 /// Generate **only** ConnectRPC service bindings from proto descriptors.
 ///
-/// Returns one `GeneratedFile` per proto file in `file_to_generate` that
-/// declares at least one `service`. No message types, no `mod.rs`.
+/// Returns one `<stem>.__connect.rs` `GeneratedFile` per proto file in
+/// `file_to_generate` that declares at least one `service`, plus one
+/// `<pkg>.mod.rs` stitcher per package. No message types.
+///
+/// Service files carry [`GeneratedFileKind::Companion`] for symmetry with
+/// [`generate_files`], even though this path never calls
+/// `apply_companions`: the split-path stitcher emitted here `include!`s
+/// them directly. Build integrations filtering on kind should treat
+/// `Companion` as "connect-rust service stub" in both modes.
 ///
 /// This is the **split** path: service stubs reference message types via
 /// absolute Rust paths derived from [`CodeGenConfig::extern_paths`]. Callers must
@@ -193,8 +223,8 @@ pub fn generate_services(
     // Emit a per-package `<pkg>.mod.rs` stitcher for each package with at
     // least one service-declaring proto, so `protoc-gen-buffa-packaging`
     // can wire this output the same way it wires buffa's. The stitcher
-    // here is trivial — just `include!("<stem>.rs")` per file; there's no
-    // `__buffa::` ancillary tree for service stubs.
+    // here is trivial — just `include!("<stem>.__connect.rs")` per file;
+    // there's no view/oneof ancillary tree for service stubs.
     let mut by_package: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for f in &files {
         by_package
@@ -228,9 +258,9 @@ pub fn generate_services(
 ///
 /// # Output
 ///
-/// Per proto with at least one `service`: a `<stem>.rs` content file with
-/// the service stubs. Per package with at least one such proto: a
-/// `<pkg>.mod.rs` stitcher that `include!`s the content files. The
+/// Per proto with at least one `service`: a `<stem>.__connect.rs` content
+/// file with the service stubs. Per package with at least one such proto:
+/// a `<pkg>.mod.rs` stitcher that `include!`s the content files. The
 /// stitcher filename intentionally matches `protoc-gen-buffa`'s, so run
 /// this plugin into a separate output directory and use
 /// `protoc-gen-buffa-packaging` to wire both trees, as shown in this
@@ -2117,11 +2147,32 @@ mod tests {
             &Options::default(),
         )
         .unwrap();
-        let combined: String = generated
+
+        // Each service-declaring proto produces exactly one Companion file
+        // named `<stem>.__connect.rs`, wired into its package stitcher.
+        let companions: Vec<_> = generated
             .iter()
-            .filter(|f| f.kind == GeneratedFileKind::Owned)
-            .map(|f| f.content.as_str())
+            .filter(|f| f.kind == GeneratedFileKind::Companion)
             .collect();
+        let mut companion_names: Vec<&str> = companions.iter().map(|f| f.name.as_str()).collect();
+        companion_names.sort_unstable();
+        assert_eq!(companion_names, ["a.__connect.rs", "b.__connect.rs"]);
+        for c in &companions {
+            let stitcher = generated
+                .iter()
+                .find(|g| g.kind == GeneratedFileKind::PackageMod && g.package == c.package)
+                .expect("each companion's package must have a stitcher");
+            assert!(
+                stitcher
+                    .content
+                    .contains(&format!("include!(\"{}\")", c.name)),
+                "stitcher for {} must include companion {}",
+                c.package,
+                c.name
+            );
+        }
+
+        let combined: String = companions.iter().map(|f| f.content.as_str()).collect();
 
         let view_impl = "impl ::connectrpc::Encodable<super::super::common::v1::Reply>\nfor super::super::common::v1::__buffa::view::ReplyView<'_>";
         let owned_view_impl = "impl ::connectrpc::Encodable<super::super::common::v1::Reply>\nfor ::buffa::view::OwnedView<";

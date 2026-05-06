@@ -33,12 +33,12 @@ use connectrpc_conformance::Header;
 use connectrpc_conformance::Protocol;
 use connectrpc_conformance::StreamType;
 use connectrpc_conformance::init_type_registry;
-use connectrpc_conformance::proto::connectrpc::conformance::v1::__buffa::view::{
+use connectrpc_conformance::read_message;
+use connectrpc_conformance::write_message;
+use connectrpc_conformance::{
     BidiStreamResponseView, ClientStreamResponseView, IdempotentUnaryResponseView,
     ServerStreamResponseView, UnaryResponseView,
 };
-use connectrpc_conformance::read_message;
-use connectrpc_conformance::write_message;
 use hyper::Request;
 use hyper::Response;
 use hyper_util::rt::TokioIo;
@@ -290,7 +290,7 @@ async fn execute_request(req: &ClientCompatRequest) -> ExecResult {
 
     // Validate cancel timing
     let cancel_before_close_send = if req.cancel.is_set() {
-        use connectrpc_conformance::__buffa::oneof::client_compat_request::cancel::CancelTiming;
+        use connectrpc_conformance::client_compat_request::cancel::CancelTiming;
         let cancel = &*req.cancel;
         match &cancel.cancel_timing {
             Some(CancelTiming::AfterCloseSendMs(_)) => false,
@@ -335,14 +335,14 @@ async fn execute_request(req: &ClientCompatRequest) -> ExecResult {
 
     // Extract cancel timing info
     let cancel_after_ms = req.cancel.as_option().and_then(|c| {
-        use connectrpc_conformance::__buffa::oneof::client_compat_request::cancel::CancelTiming;
+        use connectrpc_conformance::client_compat_request::cancel::CancelTiming;
         match &c.cancel_timing {
             Some(CancelTiming::AfterCloseSendMs(ms)) => Some(*ms),
             _ => None,
         }
     });
     let cancel_after_responses = req.cancel.as_option().and_then(|c| {
-        use connectrpc_conformance::__buffa::oneof::client_compat_request::cancel::CancelTiming;
+        use connectrpc_conformance::client_compat_request::cancel::CancelTiming;
         match &c.cancel_timing {
             Some(CancelTiming::AfterNumResponses(n)) => Some(*n),
             _ => None,

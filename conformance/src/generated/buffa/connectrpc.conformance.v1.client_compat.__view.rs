@@ -475,12 +475,17 @@ impl<'a> ::buffa::MessageView<'a> for ClientCompatRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ClientCompatRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ClientCompatRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ClientCompatRequest {
             test_name: self.test_name.to_string(),
             http_version: self.http_version,
@@ -494,7 +499,7 @@ impl<'a> ::buffa::MessageView<'a> for ClientCompatRequestView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::TLSCreds,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -506,12 +511,12 @@ impl<'a> ::buffa::MessageView<'a> for ClientCompatRequestView<'a> {
             request_headers: self
                 .request_headers
                 .iter()
-                .map(|v| v.to_owned_message())
+                .map(|v| v.to_owned_from_source(__buffa_src))
                 .collect(),
             request_messages: self
                 .request_messages
                 .iter()
-                .map(|v| v.to_owned_message())
+                .map(|v| v.to_owned_from_source(__buffa_src))
                 .collect(),
             timeout_ms: self.timeout_ms,
             request_delay_ms: self.request_delay_ms,
@@ -519,7 +524,7 @@ impl<'a> ::buffa::MessageView<'a> for ClientCompatRequestView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::client_compat_request::Cancel,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -527,7 +532,7 @@ impl<'a> ::buffa::MessageView<'a> for ClientCompatRequestView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::RawHTTPRequest,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -613,6 +618,22 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientCompatRequestView<'a> {
         if self.use_get_http_method {
             size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
         }
+        for v in &self.request_headers {
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
+        for v in &self.request_messages {
+            let __slot = __cache.reserve();
+            let inner_size = v.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 2u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         if let Some(v) = self.timeout_ms {
             size += 2u32 + ::buffa::types::uint32_encoded_len(v) as u32;
         }
@@ -632,22 +653,6 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientCompatRequestView<'a> {
         if self.raw_request.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.raw_request.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 2u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
-        for v in &self.request_headers {
-            let __slot = __cache.reserve();
-            let inner_size = v.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
-        for v in &self.request_messages {
-            let __slot = __cache.reserve();
-            let inner_size = v.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 2u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
@@ -768,6 +773,24 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientCompatRequestView<'a> {
                 .encode(buf);
             ::buffa::types::encode_bool(self.use_get_http_method, buf);
         }
+        for v in &self.request_headers {
+            ::buffa::encoding::Tag::new(
+                    15u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
+        }
+        for v in &self.request_messages {
+            ::buffa::encoding::Tag::new(
+                    16u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
+        }
         if let Some(v) = self.timeout_ms {
             ::buffa::encoding::Tag::new(17u32, ::buffa::encoding::WireType::Varint)
                 .encode(buf);
@@ -796,24 +819,6 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientCompatRequestView<'a> {
             ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
             self.raw_request.write_to(__cache, buf);
         }
-        for v in &self.request_headers {
-            ::buffa::encoding::Tag::new(
-                    15u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            v.write_to(__cache, buf);
-        }
-        for v in &self.request_messages {
-            ::buffa::encoding::Tag::new(
-                    16u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            v.write_to(__cache, buf);
-        }
         self.__buffa_unknown_fields.write_to(buf);
     }
 }
@@ -827,6 +832,12 @@ impl<'v> ::buffa::DefaultViewInstance for ClientCompatRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <ClientCompatRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for ClientCompatRequestView<'static> {
+    type Reborrowed<'b> = ClientCompatRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 pub mod client_compat_request {
@@ -964,14 +975,19 @@ pub mod client_compat_request {
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
             Self::_decode_depth(buf, depth)
         }
-        /// Convert this view to the owned message type.
-        #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-        #[allow(clippy::needless_update)]
         fn to_owned_message(
             &self,
         ) -> super::super::super::client_compat_request::Cancel {
+            self.to_owned_from_source(None)
+        }
+        #[allow(clippy::useless_conversion, clippy::needless_update)]
+        fn to_owned_from_source(
+            &self,
+            __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+        ) -> super::super::super::client_compat_request::Cancel {
             #[allow(unused_imports)]
             use ::buffa::alloc::string::ToString as _;
+            let _ = __buffa_src;
             super::super::super::client_compat_request::Cancel {
                 cancel_timing: self
                     .cancel_timing
@@ -981,7 +997,9 @@ pub mod client_compat_request {
                             v,
                         ) => {
                             super::super::super::__buffa::oneof::client_compat_request::cancel::CancelTiming::BeforeCloseSend(
-                                ::buffa::alloc::boxed::Box::new(v.to_owned_message()),
+                                ::buffa::alloc::boxed::Box::new(
+                                    v.to_owned_from_source(__buffa_src),
+                                ),
                             )
                         }
                         super::super::super::__buffa::view::oneof::client_compat_request::cancel::CancelTiming::AfterCloseSendMs(
@@ -1100,6 +1118,12 @@ pub mod client_compat_request {
                 .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                     <CancelView<'static>>::default(),
                 ))
+        }
+    }
+    impl ::buffa::ViewReborrow for CancelView<'static> {
+        type Reborrowed<'b> = CancelView<'b>;
+        fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+            this
         }
     }
 }
@@ -1248,12 +1272,17 @@ impl<'a> ::buffa::MessageView<'a> for ClientCompatResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ClientCompatResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ClientCompatResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ClientCompatResponse {
             test_name: self.test_name.to_string(),
             result: self
@@ -1264,14 +1293,18 @@ impl<'a> ::buffa::MessageView<'a> for ClientCompatResponseView<'a> {
                         v,
                     ) => {
                         super::super::__buffa::oneof::client_compat_response::Result::Response(
-                            ::buffa::alloc::boxed::Box::new(v.to_owned_message()),
+                            ::buffa::alloc::boxed::Box::new(
+                                v.to_owned_from_source(__buffa_src),
+                            ),
                         )
                     }
                     super::super::__buffa::view::oneof::client_compat_response::Result::Error(
                         v,
                     ) => {
                         super::super::__buffa::oneof::client_compat_response::Result::Error(
-                            ::buffa::alloc::boxed::Box::new(v.to_owned_message()),
+                            ::buffa::alloc::boxed::Box::new(
+                                v.to_owned_from_source(__buffa_src),
+                            ),
                         )
                     }
                 }),
@@ -1375,6 +1408,12 @@ impl<'v> ::buffa::DefaultViewInstance for ClientCompatResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <ClientCompatResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for ClientCompatResponseView<'static> {
+    type Reborrowed<'b> = ClientCompatResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// The result of a ClientCompatRequest, which may or may not be successful.
@@ -1609,31 +1648,40 @@ impl<'a> ::buffa::MessageView<'a> for ClientResponseResultView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ClientResponseResult {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ClientResponseResult {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ClientResponseResult {
             response_headers: self
                 .response_headers
                 .iter()
-                .map(|v| v.to_owned_message())
+                .map(|v| v.to_owned_from_source(__buffa_src))
                 .collect(),
-            payloads: self.payloads.iter().map(|v| v.to_owned_message()).collect(),
+            payloads: self
+                .payloads
+                .iter()
+                .map(|v| v.to_owned_from_source(__buffa_src))
+                .collect(),
             error: match self.error.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::Error,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
             response_trailers: self
                 .response_trailers
                 .iter()
-                .map(|v| v.to_owned_message())
+                .map(|v| v.to_owned_from_source(__buffa_src))
                 .collect(),
             num_unsent_requests: self.num_unsent_requests,
             http_status_code: self.http_status_code,
@@ -1653,22 +1701,6 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientResponseResultView<'a> {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
         let mut size = 0u32;
-        if self.error.is_set() {
-            let __slot = __cache.reserve();
-            let inner_size = self.error.compute_size(__cache);
-            __cache.set(__slot, inner_size);
-            size
-                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
-                    + inner_size;
-        }
-        if self.num_unsent_requests != 0i32 {
-            size
-                += 1u32
-                    + ::buffa::types::int32_encoded_len(self.num_unsent_requests) as u32;
-        }
-        if let Some(v) = self.http_status_code {
-            size += 1u32 + ::buffa::types::int32_encoded_len(v) as u32;
-        }
         for v in &self.response_headers {
             let __slot = __cache.reserve();
             let inner_size = v.compute_size(__cache);
@@ -1685,6 +1717,14 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientResponseResultView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
+        if self.error.is_set() {
+            let __slot = __cache.reserve();
+            let inner_size = self.error.compute_size(__cache);
+            __cache.set(__slot, inner_size);
+            size
+                += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
+                    + inner_size;
+        }
         for v in &self.response_trailers {
             let __slot = __cache.reserve();
             let inner_size = v.compute_size(__cache);
@@ -1692,6 +1732,14 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientResponseResultView<'a> {
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
+        }
+        if self.num_unsent_requests != 0i32 {
+            size
+                += 1u32
+                    + ::buffa::types::int32_encoded_len(self.num_unsent_requests) as u32;
+        }
+        if let Some(v) = self.http_status_code {
+            size += 1u32 + ::buffa::types::int32_encoded_len(v) as u32;
         }
         for v in &self.feedback {
             size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
@@ -1707,25 +1755,6 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientResponseResultView<'a> {
     ) {
         #[allow(unused_imports)]
         use ::buffa::Enumeration as _;
-        if self.error.is_set() {
-            ::buffa::encoding::Tag::new(
-                    3u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            self.error.write_to(__cache, buf);
-        }
-        if self.num_unsent_requests != 0i32 {
-            ::buffa::encoding::Tag::new(5u32, ::buffa::encoding::WireType::Varint)
-                .encode(buf);
-            ::buffa::types::encode_int32(self.num_unsent_requests, buf);
-        }
-        if let Some(v) = self.http_status_code {
-            ::buffa::encoding::Tag::new(6u32, ::buffa::encoding::WireType::Varint)
-                .encode(buf);
-            ::buffa::types::encode_int32(v, buf);
-        }
         for v in &self.response_headers {
             ::buffa::encoding::Tag::new(
                     1u32,
@@ -1744,6 +1773,15 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientResponseResultView<'a> {
             ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
             v.write_to(__cache, buf);
         }
+        if self.error.is_set() {
+            ::buffa::encoding::Tag::new(
+                    3u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.error.write_to(__cache, buf);
+        }
         for v in &self.response_trailers {
             ::buffa::encoding::Tag::new(
                     4u32,
@@ -1752,6 +1790,16 @@ impl<'a> ::buffa::ViewEncode<'a> for ClientResponseResultView<'a> {
                 .encode(buf);
             ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
             v.write_to(__cache, buf);
+        }
+        if self.num_unsent_requests != 0i32 {
+            ::buffa::encoding::Tag::new(5u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_int32(self.num_unsent_requests, buf);
+        }
+        if let Some(v) = self.http_status_code {
+            ::buffa::encoding::Tag::new(6u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_int32(v, buf);
         }
         for v in &self.feedback {
             ::buffa::encoding::Tag::new(
@@ -1774,6 +1822,12 @@ impl<'v> ::buffa::DefaultViewInstance for ClientResponseResultView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <ClientResponseResultView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for ClientResponseResultView<'static> {
+    type Reborrowed<'b> = ClientResponseResultView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// The client is not able to fulfill the ClientCompatRequest. This may be due
@@ -1858,12 +1912,17 @@ impl<'a> ::buffa::MessageView<'a> for ClientErrorResultView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ClientErrorResult {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ClientErrorResult {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ClientErrorResult {
             message: self.message.to_string(),
             __buffa_unknown_fields: self
@@ -1916,6 +1975,12 @@ impl<'v> ::buffa::DefaultViewInstance for ClientErrorResultView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <ClientErrorResultView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for ClientErrorResultView<'static> {
+    type Reborrowed<'b> = ClientErrorResultView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// Details about various values as observed on the wire. This message is used
@@ -2080,26 +2145,31 @@ impl<'a> ::buffa::MessageView<'a> for WireDetailsView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::WireDetails {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::WireDetails {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::WireDetails {
             actual_status_code: self.actual_status_code,
             connect_error_raw: match self.connect_error_raw.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Struct,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
             actual_http_trailers: self
                 .actual_http_trailers
                 .iter()
-                .map(|v| v.to_owned_message())
+                .map(|v| v.to_owned_from_source(__buffa_src))
                 .collect(),
             actual_grpcweb_trailers: self.actual_grpcweb_trailers.map(|s| s.to_string()),
             __buffa_unknown_fields: self
@@ -2130,9 +2200,6 @@ impl<'a> ::buffa::ViewEncode<'a> for WireDetailsView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if let Some(ref v) = self.actual_grpcweb_trailers {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-        }
         for v in &self.actual_http_trailers {
             let __slot = __cache.reserve();
             let inner_size = v.compute_size(__cache);
@@ -2140,6 +2207,9 @@ impl<'a> ::buffa::ViewEncode<'a> for WireDetailsView<'a> {
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
+        }
+        if let Some(ref v) = self.actual_grpcweb_trailers {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
@@ -2166,14 +2236,6 @@ impl<'a> ::buffa::ViewEncode<'a> for WireDetailsView<'a> {
             ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
             self.connect_error_raw.write_to(__cache, buf);
         }
-        if let Some(ref v) = self.actual_grpcweb_trailers {
-            ::buffa::encoding::Tag::new(
-                    4u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::types::encode_string(v, buf);
-        }
         for v in &self.actual_http_trailers {
             ::buffa::encoding::Tag::new(
                     3u32,
@@ -2182,6 +2244,14 @@ impl<'a> ::buffa::ViewEncode<'a> for WireDetailsView<'a> {
                 .encode(buf);
             ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
             v.write_to(__cache, buf);
+        }
+        if let Some(ref v) = self.actual_grpcweb_trailers {
+            ::buffa::encoding::Tag::new(
+                    4u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::types::encode_string(v, buf);
         }
         self.__buffa_unknown_fields.write_to(buf);
     }
@@ -2196,5 +2266,11 @@ impl<'v> ::buffa::DefaultViewInstance for WireDetailsView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <WireDetailsView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for WireDetailsView<'static> {
+    type Reborrowed<'b> = WireDetailsView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }

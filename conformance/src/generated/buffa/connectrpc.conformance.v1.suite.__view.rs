@@ -354,16 +354,25 @@ impl<'a> ::buffa::MessageView<'a> for TestSuiteView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::TestSuite {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::TestSuite {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::TestSuite {
             name: self.name.to_string(),
             mode: self.mode,
-            test_cases: self.test_cases.iter().map(|v| v.to_owned_message()).collect(),
+            test_cases: self
+                .test_cases
+                .iter()
+                .map(|v| v.to_owned_from_source(__buffa_src))
+                .collect(),
             relevant_protocols: self.relevant_protocols.to_vec(),
             relevant_http_versions: self.relevant_http_versions.to_vec(),
             relevant_codecs: self.relevant_codecs.to_vec(),
@@ -396,24 +405,6 @@ impl<'a> ::buffa::ViewEncode<'a> for TestSuiteView<'a> {
             if val != 0 {
                 size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
             }
-        }
-        {
-            let val = self.connect_version_mode.to_i32();
-            if val != 0 {
-                size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
-            }
-        }
-        if self.relies_on_tls {
-            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
-        }
-        if self.relies_on_tls_client_certs {
-            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
-        }
-        if self.relies_on_connect_get {
-            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
-        }
-        if self.relies_on_message_receive_limit {
-            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
         }
         for v in &self.test_cases {
             let __slot = __cache.reserve();
@@ -459,6 +450,24 @@ impl<'a> ::buffa::ViewEncode<'a> for TestSuiteView<'a> {
             size
                 += 1u32 + ::buffa::encoding::varint_len(payload as u64) as u32 + payload;
         }
+        {
+            let val = self.connect_version_mode.to_i32();
+            if val != 0 {
+                size += 1u32 + ::buffa::types::int32_encoded_len(val) as u32;
+            }
+        }
+        if self.relies_on_tls {
+            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+        }
+        if self.relies_on_tls_client_certs {
+            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+        }
+        if self.relies_on_connect_get {
+            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+        }
+        if self.relies_on_message_receive_limit {
+            size += 1u32 + ::buffa::types::BOOL_ENCODED_LEN as u32;
+        }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
     }
@@ -485,34 +494,6 @@ impl<'a> ::buffa::ViewEncode<'a> for TestSuiteView<'a> {
                     .encode(buf);
                 ::buffa::types::encode_int32(val, buf);
             }
-        }
-        {
-            let val = self.connect_version_mode.to_i32();
-            if val != 0 {
-                ::buffa::encoding::Tag::new(8u32, ::buffa::encoding::WireType::Varint)
-                    .encode(buf);
-                ::buffa::types::encode_int32(val, buf);
-            }
-        }
-        if self.relies_on_tls {
-            ::buffa::encoding::Tag::new(9u32, ::buffa::encoding::WireType::Varint)
-                .encode(buf);
-            ::buffa::types::encode_bool(self.relies_on_tls, buf);
-        }
-        if self.relies_on_tls_client_certs {
-            ::buffa::encoding::Tag::new(10u32, ::buffa::encoding::WireType::Varint)
-                .encode(buf);
-            ::buffa::types::encode_bool(self.relies_on_tls_client_certs, buf);
-        }
-        if self.relies_on_connect_get {
-            ::buffa::encoding::Tag::new(11u32, ::buffa::encoding::WireType::Varint)
-                .encode(buf);
-            ::buffa::types::encode_bool(self.relies_on_connect_get, buf);
-        }
-        if self.relies_on_message_receive_limit {
-            ::buffa::encoding::Tag::new(12u32, ::buffa::encoding::WireType::Varint)
-                .encode(buf);
-            ::buffa::types::encode_bool(self.relies_on_message_receive_limit, buf);
         }
         for v in &self.test_cases {
             ::buffa::encoding::Tag::new(
@@ -587,6 +568,34 @@ impl<'a> ::buffa::ViewEncode<'a> for TestSuiteView<'a> {
                 ::buffa::types::encode_int32(v.to_i32(), buf);
             }
         }
+        {
+            let val = self.connect_version_mode.to_i32();
+            if val != 0 {
+                ::buffa::encoding::Tag::new(8u32, ::buffa::encoding::WireType::Varint)
+                    .encode(buf);
+                ::buffa::types::encode_int32(val, buf);
+            }
+        }
+        if self.relies_on_tls {
+            ::buffa::encoding::Tag::new(9u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_bool(self.relies_on_tls, buf);
+        }
+        if self.relies_on_tls_client_certs {
+            ::buffa::encoding::Tag::new(10u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_bool(self.relies_on_tls_client_certs, buf);
+        }
+        if self.relies_on_connect_get {
+            ::buffa::encoding::Tag::new(11u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_bool(self.relies_on_connect_get, buf);
+        }
+        if self.relies_on_message_receive_limit {
+            ::buffa::encoding::Tag::new(12u32, ::buffa::encoding::WireType::Varint)
+                .encode(buf);
+            ::buffa::types::encode_bool(self.relies_on_message_receive_limit, buf);
+        }
         self.__buffa_unknown_fields.write_to(buf);
     }
 }
@@ -600,6 +609,12 @@ impl<'v> ::buffa::DefaultViewInstance for TestSuiteView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <TestSuiteView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for TestSuiteView<'static> {
+    type Reborrowed<'b> = TestSuiteView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -825,31 +840,36 @@ impl<'a> ::buffa::MessageView<'a> for TestCaseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::TestCase {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::TestCase {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::TestCase {
             request: match self.request.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::ClientCompatRequest,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
             expand_requests: self
                 .expand_requests
                 .iter()
-                .map(|v| v.to_owned_message())
+                .map(|v| v.to_owned_from_source(__buffa_src))
                 .collect(),
             expected_response: match self.expected_response.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::ClientResponseResult,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -877,17 +897,17 @@ impl<'a> ::buffa::ViewEncode<'a> for TestCaseView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        if self.expected_response.is_set() {
+        for v in &self.expand_requests {
             let __slot = __cache.reserve();
-            let inner_size = self.expected_response.compute_size(__cache);
+            let inner_size = v.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        for v in &self.expand_requests {
+        if self.expected_response.is_set() {
             let __slot = __cache.reserve();
-            let inner_size = v.compute_size(__cache);
+            let inner_size = self.expected_response.compute_size(__cache);
             __cache.set(__slot, inner_size);
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
@@ -922,15 +942,6 @@ impl<'a> ::buffa::ViewEncode<'a> for TestCaseView<'a> {
             ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
             self.request.write_to(__cache, buf);
         }
-        if self.expected_response.is_set() {
-            ::buffa::encoding::Tag::new(
-                    3u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            self.expected_response.write_to(__cache, buf);
-        }
         for v in &self.expand_requests {
             ::buffa::encoding::Tag::new(
                     2u32,
@@ -939,6 +950,15 @@ impl<'a> ::buffa::ViewEncode<'a> for TestCaseView<'a> {
                 .encode(buf);
             ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
             v.write_to(__cache, buf);
+        }
+        if self.expected_response.is_set() {
+            ::buffa::encoding::Tag::new(
+                    3u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.expected_response.write_to(__cache, buf);
         }
         if !self.other_allowed_error_codes.is_empty() {
             let payload: u32 = self
@@ -969,6 +989,12 @@ impl<'v> ::buffa::DefaultViewInstance for TestCaseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <TestCaseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for TestCaseView<'static> {
+    type Reborrowed<'b> = TestCaseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 pub mod test_case {
@@ -1058,12 +1084,17 @@ pub mod test_case {
         ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
             Self::_decode_depth(buf, depth)
         }
-        /// Convert this view to the owned message type.
-        #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-        #[allow(clippy::needless_update)]
         fn to_owned_message(&self) -> super::super::super::test_case::ExpandedSize {
+            self.to_owned_from_source(None)
+        }
+        #[allow(clippy::useless_conversion, clippy::needless_update)]
+        fn to_owned_from_source(
+            &self,
+            __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+        ) -> super::super::super::test_case::ExpandedSize {
             #[allow(unused_imports)]
             use ::buffa::alloc::string::ToString as _;
+            let _ = __buffa_src;
             super::super::super::test_case::ExpandedSize {
                 size_relative_to_limit: self.size_relative_to_limit,
                 __buffa_unknown_fields: self
@@ -1113,6 +1144,12 @@ pub mod test_case {
                 .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                     <ExpandedSizeView<'static>>::default(),
                 ))
+        }
+    }
+    impl ::buffa::ViewReborrow for ExpandedSizeView<'static> {
+        type Reborrowed<'b> = ExpandedSizeView<'b>;
+        fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+            this
         }
     }
 }

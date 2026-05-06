@@ -341,12 +341,17 @@ impl<'a> ::buffa::MessageView<'a> for BloatEchoView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::BloatEcho {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::BloatEcho {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::BloatEcho {
             tenant_id: self.tenant_id.to_string(),
             trace_id: self.trace_id.to_string(),
@@ -368,7 +373,7 @@ impl<'a> ::buffa::MessageView<'a> for BloatEchoView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::BloatHeader,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -376,14 +381,14 @@ impl<'a> ::buffa::MessageView<'a> for BloatEchoView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::BloatHeader,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
             extra_headers: self
                 .extra_headers
                 .iter()
-                .map(|v| v.to_owned_message())
+                .map(|v| v.to_owned_from_source(__buffa_src))
                 .collect(),
             __buffa_unknown_fields: self
                 .__buffa_unknown_fields
@@ -431,6 +436,17 @@ impl<'a> ::buffa::ViewEncode<'a> for BloatEchoView<'a> {
         if self.status_code != 0i32 {
             size += 1u32 + ::buffa::types::int32_encoded_len(self.status_code) as u32;
         }
+        for v in &self.tags {
+            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+        }
+        #[allow(clippy::for_kv_map)]
+        for (k, v) in &self.labels {
+            let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
+                + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
+            size
+                += 1u32 + ::buffa::encoding::varint_len(entry_size as u64) as u32
+                    + entry_size;
+        }
         if self.auth.is_set() {
             let __slot = __cache.reserve();
             let inner_size = self.auth.compute_size(__cache);
@@ -447,9 +463,6 @@ impl<'a> ::buffa::ViewEncode<'a> for BloatEchoView<'a> {
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
         }
-        for v in &self.tags {
-            size += 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-        }
         for v in &self.extra_headers {
             let __slot = __cache.reserve();
             let inner_size = v.compute_size(__cache);
@@ -457,14 +470,6 @@ impl<'a> ::buffa::ViewEncode<'a> for BloatEchoView<'a> {
             size
                 += 1u32 + ::buffa::encoding::varint_len(inner_size as u64) as u32
                     + inner_size;
-        }
-        #[allow(clippy::for_kv_map)]
-        for (k, v) in &self.labels {
-            let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
-                + 1u32 + ::buffa::types::string_encoded_len(v) as u32;
-            size
-                += 1u32 + ::buffa::encoding::varint_len(entry_size as u64) as u32
-                    + entry_size;
         }
         size += self.__buffa_unknown_fields.encoded_len() as u32;
         size
@@ -551,24 +556,6 @@ impl<'a> ::buffa::ViewEncode<'a> for BloatEchoView<'a> {
                 .encode(buf);
             ::buffa::types::encode_int32(self.status_code, buf);
         }
-        if self.auth.is_set() {
-            ::buffa::encoding::Tag::new(
-                    13u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            self.auth.write_to(__cache, buf);
-        }
-        if self.origin.is_set() {
-            ::buffa::encoding::Tag::new(
-                    14u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            self.origin.write_to(__cache, buf);
-        }
         for v in &self.tags {
             ::buffa::encoding::Tag::new(
                     11u32,
@@ -576,15 +563,6 @@ impl<'a> ::buffa::ViewEncode<'a> for BloatEchoView<'a> {
                 )
                 .encode(buf);
             ::buffa::types::encode_string(v, buf);
-        }
-        for v in &self.extra_headers {
-            ::buffa::encoding::Tag::new(
-                    15u32,
-                    ::buffa::encoding::WireType::LengthDelimited,
-                )
-                .encode(buf);
-            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
-            v.write_to(__cache, buf);
         }
         for (k, v) in &self.labels {
             let entry_size: u32 = 1u32 + ::buffa::types::string_encoded_len(k) as u32
@@ -608,6 +586,33 @@ impl<'a> ::buffa::ViewEncode<'a> for BloatEchoView<'a> {
                 .encode(buf);
             ::buffa::types::encode_string(v, buf);
         }
+        if self.auth.is_set() {
+            ::buffa::encoding::Tag::new(
+                    13u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.auth.write_to(__cache, buf);
+        }
+        if self.origin.is_set() {
+            ::buffa::encoding::Tag::new(
+                    14u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            self.origin.write_to(__cache, buf);
+        }
+        for v in &self.extra_headers {
+            ::buffa::encoding::Tag::new(
+                    15u32,
+                    ::buffa::encoding::WireType::LengthDelimited,
+                )
+                .encode(buf);
+            ::buffa::encoding::encode_varint(__cache.consume_next() as u64, buf);
+            v.write_to(__cache, buf);
+        }
         self.__buffa_unknown_fields.write_to(buf);
     }
 }
@@ -621,6 +626,12 @@ impl<'v> ::buffa::DefaultViewInstance for BloatEchoView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <BloatEchoView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for BloatEchoView<'static> {
+    type Reborrowed<'b> = BloatEchoView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -734,12 +745,17 @@ impl<'a> ::buffa::MessageView<'a> for BloatHeaderView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::BloatHeader {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::BloatHeader {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::BloatHeader {
             name: self.name.to_string(),
             value: self.value.to_string(),
@@ -828,6 +844,12 @@ impl<'v> ::buffa::DefaultViewInstance for BloatHeaderView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <BloatHeaderView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for BloatHeaderView<'static> {
+    type Reborrowed<'b> = BloatHeaderView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// ── Shape-sweep messages for the ViewEncode mental-model bench ────────
@@ -1117,12 +1139,17 @@ impl<'a> ::buffa::MessageView<'a> for ScalarHeavyView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ScalarHeavy {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ScalarHeavy {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ScalarHeavy {
             a: self.a,
             b: self.b,
@@ -1333,6 +1360,12 @@ impl<'v> ::buffa::DefaultViewInstance for ScalarHeavyView<'v> {
             ))
     }
 }
+impl ::buffa::ViewReborrow for ScalarHeavyView<'static> {
+    type Reborrowed<'b> = ScalarHeavyView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
+    }
+}
 /// Few large strings: 4×~1200B + 2 scalars. Low alloc count, high bytes.
 #[derive(Clone, Debug, Default)]
 pub struct FewLargeStringsView<'a> {
@@ -1469,12 +1502,17 @@ impl<'a> ::buffa::MessageView<'a> for FewLargeStringsView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::FewLargeStrings {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::FewLargeStrings {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::FewLargeStrings {
             body_a: self.body_a.to_string(),
             body_b: self.body_b.to_string(),
@@ -1583,6 +1621,12 @@ impl<'v> ::buffa::DefaultViewInstance for FewLargeStringsView<'v> {
             ))
     }
 }
+impl ::buffa::ViewReborrow for FewLargeStringsView<'static> {
+    type Reborrowed<'b> = FewLargeStringsView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
+    }
+}
 /// Deep nested: 5 levels of singular sub-message, 2 strings per level.
 /// Tests `MessageFieldView` boxing on the view side.
 #[derive(Clone, Debug, Default)]
@@ -1672,12 +1716,17 @@ impl<'a> ::buffa::MessageView<'a> for NestL5View<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::NestL5 {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::NestL5 {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::NestL5 {
             a: self.a.to_string(),
             b: self.b.to_string(),
@@ -1742,6 +1791,12 @@ impl<'v> ::buffa::DefaultViewInstance for NestL5View<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <NestL5View<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for NestL5View<'static> {
+    type Reborrowed<'b> = NestL5View<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -1857,12 +1912,17 @@ impl<'a> ::buffa::MessageView<'a> for NestL4View<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::NestL4 {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::NestL4 {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::NestL4 {
             a: self.a.to_string(),
             b: self.b.to_string(),
@@ -1870,7 +1930,7 @@ impl<'a> ::buffa::MessageView<'a> for NestL4View<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::NestL5,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -1952,6 +2012,12 @@ impl<'v> ::buffa::DefaultViewInstance for NestL4View<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <NestL4View<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for NestL4View<'static> {
+    type Reborrowed<'b> = NestL4View<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -2067,12 +2133,17 @@ impl<'a> ::buffa::MessageView<'a> for NestL3View<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::NestL3 {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::NestL3 {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::NestL3 {
             a: self.a.to_string(),
             b: self.b.to_string(),
@@ -2080,7 +2151,7 @@ impl<'a> ::buffa::MessageView<'a> for NestL3View<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::NestL4,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -2162,6 +2233,12 @@ impl<'v> ::buffa::DefaultViewInstance for NestL3View<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <NestL3View<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for NestL3View<'static> {
+    type Reborrowed<'b> = NestL3View<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -2277,12 +2354,17 @@ impl<'a> ::buffa::MessageView<'a> for NestL2View<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::NestL2 {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::NestL2 {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::NestL2 {
             a: self.a.to_string(),
             b: self.b.to_string(),
@@ -2290,7 +2372,7 @@ impl<'a> ::buffa::MessageView<'a> for NestL2View<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::NestL3,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -2372,6 +2454,12 @@ impl<'v> ::buffa::DefaultViewInstance for NestL2View<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <NestL2View<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for NestL2View<'static> {
+    type Reborrowed<'b> = NestL2View<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -2487,12 +2575,17 @@ impl<'a> ::buffa::MessageView<'a> for NestL1View<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::NestL1 {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::NestL1 {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::NestL1 {
             a: self.a.to_string(),
             b: self.b.to_string(),
@@ -2500,7 +2593,7 @@ impl<'a> ::buffa::MessageView<'a> for NestL1View<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::NestL2,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -2582,6 +2675,12 @@ impl<'v> ::buffa::DefaultViewInstance for NestL1View<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <NestL1View<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for NestL1View<'static> {
+    type Reborrowed<'b> = NestL1View<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -2697,12 +2796,17 @@ impl<'a> ::buffa::MessageView<'a> for DeepNestedView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::DeepNested {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::DeepNested {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::DeepNested {
             root_a: self.root_a.to_string(),
             root_b: self.root_b.to_string(),
@@ -2710,7 +2814,7 @@ impl<'a> ::buffa::MessageView<'a> for DeepNestedView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::NestL1,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -2792,6 +2896,12 @@ impl<'v> ::buffa::DefaultViewInstance for DeepNestedView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <DeepNestedView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for DeepNestedView<'static> {
+    type Reborrowed<'b> = DeepNestedView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// Map-dominated: 30-entry string map + 2 plain strings. Closest to the
@@ -2935,12 +3045,17 @@ impl<'a> ::buffa::MessageView<'a> for MapDominatedView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::MapDominated {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::MapDominated {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::MapDominated {
             id: self.id.to_string(),
             kind: self.kind.to_string(),
@@ -3040,5 +3155,11 @@ impl<'v> ::buffa::DefaultViewInstance for MapDominatedView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <MapDominatedView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for MapDominatedView<'static> {
+    type Reborrowed<'b> = MapDominatedView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }

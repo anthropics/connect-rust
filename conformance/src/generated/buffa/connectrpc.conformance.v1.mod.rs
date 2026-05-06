@@ -98,3 +98,73 @@ pub mod __buffa {
         reg.register_json_any(super::test_case::__EXPANDED_SIZE_JSON_ANY);
     }
 }
+#[doc(inline)]
+pub use self::__buffa::view::ConfigView;
+#[doc(inline)]
+pub use self::__buffa::view::FeaturesView;
+#[doc(inline)]
+pub use self::__buffa::view::ConfigCaseView;
+#[doc(inline)]
+pub use self::__buffa::view::TLSCredsView;
+#[doc(inline)]
+pub use self::__buffa::view::UnaryResponseDefinitionView;
+#[doc(inline)]
+pub use self::__buffa::view::StreamResponseDefinitionView;
+#[doc(inline)]
+pub use self::__buffa::view::UnaryRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::UnaryResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::IdempotentUnaryRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::IdempotentUnaryResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::ServerStreamRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::ServerStreamResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::ClientStreamRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::ClientStreamResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::BidiStreamRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::BidiStreamResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::UnimplementedRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::UnimplementedResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::ConformancePayloadView;
+#[doc(inline)]
+pub use self::__buffa::view::ErrorView;
+#[doc(inline)]
+pub use self::__buffa::view::HeaderView;
+#[doc(inline)]
+pub use self::__buffa::view::RawHTTPRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::MessageContentsView;
+#[doc(inline)]
+pub use self::__buffa::view::StreamContentsView;
+#[doc(inline)]
+pub use self::__buffa::view::RawHTTPResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::ClientCompatRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::ClientCompatResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::ClientResponseResultView;
+#[doc(inline)]
+pub use self::__buffa::view::ClientErrorResultView;
+#[doc(inline)]
+pub use self::__buffa::view::WireDetailsView;
+#[doc(inline)]
+pub use self::__buffa::view::ServerCompatRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::ServerCompatResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::TestSuiteView;
+#[doc(inline)]
+pub use self::__buffa::view::TestCaseView;
+#[doc(inline)]
+pub use self::__buffa::register_types;

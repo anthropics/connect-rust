@@ -10,19 +10,58 @@ increment the patch version.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-06
+
+This release tracks buffa 0.5.0. **Consumers with checked-in
+`protoc-gen-connect-rust` output must regenerate** with the 0.4.0
+toolchain (and buffa 0.5.0 plugins): service stubs are now emitted as
+`<stem>.__connect.rs` (was `<stem>.rs`), and the new package stitcher
+only `include!`s the new name. After regenerating, **delete the stale
+`<stem>.rs` files** in the connect output directory — protoc plugins
+do not delete or overwrite the old name. Regenerate before bumping
+the runtime crate, not after: regenerated buffa output references
+runtime symbols (`ViewReborrow`, `decode_bytes_to_bytes`,
+`__private::arbitrary_bytes`) that don't exist in `buffa` 0.4.
+`connectrpc-build` users (build.rs integration) are unaffected — Cargo
+rebuilds `OUT_DIR` automatically.
+
 ### Breaking
 
-- **buffa 0.4**: adapted to buffa's per-package stitcher layout
-  ([buffa#62]) and `ViewEncode` ([buffa#55]). Generated view types
-  now live under `<pkg>::__buffa::view::FooView` (was `<pkg>::FooView`);
-  oneof enums under `<pkg>::__buffa::oneof::<msg>::Kind` and
-  `<pkg>::__buffa::view::oneof::<msg>::Kind`. Service stubs are
-  appended to buffa's `<stem>.rs` content file in the unified path,
-  and emit their own `<pkg>.mod.rs` stitcher in the split path.
-  `buffa_types::Any.value` is now `bytes::Bytes` (was `Vec<u8>`).
-  buffa's size cache is now externalized ([buffa#22]): generated
-  structs no longer carry `__buffa_cached_size`, and
-  `Message::compute_size`/`write_to` take `&mut SizeCache`. The
+- **buffa dependency bumped to 0.5** ([buffa#97]). The only
+  codegen-facing change is that `buffa_codegen::GeneratedFileKind` is
+  now `#[non_exhaustive]`. This has no effect on `connectrpc` runtime
+  consumers; build integrations that consume `connectrpc-codegen` and
+  match `GeneratedFileKind` exhaustively need a wildcard arm
+  (connect-rust itself matches only by `==`). See the
+  [buffa 0.5.0 release](https://github.com/anthropics/buffa/releases/tag/v0.5.0)
+  for the new natural-path re-exports — buffa 0.5.0 re-exports views
+  at `pkg::FooView`, oneof enums at `pkg::msg_name::Kind`, and oneof
+  view enums at `pkg::msg_name::KindView` — so the canonical
+  `pkg::__buffa::view::FooView` / `pkg::__buffa::oneof::msg_name::Kind`
+  paths from the buffa-0.4 layout are no longer needed in hand-written
+  consumer code (they remain available for disambiguation if a proto
+  type ever shadows a re-export). connect-rust's examples and tests now
+  use the natural paths throughout.
+- **Generated service code is now emitted as a `<stem>.__connect.rs`
+  companion file** rather than appended to buffa's `<stem>.rs`
+  (unified path) or written as a bare `<stem>.rs` (split / plugin
+  path). connectrpc-codegen tags these files
+  `GeneratedFileKind::Companion` and wires them into the per-package
+  stitcher with `buffa_codegen::apply_companions` ([buffa#91],
+  designed in [buffa#81]). The
+  module structure exposed to consumers is unchanged; the visible
+  effect is the on-disk filename change for projects with checked-in
+  generated code (see the regeneration note above). Build integrations
+  that inspect `GeneratedFileKind` should now match `Companion` for
+  connect-rust's service files.
+- **Carried over from the buffa 0.4 sync** ([buffa#62], [buffa#55]):
+  generated code uses buffa's per-package stitcher layout, with view
+  and oneof types canonically located under `<pkg>::__buffa::view::`
+  and `<pkg>::__buffa::oneof::` (buffa 0.5.0's natural-path re-exports
+  above hide this from consumers). `buffa_types::Any.value` is now
+  `bytes::Bytes` (was `Vec<u8>`). buffa's size cache is externalized
+  ([buffa#22]): generated structs no longer carry `__buffa_cached_size`,
+  and `Message::compute_size`/`write_to` take `&mut SizeCache`. The
   provided `encode_to_bytes()` / `encoded_len()` are unchanged;
   connectrpc itself only uses those, but direct callers of
   `compute_size()` should switch to `encoded_len()`.
@@ -104,6 +143,15 @@ increment the patch version.
 - `StreamingCompressionProvider::compress_stream` (gzip and zstd) now
   honors the provider's configured level; previously it ignored
   `self.level` and used `async-compression`'s default.
+- **`connectrpc` no longer pulls `axum`'s default features** ([#55]),
+  which transitively required `tokio/net` → `mio` and made the crate
+  impossible to use on WASM hosts that integrate with `axum` (e.g.
+  Cloudflare Workers). The `axum` dependency now declares
+  `default-features = false`.
+- **wasm32 client-stream and bidi RPCs no longer hang** ([#63]). The
+  body-reader future is now spawned via `wasm_bindgen_futures::spawn_local`
+  on `wasm32-unknown-unknown` (it was being polled inline, deadlocking
+  on the first `.await`). Native targets keep `tokio::spawn`.
 
 ### Added
 
@@ -117,13 +165,18 @@ increment the patch version.
   `build.rs` context (e.g. from a Bazel genrule or standalone host tool).
   Default remains `true`.
 
-[#50]: https://github.com/anthropics/connect-rust/issues/50
 [#7]: https://github.com/anthropics/connect-rust/issues/7
 [#34]: https://github.com/anthropics/connect-rust/issues/34
+[#50]: https://github.com/anthropics/connect-rust/issues/50
+[#55]: https://github.com/anthropics/connect-rust/pull/55
 [#61]: https://github.com/anthropics/connect-rust/issues/61
+[#63]: https://github.com/anthropics/connect-rust/pull/63
 [buffa#22]: https://github.com/anthropics/buffa/pull/22
 [buffa#55]: https://github.com/anthropics/buffa/pull/55
 [buffa#62]: https://github.com/anthropics/buffa/pull/62
+[buffa#81]: https://github.com/anthropics/buffa/issues/81
+[buffa#91]: https://github.com/anthropics/buffa/pull/91
+[buffa#97]: https://github.com/anthropics/buffa/pull/97
 
 ## [0.3.3] - 2026-04-17
 

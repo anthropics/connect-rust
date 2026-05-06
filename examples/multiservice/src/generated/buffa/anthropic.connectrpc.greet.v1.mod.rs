@@ -40,3 +40,9 @@ pub mod __buffa {
         reg.register_json_any(super::__GREET_RESPONSE_JSON_ANY);
     }
 }
+#[doc(inline)]
+pub use self::__buffa::view::GreetRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::GreetResponseView;
+#[doc(inline)]
+pub use self::__buffa::register_types;
