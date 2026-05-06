@@ -139,19 +139,24 @@ impl<'a> ::buffa::MessageView<'a> for CreateEventRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::CreateEventRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::CreateEventRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::CreateEventRequest {
             name: self.name.to_string(),
             occurred_at: match self.occurred_at.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Timestamp,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -159,7 +164,7 @@ impl<'a> ::buffa::MessageView<'a> for CreateEventRequestView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Duration,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -247,6 +252,12 @@ impl<'v> ::buffa::DefaultViewInstance for CreateEventRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <CreateEventRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for CreateEventRequestView<'static> {
+    type Reborrowed<'b> = CreateEventRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// CreateEventResponse is the response for CreateEvent.
@@ -341,18 +352,23 @@ impl<'a> ::buffa::MessageView<'a> for CreateEventResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::CreateEventResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::CreateEventResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::CreateEventResponse {
             event: match self.event.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         super::super::Event,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -412,6 +428,12 @@ impl<'v> ::buffa::DefaultViewInstance for CreateEventResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <CreateEventResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for CreateEventResponseView<'static> {
+    type Reborrowed<'b> = CreateEventResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// Event represents an event with timing information.
@@ -596,12 +618,17 @@ impl<'a> ::buffa::MessageView<'a> for EventView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::Event {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::Event {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::Event {
             id: self.id.to_string(),
             name: self.name.to_string(),
@@ -609,7 +636,7 @@ impl<'a> ::buffa::MessageView<'a> for EventView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Timestamp,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -617,7 +644,7 @@ impl<'a> ::buffa::MessageView<'a> for EventView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Duration,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -625,7 +652,7 @@ impl<'a> ::buffa::MessageView<'a> for EventView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Timestamp,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -741,6 +768,12 @@ impl<'v> ::buffa::DefaultViewInstance for EventView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <EventView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for EventView<'static> {
+    type Reborrowed<'b> = EventView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// CalculateDurationRequest is the request for CalculateDuration.
@@ -867,18 +900,23 @@ impl<'a> ::buffa::MessageView<'a> for CalculateDurationRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::CalculateDurationRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::CalculateDurationRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::CalculateDurationRequest {
             start: match self.start.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Timestamp,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -886,7 +924,7 @@ impl<'a> ::buffa::MessageView<'a> for CalculateDurationRequestView<'a> {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Timestamp,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -965,6 +1003,12 @@ impl<'v> ::buffa::DefaultViewInstance for CalculateDurationRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <CalculateDurationRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for CalculateDurationRequestView<'static> {
+    type Reborrowed<'b> = CalculateDurationRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// CalculateDurationResponse is the response for CalculateDuration.
@@ -1061,18 +1105,23 @@ impl<'a> ::buffa::MessageView<'a> for CalculateDurationResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::CalculateDurationResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::CalculateDurationResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::CalculateDurationResponse {
             duration: match self.duration.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Duration,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -1134,6 +1183,12 @@ impl<'v> ::buffa::DefaultViewInstance for CalculateDurationResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <CalculateDurationResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for CalculateDurationResponseView<'static> {
+    type Reborrowed<'b> = CalculateDurationResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// ProcessMetadataRequest is the request for ProcessMetadata.
@@ -1230,18 +1285,23 @@ impl<'a> ::buffa::MessageView<'a> for ProcessMetadataRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ProcessMetadataRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ProcessMetadataRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ProcessMetadataRequest {
             metadata: match self.metadata.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Struct,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -1301,6 +1361,12 @@ impl<'v> ::buffa::DefaultViewInstance for ProcessMetadataRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <ProcessMetadataRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for ProcessMetadataRequestView<'static> {
+    type Reborrowed<'b> = ProcessMetadataRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// ProcessMetadataResponse is the response for ProcessMetadata.
@@ -1411,18 +1477,23 @@ impl<'a> ::buffa::MessageView<'a> for ProcessMetadataResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::ProcessMetadataResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::ProcessMetadataResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::ProcessMetadataResponse {
             metadata: match self.metadata.as_option() {
                 Some(v) => {
                     ::buffa::MessageField::<
                         ::buffa_types::google::protobuf::Struct,
-                    >::some(v.to_owned_message())
+                    >::some(v.to_owned_from_source(__buffa_src))
                 }
                 None => ::buffa::MessageField::none(),
             },
@@ -1493,5 +1564,11 @@ impl<'v> ::buffa::DefaultViewInstance for ProcessMetadataResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <ProcessMetadataResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for ProcessMetadataResponseView<'static> {
+    type Reborrowed<'b> = ProcessMetadataResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }

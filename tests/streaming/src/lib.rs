@@ -1,7 +1,6 @@
 pub mod proto {
     connectrpc::include_generated!();
 }
-pub use proto::test::echo::v1::__buffa::view::*;
 pub use proto::test::echo::v1::*;
 
 #[cfg(test)]

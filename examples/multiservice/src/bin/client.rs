@@ -9,11 +9,9 @@
 
 use std::collections::HashMap;
 
-use buffa_types::google::protobuf::__buffa::oneof::value;
-use buffa_types::google::protobuf::Duration;
-use buffa_types::google::protobuf::Struct;
-use buffa_types::google::protobuf::Timestamp;
-use buffa_types::google::protobuf::Value;
+// `value` (lowercase) is the oneof submodule for `Value`'s `kind`
+// oneof, re-exported at the natural path by buffa 0.5+.
+use buffa_types::google::protobuf::{Duration, Struct, Timestamp, Value, value};
 use connectrpc::client::ClientConfig;
 use connectrpc::client::HttpClient;
 use multiservice_example::*;

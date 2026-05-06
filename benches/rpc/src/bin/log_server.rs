@@ -10,7 +10,6 @@
 use buffa::view::OwnedView;
 use connectrpc::{ConnectRpcService, RequestContext, Response, ServiceResult};
 use rpc_bench::connect::bench::v1::*;
-use rpc_bench::proto::bench::v1::__buffa::view::LogRequestView;
 use rpc_bench::proto::bench::v1::*;
 
 struct LogIngestImpl;

@@ -4,7 +4,6 @@ use connectrpc::{ConnectError, ConnectRpcService, RequestContext, Response, Serv
 
 use rpc_bench::connect::fortune::v1::*;
 use rpc_bench::fortune;
-use rpc_bench::proto::fortune::v1::__buffa::view::GetFortunesRequestView;
 use rpc_bench::proto::fortune::v1::*;
 
 use buffa::view::OwnedView;

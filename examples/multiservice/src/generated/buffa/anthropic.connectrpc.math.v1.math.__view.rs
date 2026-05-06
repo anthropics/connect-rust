@@ -93,12 +93,17 @@ impl<'a> ::buffa::MessageView<'a> for AddRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::AddRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::AddRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::AddRequest {
             a: self.a,
             b: self.b,
@@ -157,6 +162,12 @@ impl<'v> ::buffa::DefaultViewInstance for AddRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <AddRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for AddRequestView<'static> {
+    type Reborrowed<'b> = AddRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 /// AddResponse is the response message for the Add RPC.
@@ -237,12 +248,17 @@ impl<'a> ::buffa::MessageView<'a> for AddResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::AddResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::AddResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::AddResponse {
             result: self.result,
             __buffa_unknown_fields: self
@@ -292,5 +308,11 @@ impl<'v> ::buffa::DefaultViewInstance for AddResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <AddResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for AddResponseView<'static> {
+    type Reborrowed<'b> = AddResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }

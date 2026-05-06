@@ -64,12 +64,17 @@ impl<'a> ::buffa::MessageView<'a> for GetFortunesRequestView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::GetFortunesRequest {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::GetFortunesRequest {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::GetFortunesRequest {
             __buffa_unknown_fields: self
                 .__buffa_unknown_fields
@@ -110,6 +115,12 @@ impl<'v> ::buffa::DefaultViewInstance for GetFortunesRequestView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <GetFortunesRequestView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for GetFortunesRequestView<'static> {
+    type Reborrowed<'b> = GetFortunesRequestView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -200,14 +211,23 @@ impl<'a> ::buffa::MessageView<'a> for GetFortunesResponseView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::GetFortunesResponse {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::GetFortunesResponse {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::GetFortunesResponse {
-            fortunes: self.fortunes.iter().map(|v| v.to_owned_message()).collect(),
+            fortunes: self
+                .fortunes
+                .iter()
+                .map(|v| v.to_owned_from_source(__buffa_src))
+                .collect(),
             __buffa_unknown_fields: self
                 .__buffa_unknown_fields
                 .to_owned()
@@ -264,6 +284,12 @@ impl<'v> ::buffa::DefaultViewInstance for GetFortunesResponseView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <GetFortunesResponseView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for GetFortunesResponseView<'static> {
+    type Reborrowed<'b> = GetFortunesResponseView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -353,12 +379,17 @@ impl<'a> ::buffa::MessageView<'a> for FortuneView<'a> {
     ) -> ::core::result::Result<Self, ::buffa::DecodeError> {
         Self::_decode_depth(buf, depth)
     }
-    /// Convert this view to the owned message type.
-    #[allow(clippy::redundant_closure, clippy::useless_conversion)]
-    #[allow(clippy::needless_update)]
     fn to_owned_message(&self) -> super::super::Fortune {
+        self.to_owned_from_source(None)
+    }
+    #[allow(clippy::useless_conversion, clippy::needless_update)]
+    fn to_owned_from_source(
+        &self,
+        __buffa_src: ::core::option::Option<&::buffa::bytes::Bytes>,
+    ) -> super::super::Fortune {
         #[allow(unused_imports)]
         use ::buffa::alloc::string::ToString as _;
+        let _ = __buffa_src;
         super::super::Fortune {
             id: self.id,
             message: self.message.to_string(),
@@ -420,5 +451,11 @@ impl<'v> ::buffa::DefaultViewInstance for FortuneView<'v> {
             .get_or_init(|| ::buffa::alloc::boxed::Box::new(
                 <FortuneView<'static>>::default(),
             ))
+    }
+}
+impl ::buffa::ViewReborrow for FortuneView<'static> {
+    type Reborrowed<'b> = FortuneView<'b>;
+    fn reborrow<'b>(this: &'b Self) -> &'b Self::Reborrowed<'b> {
+        this
     }
 }

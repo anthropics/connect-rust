@@ -27,7 +27,7 @@ use std::collections::HashMap;
 use buffa::{Message, MessageView, ViewEncode};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
-use rpc_bench::proto::bench::v1::__buffa::view::{
+use rpc_bench::proto::bench::v1::{
     BloatEchoView, BloatHeaderView, DeepNestedView, FewLargeStringsView, MapDominatedView,
     NestL1View, NestL2View, NestL3View, NestL4View, NestL5View, ScalarHeavyView,
 };

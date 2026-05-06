@@ -638,26 +638,28 @@ mod tests {
             .compile()
             .unwrap();
 
-        // Per-file output.
+        // Per-file output: buffa message types in `echo.rs`, connect-rust
+        // service code in the `echo.__connect.rs` companion file.
         let echo_rs = out.path().join("echo.rs");
         assert!(echo_rs.exists(), "expected {echo_rs:?} to exist");
-        let content = std::fs::read_to_string(&echo_rs).unwrap();
+        let msg_content = std::fs::read_to_string(&echo_rs).unwrap();
+        assert!(msg_content.contains("pub struct EchoRequest"));
+        assert!(msg_content.contains("pub struct EchoResponse"));
 
-        // Message types from buffa-codegen.
-        assert!(content.contains("pub struct EchoRequest"));
-        assert!(content.contains("pub struct EchoResponse"));
-        // Service trait + client from connectrpc-codegen.
-        assert!(content.contains("pub trait EchoService"));
-        assert!(content.contains("pub struct EchoServiceClient"));
+        let connect_rs = out.path().join("echo.__connect.rs");
+        assert!(connect_rs.exists(), "expected {connect_rs:?} to exist");
+        let svc_content = std::fs::read_to_string(&connect_rs).unwrap();
+        assert!(svc_content.contains("pub trait EchoService"));
+        assert!(svc_content.contains("pub struct EchoServiceClient"));
         // Fully qualified paths (the module-collision fix): no top-level `use`
         // statements, all references are inline absolute paths like
         // `::connectrpc::Context`, `::std::sync::Arc`, etc.
         assert!(
-            content.contains("::connectrpc::"),
+            svc_content.contains("::connectrpc::"),
             "service code should use ::connectrpc:: fully qualified paths"
         );
         assert!(
-            !content.contains("\nuse "),
+            !svc_content.contains("\nuse "),
             "service code should not emit top-level use statements"
         );
 
@@ -670,9 +672,14 @@ mod tests {
         assert!(inc.contains("pub mod echo {"));
         assert!(inc.contains("pub mod v1 {"));
         assert!(inc.contains(r#"include!("test.echo.v1.mod.rs");"#));
-        // Stitcher pulls in the content files including the view tree.
+        // Stitcher pulls in buffa's content files plus the connect-rust
+        // companion (wired via `apply_companions`).
         let stitcher = std::fs::read_to_string(out.path().join("test.echo.v1.mod.rs")).unwrap();
         assert!(stitcher.contains(r#"include!("echo.rs");"#));
+        assert!(
+            stitcher.contains(r#"include!("echo.__connect.rs");"#),
+            "stitcher should include the connect companion file (requires apply_companions, buffa >= 0.5)"
+        );
         assert!(stitcher.contains("pub mod __buffa"));
     }
 
@@ -719,12 +726,32 @@ mod tests {
             .compile()
             .unwrap();
 
-        // Output filename derived from proto path with dots.
-        let out_rs = out.path().join("my.pkg.ping.rs");
-        assert!(out_rs.exists(), "expected {out_rs:?}");
-        let content = std::fs::read_to_string(&out_rs).unwrap();
-        assert!(content.contains("pub struct PingRequest"));
-        assert!(content.contains("pub trait PingService"));
+        // Output filenames derived from proto path with dots: buffa
+        // message types in `<stem>.rs`, connect-rust service code in the
+        // `<stem>.__connect.rs` companion file.
+        let msg_rs = out.path().join("my.pkg.ping.rs");
+        assert!(msg_rs.exists(), "expected {msg_rs:?}");
+        assert!(
+            std::fs::read_to_string(&msg_rs)
+                .unwrap()
+                .contains("pub struct PingRequest")
+        );
+        let svc_rs = out.path().join("my.pkg.ping.__connect.rs");
+        assert!(svc_rs.exists(), "expected {svc_rs:?}");
+        assert!(
+            std::fs::read_to_string(&svc_rs)
+                .unwrap()
+                .contains("pub trait PingService")
+        );
+
+        // The dotted-stem stitcher must wire in the companion file by name;
+        // this exercises `apply_companions` filename escaping for stems that
+        // already contain `.` separators.
+        let stitcher = std::fs::read_to_string(out.path().join("my.pkg.v1.mod.rs")).unwrap();
+        assert!(
+            stitcher.contains(r#"include!("my.pkg.ping.__connect.rs");"#),
+            "stitcher should include the connect companion file (requires apply_companions, buffa >= 0.5)"
+        );
 
         // Include file nests under my.pkg.v1.
         let inc = std::fs::read_to_string(out.path().join("_inc.rs")).unwrap();

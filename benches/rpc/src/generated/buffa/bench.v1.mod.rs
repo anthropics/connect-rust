@@ -65,3 +65,49 @@ pub mod __buffa {
         reg.register_json_any(super::__MAP_DOMINATED_JSON_ANY);
     }
 }
+#[doc(inline)]
+pub use self::__buffa::view::EchoRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::EchoResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::BenchRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::BenchResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::PayloadView;
+#[doc(inline)]
+pub use self::__buffa::view::MetadataView;
+#[doc(inline)]
+pub use self::__buffa::view::LogRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::LogResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::LogRecordView;
+#[doc(inline)]
+pub use self::__buffa::view::LogSourceView;
+#[doc(inline)]
+pub use self::__buffa::view::LogIngestResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::BloatEchoView;
+#[doc(inline)]
+pub use self::__buffa::view::BloatHeaderView;
+#[doc(inline)]
+pub use self::__buffa::view::ScalarHeavyView;
+#[doc(inline)]
+pub use self::__buffa::view::FewLargeStringsView;
+#[doc(inline)]
+pub use self::__buffa::view::NestL5View;
+#[doc(inline)]
+pub use self::__buffa::view::NestL4View;
+#[doc(inline)]
+pub use self::__buffa::view::NestL3View;
+#[doc(inline)]
+pub use self::__buffa::view::NestL2View;
+#[doc(inline)]
+pub use self::__buffa::view::NestL1View;
+#[doc(inline)]
+pub use self::__buffa::view::DeepNestedView;
+#[doc(inline)]
+pub use self::__buffa::view::MapDominatedView;
+#[doc(inline)]
+pub use self::__buffa::register_types;

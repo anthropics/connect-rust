@@ -45,3 +45,19 @@ pub mod __buffa {
         reg.register_json_any(super::__PROCESS_METADATA_RESPONSE_JSON_ANY);
     }
 }
+#[doc(inline)]
+pub use self::__buffa::view::CreateEventRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::CreateEventResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::EventView;
+#[doc(inline)]
+pub use self::__buffa::view::CalculateDurationRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::CalculateDurationResponseView;
+#[doc(inline)]
+pub use self::__buffa::view::ProcessMetadataRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::ProcessMetadataResponseView;
+#[doc(inline)]
+pub use self::__buffa::register_types;

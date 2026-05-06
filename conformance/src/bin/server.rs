@@ -40,12 +40,12 @@ use connectrpc_conformance::UnaryResponse;
 use connectrpc_conformance::UnaryResponseDefinition;
 use connectrpc_conformance::UnimplementedResponse;
 use connectrpc_conformance::init_type_registry;
-use connectrpc_conformance::proto::connectrpc::conformance::v1::__buffa::view::{
+use connectrpc_conformance::read_message;
+use connectrpc_conformance::write_message;
+use connectrpc_conformance::{
     BidiStreamRequestView, ClientStreamRequestView, IdempotentUnaryRequestView,
     ServerStreamRequestView, UnaryRequestView, UnimplementedRequestView,
 };
-use connectrpc_conformance::read_message;
-use connectrpc_conformance::write_message;
 use futures::StreamExt;
 use http::HeaderName;
 use http::HeaderValue;
@@ -209,10 +209,10 @@ impl ConformanceService for ConformanceServiceImpl {
         }
 
         let data = match def.and_then(|d| d.response.as_ref()) {
-            Some(
-                connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
-            ) => d.clone(),
-            Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
+            Some(connectrpc_conformance::unary_response_definition::Response::ResponseData(d)) => {
+                d.clone()
+            }
+            Some(connectrpc_conformance::unary_response_definition::Response::Error(e)) => {
                 let def = def.unwrap();
                 let code = e
                     .code
@@ -266,10 +266,10 @@ impl ConformanceService for ConformanceServiceImpl {
         }
 
         let data = match def.and_then(|d| d.response.as_ref()) {
-            Some(
-                connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
-            ) => d.clone(),
-            Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
+            Some(connectrpc_conformance::unary_response_definition::Response::ResponseData(d)) => {
+                d.clone()
+            }
+            Some(connectrpc_conformance::unary_response_definition::Response::Error(e)) => {
                 let def = def.unwrap();
                 let code = e
                     .code
@@ -507,10 +507,10 @@ impl ConformanceService for ConformanceServiceImpl {
         }
 
         let data = match def.as_ref().and_then(|d| d.response.as_ref()) {
-            Some(
-                connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::ResponseData(d),
-            ) => d.clone(),
-            Some(connectrpc_conformance::__buffa::oneof::unary_response_definition::Response::Error(e)) => {
+            Some(connectrpc_conformance::unary_response_definition::Response::ResponseData(d)) => {
+                d.clone()
+            }
+            Some(connectrpc_conformance::unary_response_definition::Response::Error(e)) => {
                 let def = def.as_ref().unwrap();
                 let code = e
                     .code

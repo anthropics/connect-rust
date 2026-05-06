@@ -42,3 +42,13 @@ pub mod __buffa {
         reg.register_json_any(super::__LOG_INGEST_RESPONSE_JSON_ANY);
     }
 }
+#[doc(inline)]
+pub use self::__buffa::view::LogRequestView;
+#[doc(inline)]
+pub use self::__buffa::view::LogRecordView;
+#[doc(inline)]
+pub use self::__buffa::view::LogSourceView;
+#[doc(inline)]
+pub use self::__buffa::view::LogIngestResponseView;
+#[doc(inline)]
+pub use self::__buffa::register_types;

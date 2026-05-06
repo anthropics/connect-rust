@@ -35,7 +35,7 @@ Add the runtime to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-connectrpc = "0.3"
+connectrpc = "0.4"
 ```
 
 The runtime depends on [`buffa`](https://github.com/anthropics/buffa)
@@ -69,16 +69,16 @@ Common combinations:
 
 ```toml
 # Just the server, behind axum
-connectrpc = { version = "0.3", features = ["axum"] }
+connectrpc = { version = "0.4", features = ["axum"] }
 
 # Server + client, both with TLS
-connectrpc = { version = "0.3", features = ["axum", "client", "tls"] }
+connectrpc = { version = "0.4", features = ["axum", "client", "tls"] }
 
 # Built-in server (no axum)
-connectrpc = { version = "0.3", features = ["server"] }
+connectrpc = { version = "0.4", features = ["server"] }
 
 # Minimal (wasm-friendly: no networking, no native compression)
-connectrpc = { version = "0.3", default-features = false }
+connectrpc = { version = "0.4", default-features = false }
 ```
 
 ## Quick start
@@ -102,7 +102,7 @@ Generate code with `connectrpc-build` in `build.rs`:
 
 ```toml
 [build-dependencies]
-connectrpc-build = "0.3"
+connectrpc-build = "0.4"
 ```
 
 ```rust
@@ -129,7 +129,6 @@ pub mod proto {
     connectrpc::include_generated!();
 }
 use proto::greet::v1::*;
-use proto::greet::v1::__buffa::view::*;
 
 struct MyGreet;
 
@@ -202,6 +201,11 @@ modules), or when generating across language boundaries from one
 schema. Requires three plugins: `protoc-gen-buffa` for message types,
 `protoc-gen-connect-rust` for service stubs, and
 `protoc-gen-buffa-packaging` for assembling `mod.rs` trees.
+
+`protoc-gen-buffa` owns `<stem>.rs` and its ancillary companion files
+(`<stem>.__view.rs`, `<stem>.__oneof.rs`, …); `protoc-gen-connect-rust`
+adds `<stem>.__connect.rs` containing the service trait + client. Each
+package gets a `<pkg>.mod.rs` stitcher that `include!`s all of them.
 
 See the README's
 [Code generation section](../README.md#generate-rust-code) for plugin

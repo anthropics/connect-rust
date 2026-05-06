@@ -15,17 +15,15 @@ use std::time::SystemTime;
 use axum::Router;
 use axum::routing::get;
 use buffa::view::OwnedView;
-use buffa_types::google::protobuf::__buffa::oneof::value;
-use buffa_types::google::protobuf::Duration;
-use buffa_types::google::protobuf::Struct;
-use buffa_types::google::protobuf::Timestamp;
-use buffa_types::google::protobuf::Value;
+// `value` (lowercase) is the oneof submodule for `Value`'s `kind`
+// oneof, re-exported at the natural path by buffa 0.5+.
+use buffa_types::google::protobuf::{Duration, Struct, Timestamp, Value, value};
 use connectrpc::ConnectError;
 use connectrpc::Router as ConnectRouter;
 use connectrpc::{RequestContext, Response, ServiceResult};
-use multiservice_example::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView;
-use multiservice_example::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView;
-use multiservice_example::proto::anthropic::connectrpc::wkt::v1::__buffa::view::{
+use multiservice_example::proto::anthropic::connectrpc::greet::v1::GreetRequestView;
+use multiservice_example::proto::anthropic::connectrpc::math::v1::AddRequestView;
+use multiservice_example::proto::anthropic::connectrpc::wkt::v1::{
     CalculateDurationRequestView, CreateEventRequestView, ProcessMetadataRequestView,
 };
 use multiservice_example::*;

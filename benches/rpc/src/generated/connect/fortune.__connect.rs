@@ -1,9 +1,13 @@
-///Shorthand for `OwnedView<BloatEchoView<'static>>`.
-pub type OwnedBloatEchoView = ::buffa::view::OwnedView<
-    crate::proto::bench::v1::__buffa::view::BloatEchoView<'static>,
+///Shorthand for `OwnedView<GetFortunesRequestView<'static>>`.
+pub type OwnedGetFortunesRequestView = ::buffa::view::OwnedView<
+    crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView<'static>,
 >;
-impl ::connectrpc::Encodable<crate::proto::bench::v1::BloatEcho>
-for crate::proto::bench::v1::__buffa::view::BloatEchoView<'_> {
+///Shorthand for `OwnedView<GetFortunesResponseView<'static>>`.
+pub type OwnedGetFortunesResponseView = ::buffa::view::OwnedView<
+    crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'static>,
+>;
+impl ::connectrpc::Encodable<crate::proto::fortune::v1::GetFortunesResponse>
+for crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'_> {
     fn encode(
         &self,
         codec: ::connectrpc::CodecFormat,
@@ -11,9 +15,9 @@ for crate::proto::bench::v1::__buffa::view::BloatEchoView<'_> {
         ::connectrpc::__codegen::encode_view_body(self, codec)
     }
 }
-impl ::connectrpc::Encodable<crate::proto::bench::v1::BloatEcho>
+impl ::connectrpc::Encodable<crate::proto::fortune::v1::GetFortunesResponse>
 for ::buffa::view::OwnedView<
-    crate::proto::bench::v1::__buffa::view::BloatEchoView<'static>,
+    crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<'static>,
 > {
     fn encode(
         &self,
@@ -23,20 +27,19 @@ for ::buffa::view::OwnedView<
     }
 }
 /// Full service name for this service.
-pub const BLOAT_ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.BloatEchoService";
-/// String-heavy echo payload for measuring ViewEncode impact through
-/// the connect-rust codec layer. ~20 fields covering plain strings,
-/// repeated strings, a string map, two singular sub-messages, and a
-/// repeated sub-message — the field-shape mix where view→view encode
-/// (zero string allocations) is expected to win biggest.
-/// Target encoded size: ~2-3 KB.
+pub const FORTUNE_SERVICE_SERVICE_NAME: &str = "fortune.v1.FortuneService";
+/// Server trait for FortuneService.
 ///
 /// # Implementing handlers
 ///
 /// Handlers receive requests as `OwnedFooView` (an alias for
 /// `OwnedView<FooView<'static>>`), which gives zero-copy borrowed access
 /// to fields (e.g. `request.name` is a `&str` into the decoded buffer).
-/// The view can be held across `.await` points.
+/// The view can be held across `.await` points. When two RPC types in
+/// the same package would alias to the same `Owned<…>View` name (e.g.
+/// a local message plus an imported one with the same short name), the
+/// alias is suppressed for both and the request type is spelled as
+/// `OwnedView<…View<'static>>` directly in the trait signature.
 ///
 /// Implement methods with plain `async fn`; the returned future satisfies
 /// the `Send` bound automatically. See the
@@ -49,18 +52,18 @@ pub const BLOAT_ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.BloatEchoService";
 /// emitted for output types mapped via `extern_path` (the impl would be
 /// an orphan); return owned for WKT/extern outputs.
 #[allow(clippy::type_complexity)]
-pub trait BloatEchoService: Send + Sync + 'static {
-    /// Handle the Echo RPC.
+pub trait FortuneService: Send + Sync + 'static {
+    /// Handle the GetFortunes RPC.
     ///
     /// `'a` lets the response body borrow from `&self` (e.g. server-resident state).
-    fn echo<'a>(
+    fn get_fortunes<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        request: OwnedBloatEchoView,
+        request: OwnedGetFortunesRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
-                crate::proto::bench::v1::BloatEcho,
+                crate::proto::fortune::v1::GetFortunesResponse,
             > + Send + use<'a, Self>,
         >,
     > + Send;
@@ -77,7 +80,7 @@ pub trait BloatEchoService: Send + Sync + 'static {
 /// let service = Arc::new(MyServiceImpl);
 /// let router = service.register(Router::new());
 /// ```
-pub trait BloatEchoServiceExt: BloatEchoService {
+pub trait FortuneServiceExt: FortuneService {
     /// Register this service implementation with a Router.
     ///
     /// Takes ownership of the `Arc<Self>` and returns a new Router with
@@ -87,30 +90,32 @@ pub trait BloatEchoServiceExt: BloatEchoService {
         router: ::connectrpc::Router,
     ) -> ::connectrpc::Router;
 }
-impl<S: BloatEchoService> BloatEchoServiceExt for S {
+impl<S: FortuneService> FortuneServiceExt for S {
     fn register(
         self: ::std::sync::Arc<Self>,
         router: ::connectrpc::Router,
     ) -> ::connectrpc::Router {
         router
             .route_view(
-                BLOAT_ECHO_SERVICE_SERVICE_NAME,
-                "Echo",
+                FORTUNE_SERVICE_SERVICE_NAME,
+                "GetFortunes",
                 {
                     let svc = ::std::sync::Arc::clone(&self);
                     ::connectrpc::view_handler_fn(move |ctx, req, format| {
                         let svc = ::std::sync::Arc::clone(&svc);
                         async move {
-                            svc.echo(ctx, req)
+                            svc.get_fortunes(ctx, req)
                                 .await?
-                                .encode::<crate::proto::bench::v1::BloatEcho>(format)
+                                .encode::<
+                                    crate::proto::fortune::v1::GetFortunesResponse,
+                                >(format)
                         }
                     })
                 },
             )
     }
 }
-/// Monomorphic dispatcher for `BloatEchoService`.
+/// Monomorphic dispatcher for `FortuneService`.
 ///
 /// Unlike `.register(Router)` which type-erases each method into an `Arc<dyn ErasedHandler>` stored in a `HashMap`, this struct dispatches via a compile-time `match` on method name: no vtable, no hash lookup.
 ///
@@ -119,14 +124,14 @@ impl<S: BloatEchoService> BloatEchoServiceExt for S {
 /// ```rust,ignore
 /// use connectrpc::ConnectRpcService;
 ///
-/// let server = BloatEchoServiceServer::new(MyImpl);
+/// let server = FortuneServiceServer::new(MyImpl);
 /// let service = ConnectRpcService::new(server);
 /// // hand `service` to axum/hyper as a fallback_service
 /// ```
-pub struct BloatEchoServiceServer<T> {
+pub struct FortuneServiceServer<T> {
     inner: ::std::sync::Arc<T>,
 }
-impl<T: BloatEchoService> BloatEchoServiceServer<T> {
+impl<T: FortuneService> FortuneServiceServer<T> {
     /// Wrap a service implementation in a monomorphic dispatcher.
     pub fn new(service: T) -> Self {
         Self {
@@ -138,22 +143,22 @@ impl<T: BloatEchoService> BloatEchoServiceServer<T> {
         Self { inner }
     }
 }
-impl<T> Clone for BloatEchoServiceServer<T> {
+impl<T> Clone for FortuneServiceServer<T> {
     fn clone(&self) -> Self {
         Self {
             inner: ::std::sync::Arc::clone(&self.inner),
         }
     }
 }
-impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T> {
+impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
     #[inline]
     fn lookup(
         &self,
         path: &str,
     ) -> Option<::connectrpc::dispatcher::codegen::MethodDescriptor> {
-        let method = path.strip_prefix("bench.v1.BloatEchoService/")?;
+        let method = path.strip_prefix("fortune.v1.FortuneService/")?;
         match method {
-            "Echo" => {
+            "GetFortunes" => {
                 Some(::connectrpc::dispatcher::codegen::MethodDescriptor::unary(false))
             }
             _ => None,
@@ -166,20 +171,20 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
-        let Some(method) = path.strip_prefix("bench.v1.BloatEchoService/") else {
+        let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &request, &format);
         match method {
-            "Echo" => {
+            "GetFortunes" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
-                        crate::proto::bench::v1::__buffa::view::BloatEchoView,
+                        crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView,
                     >(request, format)?;
-                    svc.echo(ctx, req)
+                    svc.get_fortunes(ctx, req)
                         .await?
-                        .encode::<crate::proto::bench::v1::BloatEcho>(format)
+                        .encode::<crate::proto::fortune::v1::GetFortunesResponse>(format)
                 })
             }
             _ => ::connectrpc::dispatcher::codegen::unimplemented_unary(path),
@@ -192,7 +197,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
         request: ::buffa::bytes::Bytes,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
-        let Some(method) = path.strip_prefix("bench.v1.BloatEchoService/") else {
+        let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &request, &format);
@@ -207,7 +212,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
-        let Some(method) = path.strip_prefix("bench.v1.BloatEchoService/") else {
+        let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_unary(path);
         };
         let _ = (&ctx, &requests, &format);
@@ -222,7 +227,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
         requests: ::connectrpc::dispatcher::codegen::RequestStream,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::StreamingResult {
-        let Some(method) = path.strip_prefix("bench.v1.BloatEchoService/") else {
+        let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
             return ::connectrpc::dispatcher::codegen::unimplemented_streaming(path);
         };
         let _ = (&ctx, &requests, &format);
@@ -248,8 +253,8 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
 /// let conn = Http2Connection::connect_plaintext(uri.clone()).await?.shared(1024);
 /// let config = ClientConfig::new(uri).protocol(Protocol::Grpc);
 ///
-/// let client = BloatEchoServiceClient::new(conn, config);
-/// let response = client.echo(request).await?;
+/// let client = FortuneServiceClient::new(conn, config);
+/// let response = client.get_fortunes(request).await?;
 /// ```
 ///
 /// # Example (Connect / HTTP/1.1 or ALPN)
@@ -260,8 +265,8 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
 /// let http = HttpClient::plaintext();  // cleartext http:// only
 /// let config = ClientConfig::new("http://localhost:8080".parse()?);
 ///
-/// let client = BloatEchoServiceClient::new(http, config);
-/// let response = client.echo(request).await?;
+/// let client = FortuneServiceClient::new(http, config);
+/// let response = client.get_fortunes(request).await?;
 /// ```
 ///
 /// # Working with the response
@@ -270,7 +275,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
 /// The `OwnedView` derefs to the view, so field access is zero-copy:
 ///
 /// ```rust,ignore
-/// let resp = client.echo(request).await?.into_view();
+/// let resp = client.get_fortunes(request).await?.into_view();
 /// let name: &str = resp.name;  // borrow into the response buffer
 /// ```
 ///
@@ -278,14 +283,14 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
 /// [`into_owned()`](::connectrpc::client::UnaryResponse::into_owned):
 ///
 /// ```rust,ignore
-/// let owned = client.echo(request).await?.into_owned();
+/// let owned = client.get_fortunes(request).await?.into_owned();
 /// ```
 #[derive(Clone)]
-pub struct BloatEchoServiceClient<T> {
+pub struct FortuneServiceClient<T> {
     transport: T,
     config: ::connectrpc::client::ClientConfig,
 }
-impl<T> BloatEchoServiceClient<T>
+impl<T> FortuneServiceClient<T>
 where
     T: ::connectrpc::client::ClientTransport,
     <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
@@ -302,30 +307,37 @@ where
     pub fn config_mut(&mut self) -> &mut ::connectrpc::client::ClientConfig {
         &mut self.config
     }
-    /// Call the Echo RPC. Sends a request to /bench.v1.BloatEchoService/Echo.
-    pub async fn echo(
+    /// Call the GetFortunes RPC. Sends a request to /fortune.v1.FortuneService/GetFortunes.
+    pub async fn get_fortunes(
         &self,
-        request: crate::proto::bench::v1::BloatEcho,
+        request: crate::proto::fortune::v1::GetFortunesRequest,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
             ::buffa::view::OwnedView<
-                crate::proto::bench::v1::__buffa::view::BloatEchoView<'static>,
+                crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<
+                    'static,
+                >,
             >,
         >,
         ::connectrpc::ConnectError,
     > {
-        self.echo_with_options(request, ::connectrpc::client::CallOptions::default())
+        self.get_fortunes_with_options(
+                request,
+                ::connectrpc::client::CallOptions::default(),
+            )
             .await
     }
-    /// Call the Echo RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
-    pub async fn echo_with_options(
+    /// Call the GetFortunes RPC with explicit per-call options. Options override [`ClientConfig`](::connectrpc::client::ClientConfig) defaults.
+    pub async fn get_fortunes_with_options(
         &self,
-        request: crate::proto::bench::v1::BloatEcho,
+        request: crate::proto::fortune::v1::GetFortunesRequest,
         options: ::connectrpc::client::CallOptions,
     ) -> Result<
         ::connectrpc::client::UnaryResponse<
             ::buffa::view::OwnedView<
-                crate::proto::bench::v1::__buffa::view::BloatEchoView<'static>,
+                crate::proto::fortune::v1::__buffa::view::GetFortunesResponseView<
+                    'static,
+                >,
             >,
         >,
         ::connectrpc::ConnectError,
@@ -333,8 +345,8 @@ where
         ::connectrpc::client::call_unary(
                 &self.transport,
                 &self.config,
-                BLOAT_ECHO_SERVICE_SERVICE_NAME,
-                "Echo",
+                FORTUNE_SERVICE_SERVICE_NAME,
+                "GetFortunes",
                 request,
                 options,
             )

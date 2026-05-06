@@ -23,7 +23,6 @@ pub mod proto {
     connectrpc::include_generated!();
 }
 
-use proto::anthropic::connectrpc::tour::v1::__buffa::view::*;
 use proto::anthropic::connectrpc::tour::v1::*;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;

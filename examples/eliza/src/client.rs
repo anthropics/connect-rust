@@ -41,7 +41,6 @@ mod connect;
 mod proto;
 
 use connect::connectrpc::eliza::v1::*;
-use proto::connectrpc::eliza::v1::__buffa::view::*;
 use proto::connectrpc::eliza::v1::*;
 
 use clap::Parser;
