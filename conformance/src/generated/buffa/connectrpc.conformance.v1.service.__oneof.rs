@@ -28,7 +28,7 @@ pub mod unary_response_definition {
             use serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
-                Response::ResponseData(v) => {
+                Self::ResponseData(v) => {
                     struct _W<'a>(&'a ::buffa::alloc::vec::Vec<u8>);
                     impl serde::Serialize for _W<'_> {
                         fn serialize<S2: serde::Serializer>(
@@ -40,7 +40,7 @@ pub mod unary_response_definition {
                     }
                     map.serialize_entry("responseData", &_W(v))?;
                 }
-                Response::Error(v) => {
+                Self::Error(v) => {
                     map.serialize_entry("error", v)?;
                 }
             }
@@ -85,10 +85,10 @@ pub mod raw_http_request {
             use serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
-                Body::Unary(v) => {
+                Self::Unary(v) => {
                     map.serialize_entry("unary", v)?;
                 }
-                Body::Stream(v) => {
+                Self::Stream(v) => {
                     map.serialize_entry("stream", v)?;
                 }
             }
@@ -120,7 +120,7 @@ pub mod message_contents {
             use serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
-                Data::Binary(v) => {
+                Self::Binary(v) => {
                     struct _W<'a>(&'a ::buffa::alloc::vec::Vec<u8>);
                     impl serde::Serialize for _W<'_> {
                         fn serialize<S2: serde::Serializer>(
@@ -132,10 +132,10 @@ pub mod message_contents {
                     }
                     map.serialize_entry("binary", &_W(v))?;
                 }
-                Data::Text(v) => {
+                Self::Text(v) => {
                     map.serialize_entry("text", v)?;
                 }
-                Data::BinaryMessage(v) => {
+                Self::BinaryMessage(v) => {
                     map.serialize_entry("binaryMessage", v)?;
                 }
             }
@@ -180,10 +180,10 @@ pub mod raw_http_response {
             use serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
-                Body::Unary(v) => {
+                Self::Unary(v) => {
                     map.serialize_entry("unary", v)?;
                 }
-                Body::Stream(v) => {
+                Self::Stream(v) => {
                     map.serialize_entry("stream", v)?;
                 }
             }

@@ -10,6 +10,37 @@ increment the patch version.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-07
+
+### Fixed
+
+- **`connectrpc`: `server` feature now enables `tokio/macros`.**
+  `Server::serve` uses `tokio::select!` to race accept against graceful
+  shutdown, but the `server` feature only enabled `tokio/net`. Crates
+  depending on `connectrpc = { features = ["server"] }` only compiled
+  when something else in the dependency closure enabled `tokio/macros`
+  for them — the conformance suite and examples always do (`tokio = {
+  features = ["macros", …] }` in dev-deps), which kept the gap hidden in
+  CI. The feature now declares its own requirement.
+- **`connectrpc-build`: generated `mod.rs` `#[allow(...)]` is now sourced
+  from `buffa_codegen::ALLOW_LINTS`.** The hardcoded list had drifted
+  behind buffa's: it was missing `clippy::uninlined_format_args` (which
+  buffa enum JSON deserialize errors trip), `clippy::doc_lazy_continuation`,
+  and `clippy::module_inception`. The `pub mod <pkg>` tree wraps buffa's
+  per-proto split output (Owned/View/Oneof/Ext/PackageMod) plus our own
+  `__connect.rs` companions, and the per-proto Owned content has no
+  `#[allow(...)]` of its own — buffa scopes `package_mod_allow_attr()` to
+  `__buffa` and `protoc-gen-buffa-packaging` covers the rest with an
+  inner `#![allow(...)]` that has no analogue in `connectrpc-build`'s
+  outer-mod layout. Sourcing from `ALLOW_LINTS` (chained with the
+  `connectrpc-build`-specific `impl_trait_redundant_captures`) keeps the
+  two from drifting again. Bumps the `buffa-codegen` dependency floor to
+  `0.5.1`, where `unused_qualifications` landed in `ALLOW_LINTS`. The
+  checked-in conformance/example/bench output was regenerated against the
+  buffa 0.5.2 toolchain (`Self::` in oneof serde, inlined format args in
+  enum serde) — those are codegen *output* changes, not API changes, and
+  don't affect the floor.
+
 ## [0.4.1] - 2026-05-07
 
 ### Fixed
