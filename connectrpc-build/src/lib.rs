@@ -501,9 +501,21 @@ fn generate_include_file(entries: &[(String, String)], relative: bool) -> String
         }
         for (name, child) in &node.children {
             let ident = buffa_codegen::idents::escape_mod_ident(name);
+            // `unused_qualifications`: buffa-codegen always references
+            // sibling types through the canonical `__buffa::view::*` path
+            // even when a shorter natural-path re-export exists, because
+            // the re-export can be shadowed by a proto type with the same
+            // name. The qualification is intentional, not "unused".
+            //
+            // `impl_trait_redundant_captures`: the `use<'a, Self>` precise-
+            // capturing clause on trait method RPITs is required for
+            // edition-2021 consumers (which capture only `'static` by
+            // default) but redundant under edition 2024. Codegen targets
+            // both editions and cannot know the consumer's at write time.
             writeln!(
                 out,
                 "{indent}#[allow(dead_code, non_camel_case_types, unused_imports, \
+                 unused_qualifications, impl_trait_redundant_captures, \
                  clippy::derivable_impls, clippy::match_single_binding)]"
             )
             .unwrap();

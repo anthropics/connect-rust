@@ -321,7 +321,7 @@ The core crate compiles for `wasm32-unknown-unknown`. Generated clients are gene
 
 ```toml
 [dependencies]
-connectrpc = { version = "0.2", default-features = false, features = ["gzip"] }
+connectrpc = { version = "0.4", default-features = false, features = ["gzip"] }
 ```
 
 ### Minimal build (no compression)
