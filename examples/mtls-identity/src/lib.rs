@@ -76,10 +76,9 @@ pub fn extract_identity(certs: Option<&PeerCerts>) -> Result<Identity, ConnectEr
         .flat_map(|ext| ext.value.general_names.iter())
         .find_map(|gn| {
             // Only `<single-label>.workloads.example.com` is a workload SAN.
-            // Reject `.workloads.example.com` (empty label) and
-            // `a.b.workloads.example.com` (would alias as `a.b`), which an
-            // attacker-controlled CA could otherwise mint to spoof an ACL
-            // entry.
+            // Reject `.workloads.example.com` and `a.b.workloads.example.com`:
+            // we intend to accept only direct subdomains of the workload
+            // domain.
             let GeneralName::DNSName(dns) = gn else {
                 return None;
             };
@@ -353,7 +352,7 @@ mod tests {
             extract_identity(Some(&empty)).unwrap_err().code,
             ErrorCode::Unauthenticated
         );
-        // Multi-label prefix: "a.b" would alias an ACL entry; reject it.
+        // Multi-label prefix: not a direct subdomain; reject it.
         let multi = peer_certs_with_dns_sans(&["a.b.workloads.example.com"]);
         assert_eq!(
             extract_identity(Some(&multi)).unwrap_err().code,
