@@ -501,24 +501,30 @@ fn generate_include_file(entries: &[(String, String)], relative: bool) -> String
         }
         for (name, child) in &node.children {
             let ident = buffa_codegen::idents::escape_mod_ident(name);
-            // `unused_qualifications`: buffa-codegen always references
-            // sibling types through the canonical `__buffa::view::*` path
-            // even when a shorter natural-path re-export exists, because
-            // the re-export can be shadowed by a proto type with the same
-            // name. The qualification is intentional, not "unused".
+            // The `pub mod <pkg>` tree wraps buffa's per-proto split
+            // output (Owned/View/Oneof/Ext + the PackageMod stitcher)
+            // plus our own `__connect.rs` companions. The per-proto
+            // content files have no `#[allow(...)]` of their own —
+            // buffa's `package_mod_allow_attr()` is scoped to `__buffa`
+            // and `protoc-gen-buffa-packaging` covers the rest with an
+            // inner `#![allow(...)]` that doesn't apply here — so the
+            // suppression set must be the union of
+            // `buffa_codegen::ALLOW_LINTS` and the lints connect-rust
+            // output trips. Sourcing from `ALLOW_LINTS` keeps the two
+            // in lockstep when buffa adds entries.
             //
             // `impl_trait_redundant_captures`: the `use<'a, Self>` precise-
             // capturing clause on trait method RPITs is required for
             // edition-2021 consumers (which capture only `'static` by
             // default) but redundant under edition 2024. Codegen targets
             // both editions and cannot know the consumer's at write time.
-            writeln!(
-                out,
-                "{indent}#[allow(dead_code, non_camel_case_types, unused_imports, \
-                 unused_qualifications, impl_trait_redundant_captures, \
-                 clippy::derivable_impls, clippy::match_single_binding)]"
-            )
-            .unwrap();
+            let allow_lints = buffa_codegen::ALLOW_LINTS
+                .iter()
+                .copied()
+                .chain(["impl_trait_redundant_captures"])
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(out, "{indent}#[allow({allow_lints})]").unwrap();
             writeln!(out, "{indent}pub mod {ident} {{").unwrap();
             writeln!(out, "{indent}    use super::*;").unwrap();
             emit(out, child, depth + 1, relative);

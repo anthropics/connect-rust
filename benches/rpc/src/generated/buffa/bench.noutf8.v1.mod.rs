@@ -5,6 +5,7 @@ include!("bench_noutf8.rs");
     non_camel_case_types,
     dead_code,
     unused_imports,
+    unused_qualifications,
     clippy::derivable_impls,
     clippy::match_single_binding,
     clippy::uninlined_format_args,

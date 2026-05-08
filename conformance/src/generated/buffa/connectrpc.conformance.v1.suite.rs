@@ -749,13 +749,13 @@ pub mod test_suite {
                     let v32 = i32::try_from(v)
                         .map_err(|_| {
                             ::serde::de::Error::custom(
-                                ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                                ::buffa::alloc::format!("enum value {v} out of i32 range"),
                             )
                         })?;
                     <TestMode as ::buffa::Enumeration>::from_i32(v32)
                         .ok_or_else(|| {
                             ::serde::de::Error::custom(
-                                ::buffa::alloc::format!("unknown enum value {}", v32),
+                                ::buffa::alloc::format!("unknown enum value {v32}"),
                             )
                         })
                 }
@@ -766,13 +766,13 @@ pub mod test_suite {
                     let v32 = i32::try_from(v)
                         .map_err(|_| {
                             ::serde::de::Error::custom(
-                                ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                                ::buffa::alloc::format!("enum value {v} out of i32 range"),
                             )
                         })?;
                     <TestMode as ::buffa::Enumeration>::from_i32(v32)
                         .ok_or_else(|| {
                             ::serde::de::Error::custom(
-                                ::buffa::alloc::format!("unknown enum value {}", v32),
+                                ::buffa::alloc::format!("unknown enum value {v32}"),
                             )
                         })
                 }
@@ -897,13 +897,13 @@ pub mod test_suite {
                     let v32 = i32::try_from(v)
                         .map_err(|_| {
                             ::serde::de::Error::custom(
-                                ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                                ::buffa::alloc::format!("enum value {v} out of i32 range"),
                             )
                         })?;
                     <ConnectVersionMode as ::buffa::Enumeration>::from_i32(v32)
                         .ok_or_else(|| {
                             ::serde::de::Error::custom(
-                                ::buffa::alloc::format!("unknown enum value {}", v32),
+                                ::buffa::alloc::format!("unknown enum value {v32}"),
                             )
                         })
                 }
@@ -914,13 +914,13 @@ pub mod test_suite {
                     let v32 = i32::try_from(v)
                         .map_err(|_| {
                             ::serde::de::Error::custom(
-                                ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                                ::buffa::alloc::format!("enum value {v} out of i32 range"),
                             )
                         })?;
                     <ConnectVersionMode as ::buffa::Enumeration>::from_i32(v32)
                         .ok_or_else(|| {
                             ::serde::de::Error::custom(
-                                ::buffa::alloc::format!("unknown enum value {}", v32),
+                                ::buffa::alloc::format!("unknown enum value {v32}"),
                             )
                         })
                 }

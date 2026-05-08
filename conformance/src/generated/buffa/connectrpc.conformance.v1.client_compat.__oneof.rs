@@ -34,10 +34,10 @@ pub mod client_compat_request {
                 use serde::ser::SerializeMap;
                 let mut map = s.serialize_map(Some(1))?;
                 match self {
-                    CancelTiming::BeforeCloseSend(v) => {
+                    Self::BeforeCloseSend(v) => {
                         map.serialize_entry("beforeCloseSend", v)?;
                     }
-                    CancelTiming::AfterCloseSendMs(v) => {
+                    Self::AfterCloseSendMs(v) => {
                         struct _W<'a>(&'a u32);
                         impl serde::Serialize for _W<'_> {
                             fn serialize<S2: serde::Serializer>(
@@ -49,7 +49,7 @@ pub mod client_compat_request {
                         }
                         map.serialize_entry("afterCloseSendMs", &_W(v))?;
                     }
-                    CancelTiming::AfterNumResponses(v) => {
+                    Self::AfterNumResponses(v) => {
                         struct _W<'a>(&'a u32);
                         impl serde::Serialize for _W<'_> {
                             fn serialize<S2: serde::Serializer>(
@@ -115,10 +115,10 @@ pub mod client_compat_response {
             use serde::ser::SerializeMap;
             let mut map = s.serialize_map(Some(1))?;
             match self {
-                Result::Response(v) => {
+                Self::Response(v) => {
                     map.serialize_entry("response", v)?;
                 }
-                Result::Error(v) => {
+                Self::Error(v) => {
                     map.serialize_entry("error", v)?;
                 }
             }

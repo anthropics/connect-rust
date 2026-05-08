@@ -51,13 +51,13 @@ impl<'de> ::serde::Deserialize<'de> for HTTPVersion {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <HTTPVersion as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -68,13 +68,13 @@ impl<'de> ::serde::Deserialize<'de> for HTTPVersion {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <HTTPVersion as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -194,13 +194,13 @@ impl<'de> ::serde::Deserialize<'de> for Protocol {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <Protocol as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -211,13 +211,13 @@ impl<'de> ::serde::Deserialize<'de> for Protocol {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <Protocol as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -335,13 +335,13 @@ impl<'de> ::serde::Deserialize<'de> for Codec {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <Codec as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -352,13 +352,13 @@ impl<'de> ::serde::Deserialize<'de> for Codec {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <Codec as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -471,13 +471,13 @@ impl<'de> ::serde::Deserialize<'de> for Compression {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <Compression as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -488,13 +488,13 @@ impl<'de> ::serde::Deserialize<'de> for Compression {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <Compression as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -631,13 +631,13 @@ impl<'de> ::serde::Deserialize<'de> for StreamType {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <StreamType as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -648,13 +648,13 @@ impl<'de> ::serde::Deserialize<'de> for StreamType {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <StreamType as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -806,13 +806,13 @@ impl<'de> ::serde::Deserialize<'de> for Code {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <Code as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
@@ -823,13 +823,13 @@ impl<'de> ::serde::Deserialize<'de> for Code {
                 let v32 = i32::try_from(v)
                     .map_err(|_| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("enum value {} out of i32 range", v),
+                            ::buffa::alloc::format!("enum value {v} out of i32 range"),
                         )
                     })?;
                 <Code as ::buffa::Enumeration>::from_i32(v32)
                     .ok_or_else(|| {
                         ::serde::de::Error::custom(
-                            ::buffa::alloc::format!("unknown enum value {}", v32),
+                            ::buffa::alloc::format!("unknown enum value {v32}"),
                         )
                     })
             }
