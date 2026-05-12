@@ -246,6 +246,7 @@ pub use handler::view_streaming_handler_fn;
 pub use response::Encodable;
 pub use response::EncodedResponse;
 pub use response::MaybeBorrowed;
+pub use response::PreEncoded;
 pub use response::RequestContext;
 pub use response::Response;
 pub use response::ServiceResult;

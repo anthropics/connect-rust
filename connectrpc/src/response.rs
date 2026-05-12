@@ -8,11 +8,12 @@
 //! [`OwnedView<MView<'static>>`](buffa::view::OwnedView), or
 //! [`MaybeBorrowed`] for the conditional case.
 
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::time::Instant;
 
 use buffa::Message;
-use buffa::view::ViewEncode;
+use buffa::view::{MessageView, ViewEncode};
 use bytes::Bytes;
 use futures::Stream;
 use http::HeaderMap;
@@ -303,7 +304,9 @@ pub type ServiceStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> +
 /// - `MView<'_>` and [`OwnedView<MView<'static>>`](buffa::view::OwnedView),
 ///   emitted by codegen per RPC output type;
 /// - [`MaybeBorrowed<M, V>`] for handlers that conditionally return
-///   either.
+///   either;
+/// - [`PreEncoded`] for handlers that encode a non-`'static` view
+///   internally and pass the bytes across the handler boundary.
 ///
 /// # Contract
 ///
@@ -311,9 +314,10 @@ pub type ServiceStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> +
 /// the given format.
 ///
 /// `encode` is fallible: the owned-message impl never errors, but the
-/// view-body impls are proto-only (view types lack `Serialize`) and
-/// return [`ErrorCode::Unimplemented`](crate::ErrorCode::Unimplemented)
-/// for `CodecFormat::Json`.
+/// view-body impls and [`PreEncoded`] are proto-only (view types lack
+/// `Serialize`, and pre-encoded bytes carry no JSON form) and return
+/// [`ErrorCode::Unimplemented`](crate::ErrorCode::Unimplemented) for
+/// `CodecFormat::Json`.
 pub trait Encodable<M> {
     /// Encode `self` as wire bytes for `M` in the requested format.
     fn encode(&self, codec: CodecFormat) -> Result<Bytes, ConnectError>;
@@ -409,6 +413,138 @@ where
         match self {
             Self::Owned(m) => m.encode(codec),
             Self::Borrowed(v) => v.encode(codec),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PreEncoded
+// ---------------------------------------------------------------------------
+
+/// Pre-encoded protobuf response body for message type `M`.
+///
+/// Use when the handler builds and encodes a borrowing view internally —
+/// e.g. a `FooView<'a>` borrowing from a local snapshot — rather than
+/// returning the view itself. The `'static` bound on `Handler::Body` (and
+/// on streaming items, see the `use<Self>` note in the [`StreamingHandler`]
+/// docs) means a view with a non-`'static` lifetime can't cross the handler
+/// boundary; `PreEncoded` carries the bytes across instead.
+///
+/// The `M` type parameter is a compile-time witness for which RPC output
+/// type the bytes encode. [`PreEncoded::from_view`] enforces it via
+/// `MessageView::Owned`; [`PreEncoded::proto`] takes `M` on trust (you're
+/// asserting the bytes already decode as `M`).
+///
+/// # Streaming example
+///
+/// The motivating shape — a server-streaming handler that builds and
+/// encodes per-item views borrowing from a local store snapshot, then
+/// yields the bytes:
+///
+/// ```rust,ignore
+/// use connectrpc::{PreEncoded, Response, RequestContext, ServiceResult, ServiceStream};
+///
+/// async fn watch(
+///     &self,
+///     _ctx: RequestContext,
+///     req: OwnedWatchRequestView,
+/// ) -> ServiceResult<ServiceStream<PreEncoded<WatchResponse>>> {
+///     let store = self.store.clone();
+///     let stream = futures::stream::unfold(store, |store| async move {
+///         let snapshot = store.load();
+///         // `view` borrows from `snapshot`; encode while the borrow is live.
+///         let view = build_view_from_snapshot(&snapshot);
+///         let item = PreEncoded::from_view(&view);
+///         Some((Ok(item), store))
+///     });
+///     Response::stream_ok(stream)
+/// }
+/// ```
+///
+/// For a unary handler, the same pattern applies — return
+/// `ServiceResult<PreEncoded<MyResponse>>`.
+///
+/// # Codec compatibility
+///
+/// Proto-only — same constraint as the per-output-type view-body impls.
+/// JSON clients receive an [`unimplemented`](crate::ErrorCode::Unimplemented)
+/// error; if your service must support JSON, build the owned message and
+/// return it directly (or [`MaybeBorrowed::Owned`]) on every path.
+///
+/// # Contract
+///
+/// `PreEncoded` is a transparent byte container — it does not validate
+/// the wrapped bytes. [`PreEncoded::from_view`] gives a compile-time
+/// witness via `MessageView::Owned = M`; [`PreEncoded::proto`] trusts the
+/// caller. Returning bytes that don't decode as `M` will produce decode
+/// errors on the client.
+#[must_use = "PreEncoded must be returned from a handler to take effect"]
+pub struct PreEncoded<M> {
+    bytes: Bytes,
+    // `fn() -> M` keeps `PreEncoded<M>` `Send + Sync` regardless of `M`'s
+    // auto-trait surface (the bytes are owned; `M` is only a type witness).
+    _marker: PhantomData<fn() -> M>,
+}
+
+// Manual derives: `#[derive(Debug, Clone)]` would add a spurious `M: Debug` /
+// `M: Clone` bound (PhantomData carries it through to the where-clause).
+impl<M> std::fmt::Debug for PreEncoded<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("PreEncoded").field(&self.bytes).finish()
+    }
+}
+
+impl<M> Clone for PreEncoded<M> {
+    fn clone(&self) -> Self {
+        Self {
+            bytes: self.bytes.clone(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<M> PreEncoded<M> {
+    /// Wrap already-encoded protobuf bytes.
+    ///
+    /// You are asserting the bytes decode as `M`; this is not validated.
+    /// Prefer [`PreEncoded::from_view`] when you have a view in hand —
+    /// it enforces `M` at compile time.
+    pub fn proto(bytes: impl Into<Bytes>) -> Self {
+        Self {
+            bytes: bytes.into(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<M: Message> PreEncoded<M> {
+    /// Encode a [`ViewEncode`] view to protobuf bytes.
+    ///
+    /// The `MessageView<'a, Owned = M>` bound is the compile-time witness
+    /// that the bytes decode as `M` — passing `OtherView<'a>` won't
+    /// type-check unless `OtherView::Owned == M`.
+    pub fn from_view<'a, V>(view: &V) -> Self
+    where
+        V: ViewEncode<'a> + MessageView<'a, Owned = M>,
+    {
+        Self {
+            bytes: view.encode_to_bytes(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+// Coherence note: this impl is well-defined only because `PreEncoded<M>`
+// never implements `Message` or `Serialize` — those would overlap the
+// `impl<M: Message + Serialize> Encodable<M> for M` blanket above. Keep it
+// that way.
+impl<M> Encodable<M> for PreEncoded<M> {
+    fn encode(&self, codec: CodecFormat) -> Result<Bytes, ConnectError> {
+        match codec {
+            CodecFormat::Proto => Ok(self.bytes.clone()),
+            CodecFormat::Json => Err(ConnectError::unimplemented(
+                "pre-encoded body is protobuf-only; build the owned message for JSON-serving handlers",
+            )),
         }
     }
 }
@@ -661,6 +797,60 @@ mod tests {
             MaybeBorrowed::Borrowed(V(StringValueView::default()));
         let err = borrowed.encode(CodecFormat::Json).unwrap_err();
         assert_eq!(err.code, crate::ErrorCode::Unimplemented);
+    }
+
+    #[test]
+    fn pre_encoded_proto_round_trip() {
+        let m = StringValue::from("pre-encoded");
+        let bytes = m.encode_to_bytes();
+        let body = PreEncoded::<StringValue>::proto(bytes.clone());
+        let out = Encodable::<StringValue>::encode(&body, CodecFormat::Proto).unwrap();
+        assert_eq!(out, bytes);
+        assert_eq!(
+            StringValue::decode_from_slice(&out).unwrap().value,
+            "pre-encoded"
+        );
+    }
+
+    #[test]
+    fn pre_encoded_json_unimplemented() {
+        let body = PreEncoded::<StringValue>::proto(Bytes::from_static(&[0x0a, 0x02, b'h', b'i']));
+        let err = Encodable::<StringValue>::encode(&body, CodecFormat::Json).unwrap_err();
+        assert_eq!(err.code, crate::ErrorCode::Unimplemented);
+        assert!(err.message.as_deref().unwrap().contains("protobuf-only"));
+    }
+
+    #[test]
+    fn pre_encoded_from_view() {
+        use buffa::view::ViewEncode;
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        let v = StringValueView {
+            value: "from-view",
+            ..Default::default()
+        };
+        // `from_view` infers `M = StringValue` from `StringValueView::Owned`.
+        let body = PreEncoded::from_view(&v);
+        let out = Encodable::<StringValue>::encode(&body, CodecFormat::Proto).unwrap();
+        assert_eq!(out, v.encode_to_bytes());
+        assert_eq!(
+            StringValue::decode_from_slice(&out).unwrap().value,
+            "from-view"
+        );
+    }
+
+    #[test]
+    fn pre_encoded_is_typed() {
+        // `PreEncoded<M>` only implements `Encodable<M>` — the type witness
+        // means `PreEncoded<StringValue>` cannot be used where
+        // `Encodable<Int32Value>` is required. Verified at compile time;
+        // this test just exercises the happy path for both types.
+        use buffa_types::google::protobuf::Int32Value;
+        let s = PreEncoded::<StringValue>::proto(StringValue::from("a").encode_to_bytes());
+        let i = PreEncoded::<Int32Value>::proto(Int32Value::from(1).encode_to_bytes());
+        Encodable::<StringValue>::encode(&s, CodecFormat::Proto).unwrap();
+        Encodable::<Int32Value>::encode(&i, CodecFormat::Proto).unwrap();
+        // The following would not compile:
+        //   Encodable::<Int32Value>::encode(&s, CodecFormat::Proto)
     }
 
     #[test]

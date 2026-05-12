@@ -295,7 +295,6 @@ pub mod codegen {
     use bytes::Bytes;
     use futures::Stream;
     use futures::StreamExt;
-    use serde::Serialize;
     use serde::de::DeserializeOwned;
 
     use crate::codec::CodecFormat;
@@ -314,26 +313,32 @@ pub mod codegen {
     pub use super::unimplemented_streaming;
     pub use super::unimplemented_unary;
 
-    /// Map a stream of typed responses through `encode_response`.
+    /// Map a stream of typed responses through [`Encodable::encode`].
     ///
     /// Used by generated `call_server_streaming` and `call_bidi_streaming`
-    /// arms to convert the handler's `Stream<Item = Result<Res, _>>` into
+    /// arms to convert the handler's `Stream<Item = Result<B, _>>` into
     /// the `Stream<Item = Result<Bytes, _>>` that the dispatcher protocol
-    /// requires.
-    pub fn encode_response_stream<Res, S>(
+    /// requires. `B` is any [`Encodable<Res>`] — typically `Res` itself,
+    /// but may be [`PreEncoded`](crate::PreEncoded) or
+    /// [`MaybeBorrowed`](crate::MaybeBorrowed) for handlers that encode
+    /// borrowing views per item.
+    ///
+    /// [`Encodable`]: crate::Encodable
+    /// [`Encodable::encode`]: crate::Encodable::encode
+    pub fn encode_response_stream<Res, B, S>(
         stream: S,
         format: CodecFormat,
     ) -> BoxStream<Result<Bytes, ConnectError>>
     where
-        Res: Message + Serialize + Send + 'static,
-        S: Stream<Item = Result<Res, ConnectError>> + Send + 'static,
+        Res: Message + Send + 'static,
+        B: crate::Encodable<Res> + Send + 'static,
+        S: Stream<Item = Result<B, ConnectError>> + Send + 'static,
     {
         use crate::response::Encodable;
         Box::pin(
             futures::stream::unfold(
                 (
-                    Box::pin(stream)
-                        as Pin<Box<dyn Stream<Item = Result<Res, ConnectError>> + Send>>,
+                    Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<B, ConnectError>> + Send>>,
                     format,
                 ),
                 async |(mut s, fmt)| match s.next().await {

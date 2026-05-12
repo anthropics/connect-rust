@@ -154,7 +154,11 @@ pub trait BenchService: Send + Sync + 'static {
         request: OwnedBenchRequestView,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
-            ::connectrpc::ServiceStream<crate::proto::bench::v1::BenchResponse>,
+            ::connectrpc::ServiceStream<
+                impl ::connectrpc::Encodable<
+                    crate::proto::bench::v1::BenchResponse,
+                > + Send + use<Self>,
+            >,
         >,
     > + Send;
     /// Handle the ClientStream RPC.
@@ -178,7 +182,11 @@ pub trait BenchService: Send + Sync + 'static {
         requests: ::connectrpc::ServiceStream<OwnedBenchRequestView>,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
-            ::connectrpc::ServiceStream<crate::proto::bench::v1::BenchResponse>,
+            ::connectrpc::ServiceStream<
+                impl ::connectrpc::Encodable<
+                    crate::proto::bench::v1::BenchResponse,
+                > + Send + use<Self>,
+            >,
         >,
     > + Send;
     /// Handle the LogUnary RPC.
@@ -253,7 +261,11 @@ impl<S: BenchService> BenchServiceExt for S {
                     })
                 },
             )
-            .route_view_server_stream(
+            .route_view_server_stream::<
+                _,
+                _,
+                crate::proto::bench::v1::BenchResponse,
+            >(
                 BENCH_SERVICE_SERVICE_NAME,
                 "ServerStream",
                 ::connectrpc::view_streaming_handler_fn({
@@ -279,7 +291,11 @@ impl<S: BenchService> BenchServiceExt for S {
                     }
                 }),
             )
-            .route_view_bidi_stream(
+            .route_view_bidi_stream::<
+                _,
+                _,
+                crate::proto::bench::v1::BenchResponse,
+            >(
                 BENCH_SERVICE_SERVICE_NAME,
                 "BidiStream",
                 ::connectrpc::view_bidi_streaming_handler_fn({
@@ -461,10 +477,11 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                     let resp = svc.server_stream(ctx, req).await?;
                     Ok(
                         resp
-                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(
-                                s,
-                                format,
-                            )),
+                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream::<
+                                crate::proto::bench::v1::BenchResponse,
+                                _,
+                                _,
+                            >(s, format)),
                     )
                 })
             }
@@ -518,10 +535,11 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                     let resp = svc.bidi_stream(ctx, req_stream).await?;
                     Ok(
                         resp
-                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(
-                                s,
-                                format,
-                            )),
+                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream::<
+                                crate::proto::bench::v1::BenchResponse,
+                                _,
+                                _,
+                            >(s, format)),
                     )
                 })
             }

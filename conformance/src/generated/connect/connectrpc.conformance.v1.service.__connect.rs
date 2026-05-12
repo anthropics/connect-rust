@@ -304,7 +304,9 @@ pub trait ConformanceService: Send + Sync + 'static {
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             ::connectrpc::ServiceStream<
-                crate::proto::connectrpc::conformance::v1::ServerStreamResponse,
+                impl ::connectrpc::Encodable<
+                    crate::proto::connectrpc::conformance::v1::ServerStreamResponse,
+                > + Send + use<Self>,
             >,
         >,
     > + Send;
@@ -378,7 +380,9 @@ pub trait ConformanceService: Send + Sync + 'static {
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             ::connectrpc::ServiceStream<
-                crate::proto::connectrpc::conformance::v1::BidiStreamResponse,
+                impl ::connectrpc::Encodable<
+                    crate::proto::connectrpc::conformance::v1::BidiStreamResponse,
+                > + Send + use<Self>,
             >,
         >,
     > + Send;
@@ -459,7 +463,11 @@ impl<S: ConformanceService> ConformanceServiceExt for S {
                     })
                 },
             )
-            .route_view_server_stream(
+            .route_view_server_stream::<
+                _,
+                _,
+                crate::proto::connectrpc::conformance::v1::ServerStreamResponse,
+            >(
                 CONFORMANCE_SERVICE_SERVICE_NAME,
                 "ServerStream",
                 ::connectrpc::view_streaming_handler_fn({
@@ -487,7 +495,11 @@ impl<S: ConformanceService> ConformanceServiceExt for S {
                     }
                 }),
             )
-            .route_view_bidi_stream(
+            .route_view_bidi_stream::<
+                _,
+                _,
+                crate::proto::connectrpc::conformance::v1::BidiStreamResponse,
+            >(
                 CONFORMANCE_SERVICE_SERVICE_NAME,
                 "BidiStream",
                 ::connectrpc::view_bidi_streaming_handler_fn({
@@ -681,10 +693,11 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
                     let resp = svc.server_stream(ctx, req).await?;
                     Ok(
                         resp
-                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(
-                                s,
-                                format,
-                            )),
+                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream::<
+                                crate::proto::connectrpc::conformance::v1::ServerStreamResponse,
+                                _,
+                                _,
+                            >(s, format)),
                     )
                 })
             }
@@ -742,10 +755,11 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
                     let resp = svc.bidi_stream(ctx, req_stream).await?;
                     Ok(
                         resp
-                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(
-                                s,
-                                format,
-                            )),
+                            .map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream::<
+                                crate::proto::connectrpc::conformance::v1::BidiStreamResponse,
+                                _,
+                                _,
+                            >(s, format)),
                     )
                 })
             }

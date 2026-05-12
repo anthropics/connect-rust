@@ -10,6 +10,63 @@ increment the patch version.
 
 ## [Unreleased]
 
+### Added
+
+- **`PreEncoded<M>` response body** — wraps already-encoded protobuf
+  bytes and satisfies `Encodable<M>`. Use when the handler builds and
+  encodes a borrowing view internally — e.g. a `*View<'a>` borrowing
+  from a local snapshot held in `Arc` — rather than returning the view
+  itself. The `'static` bound on handler bodies and stream items means a
+  view with a non-`'static` lifetime can't cross the handler boundary;
+  `PreEncoded` carries the bytes across instead.
+
+  The `M` type parameter is a compile-time witness:
+  `PreEncoded::from_view(&view)` enforces `M = MView::Owned` so the
+  bytes are guaranteed to decode as `M`; `PreEncoded::proto(bytes)`
+  wraps already-encoded bytes you've produced yourself and takes `M`
+  on trust.
+
+  Proto-only, like the per-output-type view-body impls. JSON clients
+  receive an `unimplemented` error; if your service must support JSON,
+  build the owned message and return it (or `MaybeBorrowed::Owned`) on
+  every path.
+
+### Breaking
+
+- **Streaming handler traits gain `type Item: Encodable<Res>`** and
+  return `ServiceStream<Self::Item>` instead of `ServiceStream<Res>` —
+  brings `StreamingHandler`, `BidiStreamingHandler`,
+  `ViewStreamingHandler`, and `ViewBidiStreamingHandler` to parity with
+  unary `Handler::Body`. Stream items can now be `PreEncoded`,
+  `MaybeBorrowed`, or any `Encodable<Res>`; previously they had to be
+  the owned `Res` itself.
+
+  Existing handlers that yield `ServiceStream<Res>` are unchanged
+  behaviorally — `Res: Encodable<Res>` via the blanket impl. Custom
+  `impl StreamingHandler` (etc.) blocks must add `type Item = Res;`.
+  The `*_handler_fn` helpers infer it.
+
+- **Generated server-streaming and bidi-streaming trait methods now
+  declare `ServiceStream<impl Encodable<Out> + Send + use<Self>>`**
+  instead of `ServiceStream<Out>`. Handler implementations that yield
+  the owned `Out` are unchanged. Handlers that want to yield
+  `PreEncoded` items must do so from `'static` data — the `use<Self>`
+  precise-capturing clause excludes `&self`'s lifetime, so views built
+  inside the stream body must encode to bytes before the borrow ends.
+
+  **Consumers with checked-in `protoc-gen-connect-rust` output must
+  regenerate.** `connectrpc-build` users (build.rs) are unaffected.
+
+- **`encode_response_stream` / `encode_body_stream` gain a `B` type
+  parameter** for the stream item type. `Res` is no longer derivable
+  from the item type alone (the closure return type doesn't constrain
+  which `Res` to project through `Encodable<Res>`), so callers must
+  turbofish:
+  `encode_response_stream::<Res, _, _>(s, format)`. The generated
+  dispatcher and route-registration code does this; only consumers that
+  call `dispatcher::codegen::encode_response_stream` directly need to
+  update.
+
 ## [0.4.2] - 2026-05-07
 
 ### Added

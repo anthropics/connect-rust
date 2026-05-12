@@ -202,7 +202,7 @@ impl Router {
     where
         H: StreamingHandler<Req, Res>,
         Req: Message + DeserializeOwned + Send + 'static,
-        Res: Message + Serialize + Send + 'static,
+        Res: Message + Send + 'static,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = ServerStreamingHandlerWrapper::new(handler);
@@ -253,7 +253,7 @@ impl Router {
     where
         H: BidiStreamingHandler<Req, Res>,
         Req: Message + DeserializeOwned + Send + 'static,
-        Res: Message + Serialize + Send + 'static,
+        Res: Message + Send + 'static,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = BidiStreamingHandlerWrapper::new(handler);
@@ -331,7 +331,7 @@ impl Router {
         H: ViewStreamingHandler<ReqView, Res>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
+        Res: Message + Send + 'static,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = ServerStreamingViewHandlerWrapper::new(handler);
@@ -379,7 +379,7 @@ impl Router {
         H: ViewBidiStreamingHandler<ReqView, Res>,
         ReqView: MessageView<'static> + Send + Sync + 'static,
         ReqView::Owned: Message + DeserializeOwned,
-        Res: Message + Serialize + Send + 'static,
+        Res: Message + Send + 'static,
     {
         let path = format!("{service_name}/{method_name}");
         let wrapper = BidiStreamingViewHandlerWrapper::new(handler);

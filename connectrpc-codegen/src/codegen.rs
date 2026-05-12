@@ -1040,9 +1040,15 @@ fn generate_service(
             let server_streaming = m.server_streaming.unwrap_or(false);
 
             if server_streaming && !client_streaming {
-                // Server streaming method
+                // Server streaming method. The trait method returns
+                // `ServiceStream<impl Encodable<Out>>`; `Res = Out` is no
+                // longer derivable from the opaque item type, so it must
+                // be turbofished.
+                let output_type = resolver
+                    .rust_type(m.output_type.as_deref().unwrap_or(""), package)
+                    .unwrap();
                 quote! {
-                    .route_view_server_stream(
+                    .route_view_server_stream::<_, _, #output_type>(
                         #service_name_const,
                         #method_name,
                         ::connectrpc::view_streaming_handler_fn({
@@ -1075,9 +1081,13 @@ fn generate_service(
                     )
                 }
             } else if client_streaming && server_streaming {
-                // Bidi streaming method
+                // Bidi streaming method. Same turbofish need as server
+                // streaming above.
+                let output_type = resolver
+                    .rust_type(m.output_type.as_deref().unwrap_or(""), package)
+                    .unwrap();
                 quote! {
-                    .route_view_bidi_stream(
+                    .route_view_bidi_stream::<_, _, #output_type>(
                         #service_name_const,
                         #method_name,
                         ::connectrpc::view_bidi_streaming_handler_fn({
@@ -1357,7 +1367,7 @@ fn generate_service_server(
                     Box::pin(async move {
                         let req_stream = ::connectrpc::dispatcher::codegen::decode_view_request_stream::<#input_view>(requests, format);
                         let resp = svc.#method_snake(ctx, req_stream).await?;
-                        Ok(resp.map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(s, format)))
+                        Ok(resp.map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream::<#output_type, _, _>(s, format)))
                     })
                 }
             });
@@ -1380,7 +1390,7 @@ fn generate_service_server(
                     Box::pin(async move {
                         let req = ::connectrpc::dispatcher::codegen::decode_request_view::<#input_view>(request, format)?;
                         let resp = svc.#method_snake(ctx, req).await?;
-                        Ok(resp.map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream(s, format)))
+                        Ok(resp.map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream::<#output_type, _, _>(s, format)))
                     })
                 }
             });
@@ -1559,14 +1569,20 @@ fn generate_trait_method(
     };
 
     if server_streaming && !client_streaming {
-        // Server streaming method
+        // Server streaming method. `impl Encodable<...>` lets the handler
+        // yield `Res`, `PreEncoded`, or `MaybeBorrowed` items — same
+        // flexibility as the unary `impl Encodable<...>` body bound.
+        // `use<Self>` opts out of capturing `&self`'s lifetime (RPITITs in
+        // trait methods otherwise capture it by default), since stream
+        // items have to be `'static`. Without it, the generated route
+        // registration's `Arc::clone` closures fail E0597.
         Ok(quote! {
             #method_doc_tokens
             fn #method_snake(
                 &self,
                 ctx: ::connectrpc::RequestContext,
                 request: #input_arg,
-            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<#output_type>>> + Send;
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<impl ::connectrpc::Encodable<#output_type> + Send + use<Self>>>> + Send;
         })
     } else if client_streaming && !server_streaming {
         // Client streaming method
@@ -1580,14 +1596,15 @@ fn generate_trait_method(
             ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + use<'a, Self>>> + Send;
         })
     } else if client_streaming && server_streaming {
-        // Bidi streaming method
+        // Bidi streaming method. Same `impl Encodable<...>` item type and
+        // `use<Self>` capture clause as server streaming above.
         Ok(quote! {
             #method_doc_tokens
             fn #method_snake(
                 &self,
                 ctx: ::connectrpc::RequestContext,
                 requests: ::connectrpc::ServiceStream<#input_arg>,
-            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<#output_type>>> + Send;
+            ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<impl ::connectrpc::Encodable<#output_type> + Send + use<Self>>>> + Send;
         })
     } else {
         // Unary method
@@ -2191,6 +2208,80 @@ mod tests {
             .count()
                 >= 2,
             "client-streaming and bidi should both inline the streamed request type: {code}"
+        );
+    }
+
+    #[test]
+    fn streaming_methods_use_encodable_item_type() {
+        // Server-streaming and bidi methods should declare their stream
+        // item type as `impl Encodable<Out> + Send + use<Self>` rather than
+        // the bare `Out`, so handlers can return `PreEncoded` /
+        // `MaybeBorrowed` items. The dispatcher and route-registration
+        // arms must both turbofish `Res` since `Encodable<M>` for
+        // `PreEncoded` is generic over `M` (so `Res` is no longer
+        // derivable from the opaque item type).
+        let file = FileDescriptorProto {
+            name: Some("ex/v1/svc.proto".into()),
+            package: Some("ex.v1".into()),
+            message_type: vec![
+                DescriptorProto {
+                    name: Some("Req".into()),
+                    ..Default::default()
+                },
+                DescriptorProto {
+                    name: Some("Resp".into()),
+                    ..Default::default()
+                },
+            ],
+            service: vec![ServiceDescriptorProto {
+                name: Some("Svc".into()),
+                method: vec![
+                    MethodDescriptorProto {
+                        name: Some("ServerStream".into()),
+                        input_type: Some(".ex.v1.Req".into()),
+                        output_type: Some(".ex.v1.Resp".into()),
+                        server_streaming: Some(true),
+                        ..Default::default()
+                    },
+                    MethodDescriptorProto {
+                        name: Some("Bidi".into()),
+                        input_type: Some(".ex.v1.Req".into()),
+                        output_type: Some(".ex.v1.Resp".into()),
+                        client_streaming: Some(true),
+                        server_streaming: Some(true),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let code = gen_file(std::slice::from_ref(&file), 0, &[], false).unwrap();
+
+        // Trait method declares `ServiceStream<impl Encodable<Resp> + ...>`.
+        assert_eq!(
+            code.matches(":: connectrpc :: ServiceStream < impl :: connectrpc :: Encodable < Resp > + Send + use < Self >>")
+                .count(),
+            2,
+            "server-streaming and bidi should both use the Encodable item type: {code}"
+        );
+
+        // Dispatcher arms turbofish `Res` to encode_response_stream.
+        assert_eq!(
+            code.matches("encode_response_stream :: < Resp , _ , _ >")
+                .count(),
+            2,
+            "dispatcher arms must turbofish Res to encode_response_stream: {code}"
+        );
+
+        // Route registrations turbofish `Res` to route_view_*_stream.
+        assert!(
+            code.contains("route_view_server_stream :: < _ , _ , Resp >"),
+            "route_view_server_stream must turbofish Res: {code}"
+        );
+        assert!(
+            code.contains("route_view_bidi_stream :: < _ , _ , Resp >"),
+            "route_view_bidi_stream must turbofish Res: {code}"
         );
     }
 
