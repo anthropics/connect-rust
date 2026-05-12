@@ -318,7 +318,7 @@ pub mod codegen {
     /// Used by generated `call_server_streaming` and `call_bidi_streaming`
     /// arms to convert the handler's `Stream<Item = Result<B, _>>` into
     /// the `Stream<Item = Result<Bytes, _>>` that the dispatcher protocol
-    /// requires. `B` is any [`Encodable<Res>`] — typically `Res` itself,
+    /// requires. `B` is any [`Encodable<Res>`](crate::Encodable) — typically `Res` itself,
     /// but may be [`PreEncoded`](crate::PreEncoded) or
     /// [`MaybeBorrowed`](crate::MaybeBorrowed) for handlers that encode
     /// borrowing views per item.

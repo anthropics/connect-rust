@@ -426,8 +426,9 @@ where
 /// Use when the handler builds and encodes a borrowing view internally —
 /// e.g. a `FooView<'a>` borrowing from a local snapshot — rather than
 /// returning the view itself. The `'static` bound on `Handler::Body` (and
-/// on streaming items, see the `use<Self>` note in the [`StreamingHandler`]
-/// docs) means a view with a non-`'static` lifetime can't cross the handler
+/// on streaming items, see the `use<Self>` note in the
+/// [`StreamingHandler`](crate::StreamingHandler) docs) means a view with a
+/// non-`'static` lifetime can't cross the handler
 /// boundary; `PreEncoded` carries the bytes across instead.
 ///
 /// The `M` type parameter is a compile-time witness for which RPC output
