@@ -313,11 +313,12 @@ pub type ServiceStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> +
 /// Implementations must produce bytes that decode as a valid `M` in
 /// the given format.
 ///
-/// `encode` is fallible: the owned-message impl never errors, but the
-/// view-body impls and [`PreEncoded`] are proto-only (view types lack
-/// `Serialize`, and pre-encoded bytes carry no JSON form) and return
+/// `encode` is fallible: the owned-message impl never errors. The
+/// view-body impls are proto-only (view types lack `Serialize`) and return
 /// [`ErrorCode::Unimplemented`](crate::ErrorCode::Unimplemented) for
-/// `CodecFormat::Json`.
+/// `CodecFormat::Json`. [`PreEncoded`] supports both codecs but the JSON
+/// path is a slow fallback (decode + re-serialize) — see its
+/// `# Codec behaviour` doc.
 pub trait Encodable<M> {
     /// Encode `self` as wire bytes for `M` in the requested format.
     fn encode(&self, codec: CodecFormat) -> Result<Bytes, ConnectError>;
@@ -432,9 +433,24 @@ where
 /// boundary; `PreEncoded` carries the bytes across instead.
 ///
 /// The `M` type parameter is a compile-time witness for which RPC output
-/// type the bytes encode. [`PreEncoded::from_view`] enforces it via
-/// `MessageView::Owned`; [`PreEncoded::proto`] takes `M` on trust (you're
-/// asserting the bytes already decode as `M`).
+/// type the bytes encode. Three construction paths, in decreasing order
+/// of compile-time guarantee:
+///
+/// - [`from_message(&m)`](PreEncoded::from_message) — encodes an owned
+///   `M`; the receiver type *is* the witness.
+/// - [`from_view(&view)`](PreEncoded::from_view) — encodes a borrowing
+///   view; `MessageView::Owned = M` is the witness.
+/// - [`from_bytes_unchecked(bytes)`](PreEncoded::from_bytes_unchecked) —
+///   wraps already-encoded bytes from elsewhere (a cache, storage,
+///   another service). No witness; you're asserting the bytes decode as
+///   `M`.
+///
+/// `from_message` and `from_view` produce the same `PreEncoded<M>` type,
+/// so a stream can mix items built either way (e.g. a cache-hit path
+/// returning the cached owned `M`, a cache-miss path building a view from
+/// a snapshot) — the same role [`MaybeBorrowed`] fills for unary
+/// handlers, but with the encode happening eagerly inside the stream
+/// body.
 ///
 /// # Streaming example
 ///
@@ -465,20 +481,74 @@ where
 /// For a unary handler, the same pattern applies — return
 /// `ServiceResult<PreEncoded<MyResponse>>`.
 ///
-/// # Codec compatibility
+/// # Codec behaviour
 ///
-/// Proto-only — same constraint as the per-output-type view-body impls.
-/// JSON clients receive an [`unimplemented`](crate::ErrorCode::Unimplemented)
-/// error; if your service must support JSON, build the owned message and
-/// return it directly (or [`MaybeBorrowed::Owned`]) on every path.
+/// `PreEncoded` is optimized for the `proto` codec: the wrapped bytes are
+/// passed through verbatim with no re-encoding. The motivating use case
+/// (high-throughput fanout) is proto-only.
+///
+/// For the `json` codec, `PreEncoded` falls back to decoding the bytes as
+/// `M` and re-serializing as JSON. **This is correct but not fast** — a
+/// full proto decode plus a JSON serialize per response (or per stream
+/// item). The fallback exists so that registering a `PreEncoded` handler
+/// on a JSON-capable router degrades gracefully instead of returning a
+/// runtime error. If your service serves a meaningful JSON traffic share,
+/// build and return the owned message (or [`MaybeBorrowed::Owned`])
+/// instead — that lets the codec layer pick the right encoding without
+/// the proto round-trip.
+///
+/// If the wrapped bytes don't decode as `M` (e.g. you passed mismatched
+/// bytes to [`from_bytes_unchecked`](PreEncoded::from_bytes_unchecked)),
+/// the JSON path returns an [`internal`](crate::ErrorCode::Internal)
+/// error at the server; the proto path passes the bytes through and the
+/// client sees a decode error.
+///
+/// ## Codec-dependent fidelity
+///
+/// The proto path is byte-exact; the JSON path is **only as faithful as
+/// decoding the bytes to an owned `M` and re-serializing**. The two
+/// diverge when the wrapped bytes carry information not representable in
+/// `M` itself:
+///
+/// - **Unknown fields** (proto bytes encoded against a *newer* schema
+///   than the server's `M`) are preserved on the proto path and dropped
+///   on the JSON path. This matters only for
+///   [`from_bytes_unchecked`](PreEncoded::from_bytes_unchecked) bytes
+///   sourced externally; bytes produced by
+///   [`from_message`](PreEncoded::from_message) /
+///   [`from_view`](PreEncoded::from_view) cannot carry unknown fields.
+/// - **Non-canonical proto encodings** (out-of-order fields, redundant
+///   length prefixes, repeated non-`repeated` fields) are passed through
+///   verbatim on the proto path and normalized by the decode on the JSON
+///   path.
+///
+/// If byte-exact fidelity across codecs matters (e.g. signature
+/// verification, content-addressed storage), do not use `PreEncoded` with
+/// JSON-capable routes.
+///
+/// ## Cost is selected by the client
+///
+/// The codec is chosen per-request by the client's `Content-Type` header.
+/// For a service that adopted `PreEncoded` for proto throughput, a client
+/// sending JSON requests (intentionally, by misconfiguration, or
+/// adversarially) shifts those requests onto the slow decode-reserialize
+/// path. The marginal cost is bounded by the response size and is usually
+/// small relative to the handler's own work, but a streaming RPC pays it
+/// per item. A service that wants to *enforce* proto-only should reject
+/// non-proto `Content-Type` at the middleware layer (e.g. an axum
+/// middleware that returns `415 Unsupported Media Type`) rather than rely
+/// on the body type — that keeps the policy outside the handler and
+/// applies before the request body is read.
 ///
 /// # Contract
 ///
 /// `PreEncoded` is a transparent byte container — it does not validate
-/// the wrapped bytes. [`PreEncoded::from_view`] gives a compile-time
-/// witness via `MessageView::Owned = M`; [`PreEncoded::proto`] trusts the
-/// caller. Returning bytes that don't decode as `M` will produce decode
-/// errors on the client.
+/// the wrapped bytes on the proto path. [`PreEncoded::from_view`] gives a
+/// compile-time witness via `MessageView::Owned = M`;
+/// [`PreEncoded::from_bytes_unchecked`] trusts the caller. Returning bytes
+/// that don't decode as `M` will produce decode errors on the client (or,
+/// for JSON clients, an `internal` error from the server-side fallback
+/// decode).
 #[must_use = "PreEncoded must be returned from a handler to take effect"]
 pub struct PreEncoded<M> {
     bytes: Bytes,
@@ -504,21 +574,27 @@ impl<M> Clone for PreEncoded<M> {
     }
 }
 
-impl<M> PreEncoded<M> {
-    /// Wrap already-encoded protobuf bytes.
+impl<M: Message> PreEncoded<M> {
+    /// Encode an owned `M` to protobuf bytes.
     ///
-    /// You are asserting the bytes decode as `M`; this is not validated.
-    /// Prefer [`PreEncoded::from_view`] when you have a view in hand —
-    /// it enforces `M` at compile time.
-    pub fn proto(bytes: impl Into<Bytes>) -> Self {
+    /// The receiver type is the compile-time witness — there's no way to
+    /// produce a `PreEncoded<M>` from a `&Other`. This is the right
+    /// constructor when the handler builds an owned `M` and wants to
+    /// share the encoding (e.g. encode once, clone the
+    /// [`Bytes`]-backed `PreEncoded` for N readers in a fanout) or when a
+    /// stream needs to mix owned-message and view-built items under a
+    /// single `type Item = PreEncoded<M>`.
+    ///
+    /// Equivalent to `PreEncoded::from_bytes_unchecked(m.encode_to_bytes())`,
+    /// but with `M` enforced by the type system rather than asserted by
+    /// the caller.
+    pub fn from_message(msg: &M) -> Self {
         Self {
-            bytes: bytes.into(),
+            bytes: msg.encode_to_bytes(),
             _marker: PhantomData,
         }
     }
-}
 
-impl<M: Message> PreEncoded<M> {
     /// Encode a [`ViewEncode`] view to protobuf bytes.
     ///
     /// The `MessageView<'a, Owned = M>` bound is the compile-time witness
@@ -533,19 +609,78 @@ impl<M: Message> PreEncoded<M> {
             _marker: PhantomData,
         }
     }
+
+    /// Wrap already-encoded protobuf bytes without validating them.
+    ///
+    /// Use when the bytes come from somewhere with no structural type
+    /// guarantee — a byte cache, a blob store, a sidecar service. You are
+    /// asserting the bytes decode as `M`; the proto path does not
+    /// validate this. In debug builds, the bytes are decoded once as a
+    /// `debug_assert!` to surface mismatches early.
+    ///
+    /// Prefer [`from_message`](PreEncoded::from_message) when you have an
+    /// owned `M` in hand and [`from_view`](PreEncoded::from_view) when
+    /// you have a view — both enforce `M` at compile time.
+    ///
+    /// Zero-copy for `Bytes` and `Vec<u8>`; passing `&[u8]` allocates and
+    /// copies.
+    pub fn from_bytes_unchecked(bytes: impl Into<Bytes>) -> Self {
+        let bytes = bytes.into();
+        debug_assert!(
+            M::decode_from_slice(&bytes).is_ok(),
+            "PreEncoded::from_bytes_unchecked: bytes do not decode as {}",
+            std::any::type_name::<M>(),
+        );
+        Self {
+            bytes,
+            _marker: PhantomData,
+        }
+    }
 }
 
-// Coherence note: this impl is well-defined only because `PreEncoded<M>`
-// never implements `Message` or `Serialize` — those would overlap the
-// `impl<M: Message + Serialize> Encodable<M> for M` blanket above. Keep it
-// that way.
-impl<M> Encodable<M> for PreEncoded<M> {
+/// Encode an owned `M` to a [`PreEncoded<M>`].
+///
+/// Equivalent to [`PreEncoded::from_message`]; provided for `.into()`
+/// ergonomics.
+impl<M: Message> From<&M> for PreEncoded<M> {
+    fn from(msg: &M) -> Self {
+        Self::from_message(msg)
+    }
+}
+
+// Coherence: this impl is non-overlapping with the
+// `impl<M: Message + Serialize> Encodable<M> for M` blanket above for
+// structural reasons. For the two to overlap, some `T` would have to satisfy
+// both `T: Encodable<T>` (blanket, with `T: Message + Serialize`) and
+// `T = PreEncoded<U>` with `T: Encodable<U>` (this impl) for the *same* trait
+// parameter — i.e. `T = U`, i.e. `PreEncoded<U> = U`, which is infinite. So
+// the impls cannot overlap even if a future change made `PreEncoded` a
+// `Message` (which would only add `PreEncoded<M>: Encodable<PreEncoded<M>>` —
+// a different trait instantiation). No invariant to maintain here.
+//
+// The `M: Message + Serialize` bound matches the blanket so a `PreEncoded<M>`
+// is `Encodable<M>` exactly when an owned `M` would be — and is what makes the
+// JSON fallback path possible (decode as `M`, re-serialize).
+impl<M: Message + Serialize> Encodable<M> for PreEncoded<M> {
     fn encode(&self, codec: CodecFormat) -> Result<Bytes, ConnectError> {
         match codec {
             CodecFormat::Proto => Ok(self.bytes.clone()),
-            CodecFormat::Json => Err(ConnectError::unimplemented(
-                "pre-encoded body is protobuf-only; build the owned message for JSON-serving handlers",
-            )),
+            // Slow path: decode the proto bytes back to `M`, then serialize
+            // as JSON. This exists for correctness (JSON clients should get
+            // a response, not `unimplemented`), not throughput; the owned
+            // message path skips the proto round-trip and is preferable for
+            // JSON-heavy services. See the type-level docs.
+            CodecFormat::Json => {
+                let msg = M::decode_from_slice(&self.bytes).map_err(|e| {
+                    ConnectError::internal(format!(
+                        "pre-encoded bytes did not decode as {}: {e}",
+                        std::any::type_name::<M>(),
+                    ))
+                })?;
+                serde_json::to_vec(&msg).map(Bytes::from).map_err(|e| {
+                    ConnectError::internal(format!("failed to encode JSON response: {e}"))
+                })
+            }
         }
     }
 }
@@ -804,7 +939,7 @@ mod tests {
     fn pre_encoded_proto_round_trip() {
         let m = StringValue::from("pre-encoded");
         let bytes = m.encode_to_bytes();
-        let body = PreEncoded::<StringValue>::proto(bytes.clone());
+        let body = PreEncoded::<StringValue>::from_bytes_unchecked(bytes.clone());
         let out = Encodable::<StringValue>::encode(&body, CodecFormat::Proto).unwrap();
         assert_eq!(out, bytes);
         assert_eq!(
@@ -814,11 +949,33 @@ mod tests {
     }
 
     #[test]
-    fn pre_encoded_json_unimplemented() {
-        let body = PreEncoded::<StringValue>::proto(Bytes::from_static(&[0x0a, 0x02, b'h', b'i']));
+    fn pre_encoded_json_decodes_then_serializes() {
+        // The JSON path round-trips: proto bytes → owned `M` → JSON. Slow,
+        // but correct — see the `# Codec behaviour` doc on `PreEncoded`.
+        let m = StringValue::from("hi");
+        let body = PreEncoded::<StringValue>::from_bytes_unchecked(m.encode_to_bytes());
+        let out = Encodable::<StringValue>::encode(&body, CodecFormat::Json).unwrap();
+        // Output should match what serializing the owned message directly
+        // would produce.
+        assert_eq!(out, Bytes::from(serde_json::to_vec(&m).unwrap()));
+    }
+
+    #[test]
+    fn pre_encoded_json_decode_failure_is_internal_error() {
+        // `from_bytes_unchecked` is unvalidated on the proto path. The JSON
+        // fallback necessarily decodes; if that fails (the wrapped bytes
+        // were never a valid `M`), the server-side `internal` error surfaces
+        // closer to the construction bug than the proto path would.
+        //
+        // Field 1 (LEN) declares 99 bytes but only 2 follow — guaranteed
+        // truncated for `StringValue`.
+        let body = PreEncoded::<StringValue> {
+            bytes: Bytes::from_static(&[0x0a, 0x63, b'h', b'i']),
+            _marker: std::marker::PhantomData,
+        };
         let err = Encodable::<StringValue>::encode(&body, CodecFormat::Json).unwrap_err();
-        assert_eq!(err.code, crate::ErrorCode::Unimplemented);
-        assert!(err.message.as_deref().unwrap().contains("protobuf-only"));
+        assert_eq!(err.code, crate::ErrorCode::Internal);
+        assert!(err.message.as_deref().unwrap().contains("did not decode"));
     }
 
     #[test]
@@ -840,18 +997,77 @@ mod tests {
     }
 
     #[test]
+    fn pre_encoded_from_message() {
+        let m = StringValue::from("from-message");
+        // `from_message` infers `M` from the receiver — no annotation.
+        let body = PreEncoded::from_message(&m);
+        let out = Encodable::<StringValue>::encode(&body, CodecFormat::Proto).unwrap();
+        assert_eq!(out, m.encode_to_bytes());
+
+        // `From<&M>` is the same conversion via `.into()`.
+        let body2: PreEncoded<StringValue> = (&m).into();
+        let out2 = Encodable::<StringValue>::encode(&body2, CodecFormat::Proto).unwrap();
+        assert_eq!(out2, out);
+    }
+
+    #[test]
+    fn pre_encoded_codec_fidelity_diverges_on_unknown_fields() {
+        // Documents the codec-dependent fidelity caveat: the proto path
+        // is byte-exact (unknown fields preserved); the JSON path
+        // round-trips through `M` (unknown fields dropped). Only relevant
+        // for `from_bytes_unchecked` bytes sourced externally.
+        //
+        // Wire bytes: field 1 = "hi" (the known `StringValue.value`),
+        // plus field 2 = varint 42 (unknown to `StringValue`).
+        let bytes_with_unknown =
+            Bytes::from_static(&[0x0a, 0x02, b'h', b'i', /* tag 2 varint */ 0x10, 42]);
+        let body = PreEncoded::<StringValue> {
+            bytes: bytes_with_unknown.clone(),
+            _marker: std::marker::PhantomData,
+        };
+
+        // Proto: byte-exact passthrough, unknown field preserved.
+        let proto = Encodable::<StringValue>::encode(&body, CodecFormat::Proto).unwrap();
+        assert_eq!(proto, bytes_with_unknown);
+
+        // JSON: round-trips through `StringValue`, which drops the
+        // unknown field. Output equals serializing the bare known
+        // message.
+        let json = Encodable::<StringValue>::encode(&body, CodecFormat::Json).unwrap();
+        assert_eq!(
+            json,
+            Bytes::from(serde_json::to_vec(&StringValue::from("hi")).unwrap())
+        );
+    }
+
+    #[test]
     fn pre_encoded_is_typed() {
         // `PreEncoded<M>` only implements `Encodable<M>` — the type witness
         // means `PreEncoded<StringValue>` cannot be used where
         // `Encodable<Int32Value>` is required. Verified at compile time;
         // this test just exercises the happy path for both types.
         use buffa_types::google::protobuf::Int32Value;
-        let s = PreEncoded::<StringValue>::proto(StringValue::from("a").encode_to_bytes());
-        let i = PreEncoded::<Int32Value>::proto(Int32Value::from(1).encode_to_bytes());
+        let s = PreEncoded::<StringValue>::from_bytes_unchecked(
+            StringValue::from("a").encode_to_bytes(),
+        );
+        let i =
+            PreEncoded::<Int32Value>::from_bytes_unchecked(Int32Value::from(1).encode_to_bytes());
         Encodable::<StringValue>::encode(&s, CodecFormat::Proto).unwrap();
         Encodable::<Int32Value>::encode(&i, CodecFormat::Proto).unwrap();
         // The following would not compile:
         //   Encodable::<Int32Value>::encode(&s, CodecFormat::Proto)
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "do not decode as")]
+    fn pre_encoded_from_bytes_unchecked_debug_asserts() {
+        // In debug builds, `from_bytes_unchecked` decodes once to surface
+        // mismatched bytes early. Field 1 (LEN) declares 99 bytes; only 2
+        // follow.
+        let _ = PreEncoded::<StringValue>::from_bytes_unchecked(Bytes::from_static(&[
+            0x0a, 0x63, b'h', b'i',
+        ]));
     }
 
     #[test]

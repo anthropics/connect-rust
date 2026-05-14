@@ -20,16 +20,21 @@ increment the patch version.
   view with a non-`'static` lifetime can't cross the handler boundary;
   `PreEncoded` carries the bytes across instead.
 
-  The `M` type parameter is a compile-time witness:
-  `PreEncoded::from_view(&view)` enforces `M = MView::Owned` so the
-  bytes are guaranteed to decode as `M`; `PreEncoded::proto(bytes)`
-  wraps already-encoded bytes you've produced yourself and takes `M`
-  on trust.
+  The `M` type parameter is a compile-time witness. Three construction
+  paths, in decreasing order of guarantee:
+  `PreEncoded::from_message(&m)` (also `From<&M>`/`.into()`) encodes an
+  owned `M` and the receiver type is the witness;
+  `PreEncoded::from_view(&view)` enforces `M = MView::Owned`;
+  `PreEncoded::from_bytes_unchecked(bytes)` wraps already-encoded bytes
+  from elsewhere — a cache, a blob store, a sidecar — and takes `M` on
+  trust (in debug builds it also decodes once as a `debug_assert!`).
 
-  Proto-only, like the per-output-type view-body impls. JSON clients
-  receive an `unimplemented` error; if your service must support JSON,
-  build the owned message and return it (or `MaybeBorrowed::Owned`) on
-  every path.
+  Optimized for the proto codec, where the bytes pass through verbatim.
+  JSON requests fall back to decoding the proto bytes as `M` and
+  re-serializing — slow, but a working response rather than a runtime
+  `unimplemented` error. Services with significant JSON traffic should
+  build and return the owned message (or `MaybeBorrowed::Owned`) so the
+  codec layer can skip the proto round-trip.
 
 ### Breaking
 
@@ -53,8 +58,9 @@ need a one-line edit.
   service trait or the `*_handler_fn` closure helpers, neither of which
   is affected — codegen handles the new shape and the helpers infer
   `type Item` from the closure return. Hand-rolled `impl
-  StreamingHandler` blocks must add `type Item = Res;`. (At the time of
-  this change there are two such impls across all known consumers.)
+  StreamingHandler` blocks must add `type Item = Res;`. We surveyed the
+  in-tree consumers and found two; if you have hand-rolled impls,
+  expect a single one-line addition per impl block.
 
 - **Generated server-streaming and bidi-streaming trait methods now
   declare `ServiceStream<impl Encodable<Out> + Send + use<Self>>`**
@@ -71,15 +77,14 @@ need a one-line edit.
   regenerate** (the same regeneration footgun documented in 0.4.0).
   `connectrpc-build` users (build.rs) are unaffected.
 
-- **`encode_response_stream` / `encode_body_stream` gain a `B` type
-  parameter** for the stream item type. `Res` is no longer derivable
-  from the item type alone (the closure return type doesn't constrain
-  which `Res` to project through `Encodable<Res>`), so callers must
-  turbofish:
-  `encode_response_stream::<Res, _, _>(s, format)`. The generated
-  dispatcher and route-registration code does this; only consumers that
-  call `dispatcher::codegen::encode_response_stream` directly need to
-  update. We are not aware of any.
+- **`dispatcher::codegen::encode_response_stream` gains a `B` type
+  parameter** for the stream item type. The generated dispatcher and
+  route-registration code passes `Res` explicitly because the trait
+  method's stream item is the *opaque* `impl Encodable<Out>` (RPITIT),
+  which can't be unified against the `Encodable<Res>` impls. Only
+  consumers that call `dispatcher::codegen::encode_response_stream`
+  directly need to turbofish `encode_response_stream::<Res, _, _>(s,
+  format)`. We are not aware of any.
 
 ## [0.4.2] - 2026-05-07
 

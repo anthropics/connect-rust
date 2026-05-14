@@ -65,6 +65,12 @@ pub type BoxStream<T> = Pin<Box<dyn Stream<Item = T> + Send>>;
 /// `B` is any [`Encodable<Res>`] — typically `Res` itself, but may be
 /// [`PreEncoded`](crate::PreEncoded) or [`MaybeBorrowed`](crate::MaybeBorrowed)
 /// for handlers that encode borrowing views per item.
+///
+/// Thin re-export wrapper so the four `*StreamingHandlerWrapper`
+/// `call_erased` impls below don't have to spell out the
+/// `dispatcher::codegen` path; the implementation is shared with the
+/// codegen-emitted dispatcher arms (see
+/// [`encode_response_stream`](crate::dispatcher::codegen::encode_response_stream)).
 fn encode_body_stream<Res, B, S>(
     stream: S,
     format: CodecFormat,
@@ -74,21 +80,7 @@ where
     B: Encodable<Res> + Send + 'static,
     S: Stream<Item = Result<B, ConnectError>> + Send + 'static,
 {
-    use futures::StreamExt as _;
-    Box::pin(
-        futures::stream::unfold(
-            (
-                Box::pin(stream) as Pin<Box<dyn Stream<Item = Result<B, ConnectError>> + Send>>,
-                format,
-            ),
-            async |(mut s, fmt)| match s.next().await {
-                Some(Ok(res)) => Some((Encodable::<Res>::encode(&res, fmt), (s, fmt))),
-                Some(Err(e)) => Some((Err(e), (s, fmt))),
-                None => None,
-            },
-        )
-        .fuse(),
-    )
+    crate::dispatcher::codegen::encode_response_stream::<Res, B, S>(stream, format)
 }
 
 // ============================================================================
@@ -333,18 +325,25 @@ where
 
 /// Helper function to create a streaming handler from an async function.
 ///
-/// When the closure yields owned `Res` items, all type parameters are
-/// inferred. When it yields a generic [`Encodable`] body like
-/// [`PreEncoded<Res>`](crate::PreEncoded), `Res` is no longer derivable
-/// from the item type and must be turbofished:
+/// `Res` is inferred from the stream item type `B` whenever the closure
+/// pins `B` to a concrete type — yielding an owned `Res`,
+/// [`PreEncoded::from_view(&view)`](crate::PreEncoded::from_view), or
+/// [`PreEncoded::<MyResponse>::from_bytes_unchecked(bytes)`](crate::PreEncoded::from_bytes_unchecked)
+/// all infer cleanly. Inference only fails when the closure leaves the
+/// message type itself open (e.g. `PreEncoded::from_bytes_unchecked(bytes)`
+/// with no `::<M>`); the simplest fix is to name `M` at the construction
+/// site rather than turbofishing this helper:
 ///
 /// ```rust,ignore
-/// streaming_handler_fn::<_, _, MyRequest, MyResponse, PreEncoded<MyResponse>>(handler)
+/// // `M` named at the construction site — `Res` is inferred:
+/// PreEncoded::<MyResponse>::from_bytes_unchecked(bytes)
 /// ```
 ///
 /// The codegen-emitted route registrations (`route_view_server_stream::<_,
-/// _, Out>`) supply `Res` for you, so this only affects hand-written
-/// `Router` registrations.
+/// _, Out>`) always pin `Res` because the trait method's stream item is the
+/// *opaque* `impl Encodable<Out>`, which can't be unified against the
+/// `Encodable<Res>` impls. Hand-written `Router` registrations don't hit
+/// this unless they leave the message type open.
 pub fn streaming_handler_fn<F, Fut, Req, Res, B>(f: F) -> FnStreamingHandler<F>
 where
     F: Fn(RequestContext, Req) -> Fut + Send + Sync + 'static,
@@ -1224,12 +1223,16 @@ mod tests {
         use futures::StreamExt as _;
         // A `StreamingHandler` (or `ViewStreamingHandler`) with
         // `type Item = PreEncoded` yields bytes the handler encoded
-        // internally; the stream must pass them through verbatim.
+        // internally; the proto codec must pass them through verbatim.
         let bytes_a = StringValue::from("a").encode_to_bytes();
         let bytes_b = StringValue::from("b").encode_to_bytes();
         let s = futures::stream::iter([
-            Ok(PreEncoded::<StringValue>::proto(bytes_a.clone())),
-            Ok(PreEncoded::<StringValue>::proto(bytes_b.clone())),
+            Ok(PreEncoded::<StringValue>::from_bytes_unchecked(
+                bytes_a.clone(),
+            )),
+            Ok(PreEncoded::<StringValue>::from_bytes_unchecked(
+                bytes_b.clone(),
+            )),
         ]);
         let mut out =
             encode_body_stream::<StringValue, PreEncoded<StringValue>, _>(s, CodecFormat::Proto);
@@ -1239,14 +1242,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn encode_body_stream_pre_encoded_json_unimplemented() {
+    async fn encode_body_stream_pre_encoded_json_decodes_per_item() {
         use crate::PreEncoded;
         use futures::StreamExt as _;
-        let s = futures::stream::iter([Ok(PreEncoded::<StringValue>::proto(Bytes::new()))]);
+        // The JSON path decodes the proto bytes back to `M` per item and
+        // re-serializes — slow but correct. Each item should match what
+        // serializing the owned message directly would produce.
+        let m_a = StringValue::from("a");
+        let m_b = StringValue::from("b");
+        let s = futures::stream::iter([
+            Ok(PreEncoded::<StringValue>::from_bytes_unchecked(
+                m_a.encode_to_bytes(),
+            )),
+            Ok(PreEncoded::<StringValue>::from_bytes_unchecked(
+                m_b.encode_to_bytes(),
+            )),
+        ]);
         let mut out =
             encode_body_stream::<StringValue, PreEncoded<StringValue>, _>(s, CodecFormat::Json);
-        let err = out.next().await.unwrap().unwrap_err();
-        assert_eq!(err.code, crate::error::ErrorCode::Unimplemented);
+        assert_eq!(
+            out.next().await.unwrap().unwrap(),
+            Bytes::from(serde_json::to_vec(&m_a).unwrap())
+        );
+        assert_eq!(
+            out.next().await.unwrap().unwrap(),
+            Bytes::from(serde_json::to_vec(&m_b).unwrap())
+        );
+        assert!(out.next().await.is_none());
     }
 
     #[test]
@@ -1271,18 +1293,19 @@ mod tests {
         });
         assert_handler::<_, StringValue, StringValue, StringValue>(&owned);
 
-        // `PreEncoded<M>` is `Encodable<M>` only for its own `M`, but the
-        // *closure* return type `ServiceStream<PreEncoded<StringValue>>`
-        // doesn't constrain `Res` (any `Res` for which `PreEncoded<Res>:
-        // Encodable<Res>` would unify) — it must be turbofished. (The
-        // generated `register_routes` impl turbofishes `Res` at the
-        // `route_view_*_stream::<_, _, Res>(...)` call site for the same
-        // reason.)
-        let pre = streaming_handler_fn::<_, _, StringValue, StringValue, PreEncoded<StringValue>>(
-            |_ctx: RequestContext, _req: StringValue| async move {
-                Response::stream_ok(futures::stream::iter([Ok(PreEncoded::proto(Bytes::new()))]))
-            },
-        );
+        // When the closure pins the `PreEncoded` message type concretely,
+        // `Res` is inferred from the unique `Encodable<M> for PreEncoded<M>`
+        // impl. No turbofish needed on `streaming_handler_fn`. (The codegen
+        // path is different: the trait method's `impl Encodable<Out>` item
+        // is opaque, so the generated `register_routes` impl pins `Res` at
+        // the `route_view_*_stream::<_, _, Res>(...)` call site instead.)
+        let pre = streaming_handler_fn(|_ctx: RequestContext, _req: StringValue| async move {
+            Response::stream_ok(futures::stream::iter([Ok(
+                PreEncoded::<StringValue>::from_bytes_unchecked(
+                    StringValue::from("x").encode_to_bytes(),
+                ),
+            )]))
+        });
         assert_handler::<_, StringValue, StringValue, PreEncoded<StringValue>>(&pre);
     }
 }
