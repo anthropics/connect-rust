@@ -1014,10 +1014,21 @@ fn generate_service(
          [buffa user guide](https://github.com/anthropics/buffa/blob/main/docs/guide.md#ownedview-in-async-trait-implementations)\n\
          for zero-copy access patterns and when `to_owned_message()` is needed.\n\n\
          The `impl Encodable<Out>` return bound accepts the owned `Out`, the\n\
-         generated `OutView<'_>` / `OwnedOutView`, or\n\
-         [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not\n\
-         emitted for output types mapped via `extern_path` (the impl would be\n\
-         an orphan); return owned for WKT/extern outputs."
+         generated `OutView<'_>` / `OwnedOutView`,\n\
+         [`MaybeBorrowed`](::connectrpc::MaybeBorrowed), or\n\
+         [`PreEncoded`](::connectrpc::PreEncoded) for handlers that encode a\n\
+         non-`'static` view internally and pass the bytes across the handler\n\
+         boundary. View bodies are not emitted for output types mapped via\n\
+         `extern_path` (the impl would be an orphan); return owned for\n\
+         WKT/extern outputs.\n\n\
+         Server-streaming and bidi-streaming methods return\n\
+         `ServiceStream<impl Encodable<Out> + Send + use<Self>>`. The\n\
+         `use<Self>` precise-capturing clause excludes `&self`'s lifetime\n\
+         (unary methods use `use<'a, Self>` and may borrow), so stream items\n\
+         must be `'static`. To stream view-encoded data, encode each item\n\
+         inside the stream body and yield\n\
+         [`PreEncoded`](::connectrpc::PreEncoded) — see its `# Streaming\n\
+         example` doc."
     );
     let service_doc_tokens = doc_attrs(&full_doc);
 

@@ -59,10 +59,22 @@ pub const GREET_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.greet.v1.Gree
 /// for zero-copy access patterns and when `to_owned_message()` is needed.
 ///
 /// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
-/// generated `OutView<'_>` / `OwnedOutView`, or
-/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed). View bodies are not
-/// emitted for output types mapped via `extern_path` (the impl would be
-/// an orphan); return owned for WKT/extern outputs.
+/// generated `OutView<'_>` / `OwnedOutView`,
+/// [`MaybeBorrowed`](::connectrpc::MaybeBorrowed), or
+/// [`PreEncoded`](::connectrpc::PreEncoded) for handlers that encode a
+/// non-`'static` view internally and pass the bytes across the handler
+/// boundary. View bodies are not emitted for output types mapped via
+/// `extern_path` (the impl would be an orphan); return owned for
+/// WKT/extern outputs.
+///
+/// Server-streaming and bidi-streaming methods return
+/// `ServiceStream<impl Encodable<Out> + Send + use<Self>>`. The
+/// `use<Self>` precise-capturing clause excludes `&self`'s lifetime
+/// (unary methods use `use<'a, Self>` and may borrow), so stream items
+/// must be `'static`. To stream view-encoded data, encode each item
+/// inside the stream body and yield
+/// [`PreEncoded`](::connectrpc::PreEncoded) — see its `# Streaming
+/// example` doc.
 #[allow(clippy::type_complexity)]
 pub trait GreetService: Send + Sync + 'static {
     /// Greet returns a greeting message for the given name.
