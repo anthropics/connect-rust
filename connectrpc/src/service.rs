@@ -56,6 +56,7 @@ use crate::codec::content_type;
 use crate::codec::header as connect_header;
 use crate::compression::CompressionPolicy;
 use crate::compression::CompressionRegistry;
+use crate::deadline::DeadlinePolicy;
 use crate::dispatcher::Dispatcher;
 use crate::envelope::Envelope;
 use crate::error::ConnectError;
@@ -1097,6 +1098,7 @@ pub struct ConnectRpcService<D = Router> {
     /// op instead of the registry's three internal Arc fields.
     compression: Arc<CompressionRegistry>,
     compression_policy: CompressionPolicy,
+    deadline_policy: DeadlinePolicy,
 }
 
 // Manual Clone impl because `#[derive(Clone)]` would add a `D: Clone` bound,
@@ -1108,6 +1110,7 @@ impl<D> Clone for ConnectRpcService<D> {
             limits: self.limits.clone(),
             compression: Arc::clone(&self.compression),
             compression_policy: self.compression_policy,
+            deadline_policy: self.deadline_policy.clone(),
         }
     }
 }
@@ -1126,6 +1129,7 @@ impl<D: Dispatcher> ConnectRpcService<D> {
             limits: Limits::default(),
             compression: Arc::new(CompressionRegistry::default()),
             compression_policy: CompressionPolicy::default(),
+            deadline_policy: DeadlinePolicy::new(),
         }
     }
 
@@ -1136,6 +1140,7 @@ impl<D: Dispatcher> ConnectRpcService<D> {
             limits: Limits::default(),
             compression: Arc::new(CompressionRegistry::default()),
             compression_policy: CompressionPolicy::default(),
+            deadline_policy: DeadlinePolicy::new(),
         }
     }
 
@@ -1166,6 +1171,27 @@ impl<D: Dispatcher> ConnectRpcService<D> {
     pub fn with_compression_policy(mut self, policy: CompressionPolicy) -> Self {
         self.compression_policy = policy;
         self
+    }
+
+    /// Configure server-side moderation of client-asserted RPC deadlines.
+    ///
+    /// The default [`DeadlinePolicy::new`] is a no-op: the client's
+    /// `Connect-Timeout-Ms` / `grpc-timeout` header is honored verbatim
+    /// and streaming bodies are not bounded by it (only the time-to-
+    /// first-response is). Set a policy to clamp client values to an
+    /// operationally sane range, supply a default when the client
+    /// asserts nothing, or extend enforcement to streaming bodies. See
+    /// [`DeadlinePolicy`] for details and recommendations.
+    #[must_use]
+    pub fn with_deadline_policy(mut self, policy: DeadlinePolicy) -> Self {
+        self.deadline_policy = policy;
+        self
+    }
+
+    /// Get the current deadline policy.
+    #[must_use]
+    pub fn deadline_policy(&self) -> &DeadlinePolicy {
+        &self.deadline_policy
     }
 
     /// Get the current limits configuration.
@@ -1266,6 +1292,7 @@ where
         let limits = self.limits.clone();
         let compression = Arc::clone(&self.compression);
         let compression_policy = self.compression_policy;
+        let deadline_policy = self.deadline_policy.clone();
 
         // Only create and attach the tracing span when a subscriber would
         // actually observe it. For disabled-debug (the common production case),
@@ -1287,13 +1314,19 @@ where
         };
 
         let fut = async move {
-            let response =
-                match handle_request(dispatcher, req, limits, compression, &compression_policy)
-                    .await
-                {
-                    Ok(response) => response,
-                    Err(err) => error_response_either(err),
-                };
+            let response = match handle_request(
+                dispatcher,
+                req,
+                limits,
+                compression,
+                &compression_policy,
+                &deadline_policy,
+            )
+            .await
+            {
+                Ok(response) => response,
+                Err(err) => error_response_either(err),
+            };
             Ok(response)
         };
 
@@ -1311,6 +1344,7 @@ async fn handle_request<D, B>(
     limits: Limits,
     compression: Arc<CompressionRegistry>,
     compression_policy: &CompressionPolicy,
+    deadline_policy: &DeadlinePolicy,
 ) -> Result<Response<ConnectRpcBody>, ConnectError>
 where
     D: Dispatcher,
@@ -1330,9 +1364,16 @@ where
     // detection returns None. Route GET requests directly to the unary handler
     // which handles Connect GET query parameter parsing.
     if req.method() == Method::GET {
-        return handle_unary_request(&*dispatcher, req, limits, compression, compression_policy)
-            .await
-            .map(|r| r.map(ConnectRpcBody::Full));
+        return handle_unary_request(
+            &*dispatcher,
+            req,
+            limits,
+            compression,
+            compression_policy,
+            deadline_policy,
+        )
+        .await
+        .map(|r| r.map(ConnectRpcBody::Full));
     }
 
     // Check for gRPC/gRPC-Web content type prefix with unsupported codec
@@ -1413,6 +1454,7 @@ where
                         limits,
                         compression,
                         compression_policy,
+                        deadline_policy,
                     )
                     .await;
                     return Ok(response.map(ConnectRpcBody::GrpcUnary));
@@ -1428,15 +1470,23 @@ where
                 limits,
                 compression,
                 compression_policy,
+                deadline_policy,
             )
             .await;
             Ok(response.map(ConnectRpcBody::Streaming))
         }
         Some(_) | None => {
             // Unary request (Connect unary) or unknown content type (for error reporting)
-            handle_unary_request(&*dispatcher, req, limits, compression, compression_policy)
-                .await
-                .map(|r| r.map(ConnectRpcBody::Full))
+            handle_unary_request(
+                &*dispatcher,
+                req,
+                limits,
+                compression,
+                compression_policy,
+                deadline_policy,
+            )
+            .await
+            .map(|r| r.map(ConnectRpcBody::Full))
         }
     }
 }
@@ -1448,6 +1498,7 @@ async fn handle_unary_request<D, B>(
     limits: Limits,
     compression: Arc<CompressionRegistry>,
     compression_policy: &CompressionPolicy,
+    deadline_policy: &DeadlinePolicy,
 ) -> Result<Response<Full<Bytes>>, ConnectError>
 where
     D: Dispatcher,
@@ -1461,7 +1512,8 @@ where
     let method = req.method().clone();
 
     // Extract metadata from headers using the Connect protocol (unary is always Connect)
-    let metadata = RequestMetadata::from_headers(req.headers(), Protocol::Connect);
+    let mut metadata = RequestMetadata::from_headers(req.headers(), Protocol::Connect);
+    metadata.timeout = deadline_policy.moderate(metadata.timeout, &path);
 
     // Split request to consume the body
     let (parts, body) = req.into_parts();
@@ -1647,6 +1699,7 @@ async fn handle_grpc_unary_request<D, B>(
     limits: Limits,
     compression: Arc<CompressionRegistry>,
     compression_policy: &CompressionPolicy,
+    deadline_policy: &DeadlinePolicy,
 ) -> Response<GrpcUnaryBody>
 where
     D: Dispatcher,
@@ -1704,7 +1757,8 @@ where
     }
 
     // Extract metadata
-    let metadata = RequestMetadata::from_headers(req.headers(), protocol);
+    let mut metadata = RequestMetadata::from_headers(req.headers(), protocol);
+    metadata.timeout = deadline_policy.moderate(metadata.timeout, path);
 
     // Validate request compression
     if let Some(ref encoding) = metadata.streaming_encoding
@@ -1895,6 +1949,7 @@ async fn handle_streaming_request<D, B>(
     limits: Limits,
     compression: Arc<CompressionRegistry>,
     compression_policy: &CompressionPolicy,
+    deadline_policy: &DeadlinePolicy,
 ) -> Response<StreamingResponseBody>
 where
     D: Dispatcher,
@@ -1916,7 +1971,8 @@ where
     }
 
     // Extract metadata from headers using the detected protocol
-    let metadata = RequestMetadata::from_headers(req.headers(), protocol);
+    let mut metadata = RequestMetadata::from_headers(req.headers(), protocol);
+    metadata.timeout = deadline_policy.moderate(metadata.timeout, &path);
 
     // Validate request compression is supported (if specified)
     if let Some(ref encoding) = metadata.streaming_encoding
@@ -1951,6 +2007,7 @@ where
             limits,
             compression,
             compression_policy,
+            deadline_policy,
         )
         .await;
     }
@@ -2140,8 +2197,13 @@ where
 
     let stream_compression = response_encoding.map(|encoding| (compression, encoding));
     let effective_policy = compression_policy.with_override(resp.compress);
+    // Time remaining in the absolute deadline budget at the point the
+    // stream starts; the wrapper arms a `tokio::time::sleep` from this so
+    // the deadline does not shift relative to request arrival.
+    let remaining = deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
+    let resp_body = deadline_policy.enforce_on_response_stream(resp.body, remaining);
     let body = StreamingResponseBody::new(
-        resp.body,
+        resp_body,
         resp.trailers,
         protocol,
         stream_compression,
@@ -2430,6 +2492,7 @@ async fn handle_bidi_streaming_request<D, B>(
     limits: Limits,
     compression: Arc<CompressionRegistry>,
     compression_policy: &CompressionPolicy,
+    deadline_policy: &DeadlinePolicy,
 ) -> Response<StreamingResponseBody>
 where
     D: Dispatcher,
@@ -2509,8 +2572,13 @@ where
 
     let stream_compression = response_encoding.map(|encoding| (compression, encoding));
     let effective_policy = compression_policy.with_override(resp.compress);
+    // Time remaining in the absolute deadline budget at the point the
+    // stream starts; the wrapper arms a `tokio::time::sleep` from this so
+    // the deadline does not shift relative to request arrival.
+    let remaining = deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
+    let resp_body = deadline_policy.enforce_on_response_stream(resp.body, remaining);
     let body = StreamingResponseBody::new(
-        resp.body,
+        resp_body,
         resp.trailers,
         protocol,
         stream_compression,
@@ -3420,6 +3488,7 @@ mod tests {
             Limits::default(),
             Arc::new(CompressionRegistry::new()),
             &CompressionPolicy::default(),
+            &DeadlinePolicy::new(),
         )
         .await
         .expect("dispatch should succeed");

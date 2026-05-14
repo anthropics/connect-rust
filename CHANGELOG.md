@@ -36,6 +36,38 @@ increment the patch version.
   build and return the owned message (or `MaybeBorrowed::Owned`) so the
   codec layer can skip the proto round-trip.
 
+- **`DeadlinePolicy`** — server-side moderation of client-asserted RPC
+  deadlines. Clients control the per-request timeout via
+  `Connect-Timeout-Ms` / `grpc-timeout`; without a policy the server
+  trusts that value verbatim. `DeadlinePolicy` clamps the asserted
+  timeout to a server-controlled `[min, max]` range, applies a default
+  when the client asserts nothing (or sends an unparseable header), and
+  optionally extends enforcement to streaming bodies.
+
+  Configure via `ConnectRpcService::with_deadline_policy(...)` (axum /
+  tower) or `Server::with_deadline_policy(...)`. `DeadlinePolicy::new()`
+  is a no-op policy that preserves the prior default behavior — no
+  clamping, no default, streaming bodies unbounded once the handler
+  returns. Existing services see no change without an explicit opt-in.
+  Recommended production starting point: set at least `with_max(...)` to
+  bound worker lifetime and `with_default_timeout(...)` to your SLA.
+
+  Two independent opt-in extensions, both off by default:
+  - `with_enforce_on_streams(true)` wraps server- and bidi-streaming
+    response bodies so the next item after the deadline is a
+    `deadline_exceeded` error and the stream ends. Unary and
+    client-streaming responses were already bounded by the handler
+    future timeout; this closes the streaming-body gap.
+  - `with_inter_message_timeout(d)` cuts off a stream that goes longer
+    than `d` between yielded items (a stalled handler waiting on a slow
+    upstream). Takes effect whenever set, with or without
+    `with_enforce_on_streams`.
+
+  When clamping changes a client value, a `tracing::debug!` event fires
+  on target `connectrpc::deadline` with the path and before/after
+  durations. Per-route deadline policy is a planned follow-up coupled
+  to the typed routing surface (#91).
+
 ### Breaking
 
 These are breaking under semver but the practical blast radius is

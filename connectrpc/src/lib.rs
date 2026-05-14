@@ -181,6 +181,7 @@ where
 // Core modules (always available)
 pub mod codec;
 pub mod compression;
+pub mod deadline;
 pub mod dispatcher;
 pub mod envelope;
 pub mod error;
@@ -283,6 +284,12 @@ pub use compression::CompressionPolicy;
 pub use compression::CompressionProvider;
 pub use compression::CompressionRegistry;
 pub use compression::DEFAULT_COMPRESSION_MIN_SIZE;
+
+// ============================================================================
+// Deadline exports
+// ============================================================================
+
+pub use deadline::DeadlinePolicy;
 
 #[cfg(feature = "gzip")]
 pub use compression::GzipProvider;

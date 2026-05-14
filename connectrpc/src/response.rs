@@ -39,6 +39,11 @@ pub struct RequestContext {
     pub headers: HeaderMap,
     /// Absolute request deadline parsed from the protocol's timeout header,
     /// if any. Propagate to downstream calls.
+    ///
+    /// If a [`DeadlinePolicy`](crate::DeadlinePolicy) is configured on the
+    /// service, this is the *moderated* value — clamped to the policy's
+    /// `[min, max]` range, or the policy default when the client asserted
+    /// nothing — not the raw client header.
     pub deadline: Option<Instant>,
     /// Request extensions carried from the underlying `http::Request`.
     ///

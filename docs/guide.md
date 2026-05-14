@@ -704,6 +704,74 @@ mtls-identity example
 demonstrates `serve_tls` end-to-end with cert-SAN identity extraction
 and an ACL keyed on it.
 
+## Production hardening
+
+### Deadline policy
+
+Connect and gRPC clients send a per-request timeout header
+(`Connect-Timeout-Ms` or `grpc-timeout`). With no policy, the server
+trusts that value verbatim: a `Connect-Timeout-Ms: 1` request cancels
+the handler mid-write, while a `Connect-Timeout-Ms: 86400000` request
+holds a worker for 24 hours, and a request with no timeout header runs
+unbounded. `DeadlinePolicy` gives the server the say.
+
+```rust,ignore
+use connectrpc::{ConnectRpcService, DeadlinePolicy};
+use std::time::Duration;
+
+let policy = DeadlinePolicy::new()
+    .with_min(Duration::from_millis(5))           // floor: reject "cancel me instantly"
+    .with_max(Duration::from_secs(30))            // cap: bound worker lifetime
+    .with_default_timeout(Duration::from_secs(10)) // applied when client asserts nothing
+    .with_enforce_on_streams(true);               // also cut off streaming bodies
+
+let service = ConnectRpcService::new(router)
+    .with_deadline_policy(policy);
+// or: Server::new(router).with_deadline_policy(policy)
+```
+
+Why each knob:
+
+- **`with_max`** is the most important one for any service that accepts
+  untrusted callers — without it a client controls how long a worker
+  stays busy. Set it to your longest acceptable handler runtime.
+- **`with_default_timeout`** matters because the timeout header is
+  optional. A request that omits it has no bound at all unless you set
+  one. Set it to your SLA.
+- **`with_min`** protects against a misbehaving or adversarial client
+  cancelling the handler before it can do anything (e.g. mid-write on a
+  streaming response). A few milliseconds is usually enough.
+- **`with_enforce_on_streams(true)`** closes the streaming-body gap.
+  By default the deadline only bounds the time-to-first-response —
+  once a server- or bidi-streaming handler returns its stream, the
+  items flow unbounded. Enabling this wraps the response body so the
+  next item after the deadline is a `deadline_exceeded` error and the
+  stream ends. Cancellation drops the inner stream at the next yield
+  point with no grace period; spawn commit-critical work off the
+  request future if it must outlive the caller.
+- **`with_inter_message_timeout(d)`** detects stalled streams (a
+  handler waiting on a slow upstream). Independent of
+  `with_enforce_on_streams` — takes effect whenever set, with or
+  without the absolute deadline. Resets on each yielded item.
+
+`DeadlinePolicy::new()` with no `with_*` calls is a no-op that
+preserves the prior default behavior. Existing services see no change
+without opting in.
+
+When a client value is clamped, a `tracing::debug!` event fires on
+target `connectrpc::deadline` with the path and before/after
+durations. Enable `RUST_LOG=connectrpc::deadline=debug` to spot
+misbehaving clients.
+
+Inside a handler, `ctx.deadline` reflects the *moderated* value (after
+clamping), so the handler can budget downstream calls — propagate the
+remaining time minus a margin as the timeout for outbound RPCs:
+
+```rust,ignore
+use std::time::Instant;
+let remaining = ctx.deadline.map(|d| d.saturating_duration_since(Instant::now()));
+```
+
 ## Clients
 
 Enable the `client` feature for HTTP client support with connection
