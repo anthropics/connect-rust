@@ -25,6 +25,7 @@ use crate::handler::BoxFuture;
 use crate::handler::BoxStream;
 use crate::response::{EncodedResponse, RequestContext};
 use crate::router::MethodKind;
+use crate::spec::Spec;
 
 /// Description of a method returned by [`Dispatcher::lookup`].
 ///
@@ -32,50 +33,82 @@ use crate::router::MethodKind;
 /// path in `handle_request`; the actual handler invocation happens in a
 /// separate `call_*` step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MethodDescriptor {
     /// The kind of RPC method.
     pub kind: MethodKind,
     /// Whether the method has no side effects and is eligible for Connect GET.
     ///
     /// Only meaningful for `MethodKind::Unary`. Always `false` for streaming.
+    ///
+    /// This is a *narrower* flag than [`Spec::idempotency`](crate::Spec):
+    /// it is `true` only for `IdempotencyLevel::NoSideEffects`. Methods
+    /// declared `Idempotent` (safe to retry but side-effecting) report
+    /// `idempotent == false` here while carrying the full level in `spec`.
     pub idempotent: bool,
+    /// Static method metadata, when known.
+    ///
+    /// Code-generated dispatchers always supply a [`Spec`]; the dynamic
+    /// [`Router`](crate::Router) returns `None` because its method paths
+    /// are owned `String`s and `Spec::procedure` requires `&'static str`.
+    pub spec: Option<Spec>,
 }
 
 impl MethodDescriptor {
     /// Convenience constructor for unary methods.
     #[inline]
     pub const fn unary(idempotent: bool) -> Self {
-        Self {
-            kind: MethodKind::Unary,
-            idempotent,
-        }
+        Self::from_kind(MethodKind::Unary).with_idempotent(idempotent)
     }
 
     /// Convenience constructor for server-streaming methods.
     #[inline]
     pub const fn server_streaming() -> Self {
-        Self {
-            kind: MethodKind::ServerStreaming,
-            idempotent: false,
-        }
+        Self::from_kind(MethodKind::ServerStreaming)
     }
 
     /// Convenience constructor for client-streaming methods.
     #[inline]
     pub const fn client_streaming() -> Self {
-        Self {
-            kind: MethodKind::ClientStreaming,
-            idempotent: false,
-        }
+        Self::from_kind(MethodKind::ClientStreaming)
     }
 
     /// Convenience constructor for bidirectional streaming methods.
     #[inline]
     pub const fn bidi_streaming() -> Self {
+        Self::from_kind(MethodKind::BidiStreaming)
+    }
+
+    /// Construct a descriptor for the given [`MethodKind`] with default
+    /// `idempotent` (`false`) and no [`Spec`].
+    #[inline]
+    pub const fn from_kind(kind: MethodKind) -> Self {
         Self {
-            kind: MethodKind::BidiStreaming,
+            kind,
             idempotent: false,
+            spec: None,
         }
+    }
+
+    /// Set the idempotency flag. Returns `self` for chaining.
+    #[inline]
+    #[must_use]
+    pub const fn with_idempotent(mut self, idempotent: bool) -> Self {
+        self.idempotent = idempotent;
+        self
+    }
+
+    /// Attach a [`Spec`]. Returns `self` for chaining.
+    ///
+    /// Generated dispatchers call this so [`RequestContext::spec`] is
+    /// populated for handlers and interceptors.
+    ///
+    /// [`RequestContext::spec`]: crate::RequestContext::spec
+    #[inline]
+    #[must_use]
+    pub const fn with_spec(mut self, spec: Spec) -> Self {
+        self.spec = Some(spec);
+        self
     }
 }
 
