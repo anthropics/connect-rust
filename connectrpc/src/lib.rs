@@ -69,6 +69,7 @@
 //! - [`service`] - Tower service implementation (primary integration point)
 //! - [`spec`] - Static per-method metadata ([`Spec`], [`StreamType`])
 //! - [`payload`] - Lazily-decoded, type-erased message bodies ([`Payload`])
+//! - [`interceptor`] - RPC-level interceptors ([`Interceptor`], [`Next`])
 //! - [`client`] - Tower-based HTTP client utilities (requires `client` feature)
 //! - [`server`] - Standalone hyper-based server (requires `server` feature)
 //!
@@ -189,6 +190,7 @@ pub mod envelope;
 pub mod error;
 pub(crate) mod grpc_status;
 pub mod handler;
+pub mod interceptor;
 pub mod payload;
 pub mod protocol;
 pub mod response;
@@ -280,8 +282,16 @@ pub use spec::SpecOrigin;
 pub use spec::StreamType;
 
 // Type-erased message bodies for interceptors
+pub use interceptor::async_trait;
 pub use payload::AnyMessage;
 pub use payload::Payload;
+
+// Unary RPC interceptors
+pub use interceptor::Interceptor;
+pub use interceptor::Next;
+pub use interceptor::UnaryRequest;
+pub use interceptor::UnaryResponse;
+pub use interceptor::unary_interceptor;
 
 // ============================================================================
 // Codec exports

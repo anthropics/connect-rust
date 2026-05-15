@@ -1193,6 +1193,64 @@ mod tests {
         }
     }
 
+    /// End-to-end: a registered interceptor wraps the unary call. The
+    /// interceptor sees `Spec`, the request payload, and can rewrite the
+    /// response before it hits the wire.
+    #[tokio::test]
+    async fn interceptor_wraps_unary_call() {
+        use connectrpc::{Interceptor, Next, UnaryRequest, UnaryResponse};
+
+        /// Reads the request `Spec`, echoes the procedure and request
+        /// `data` field through a response header, and increments the
+        /// response message's `sequence` field.
+        struct SpecAndBodyInterceptor;
+
+        #[connectrpc::async_trait]
+        impl Interceptor for SpecAndBodyInterceptor {
+            async fn intercept_unary(
+                &self,
+                req: UnaryRequest,
+                next: Next<'_>,
+            ) -> Result<UnaryResponse, ConnectError> {
+                let proc = req
+                    .ctx
+                    .spec()
+                    .map(|s| s.procedure.to_owned())
+                    .unwrap_or_default();
+                let body = req.payload.message::<EchoRequest>()?.data.clone();
+                let mut resp = next.run(req).await?;
+                let mut msg = resp.body.message::<EchoResponse>()?.clone();
+                msg.sequence += 1000;
+                resp.body.set_message(msg);
+                Ok(resp
+                    .with_header("x-proc", proc)
+                    .with_header("x-req-data", body))
+            }
+        }
+
+        let server = EchoServiceServer::new(TestEchoService);
+        let service = ConnectRpcService::new(server).with_interceptor(SpecAndBodyInterceptor);
+        let app = axum::Router::new().fallback_service(service);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _h = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let resp = make_client(addr)
+            .echo(EchoRequest {
+                sequence: 7,
+                data: "ping".into(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.headers().get("x-proc").unwrap(),
+            "/test.echo.v1.EchoService/Echo"
+        );
+        assert_eq!(resp.headers().get("x-req-data").unwrap(), "ping");
+        // The handler echoes `sequence`; the interceptor adds 1000.
+        assert_eq!(resp.into_view().sequence, 1007);
+    }
+
     /// End-to-end: the codegen dispatcher surfaces `Spec` and `Protocol` on
     /// `RequestContext`, and the dynamic `Router` does not (no `'static` path).
     #[tokio::test]

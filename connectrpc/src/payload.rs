@@ -105,9 +105,9 @@ where
 ///   sent: either the original `bytes` or the re-encoded replacement.
 ///
 /// `Payload` is normally constructed by the dispatch path and received
-/// by user code through `UnaryRequest`/`UnaryResponse` (a future
-/// addition). [`Payload::new`] is `pub` so test fixtures and custom
-/// transports can build one directly.
+/// by user code through [`UnaryRequest`](crate::UnaryRequest) and
+/// [`UnaryResponse`](crate::UnaryResponse). [`Payload::new`] is `pub`
+/// so test fixtures and custom transports can build one directly.
 ///
 /// `message` borrows the cached owned decode; `view` returns a fresh
 /// self-contained [`OwnedView`] (a [`Bytes`] refcount bump, not a copy)

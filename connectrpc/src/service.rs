@@ -61,6 +61,7 @@ use crate::dispatcher::Dispatcher;
 use crate::envelope::Envelope;
 use crate::error::ConnectError;
 use crate::handler::BoxStream;
+use crate::interceptor::{Interceptor, call_unary_intercepted};
 use crate::protocol::Protocol;
 use crate::response::{EncodedResponse, RequestContext};
 use crate::router::MethodKind;
@@ -1099,6 +1100,9 @@ pub struct ConnectRpcService<D = Router> {
     compression: Arc<CompressionRegistry>,
     compression_policy: CompressionPolicy,
     deadline_policy: DeadlinePolicy,
+    /// Unary interceptor chain, outermost first. The `Arc<[..]>` is one
+    /// pointer to clone per request regardless of chain length.
+    interceptors: Arc<[Arc<dyn Interceptor>]>,
 }
 
 // Manual Clone impl because `#[derive(Clone)]` would add a `D: Clone` bound,
@@ -1111,6 +1115,7 @@ impl<D> Clone for ConnectRpcService<D> {
             compression: Arc::clone(&self.compression),
             compression_policy: self.compression_policy,
             deadline_policy: self.deadline_policy.clone(),
+            interceptors: Arc::clone(&self.interceptors),
         }
     }
 }
@@ -1124,13 +1129,7 @@ impl<D: Dispatcher> ConnectRpcService<D> {
     /// - a code-generated `FooServiceServer<T>` struct for monomorphic
     ///   dispatch with no HashMap lookup or trait-object indirection.
     pub fn new(dispatcher: D) -> Self {
-        Self {
-            dispatcher: Arc::new(dispatcher),
-            limits: Limits::default(),
-            compression: Arc::new(CompressionRegistry::default()),
-            compression_policy: CompressionPolicy::default(),
-            deadline_policy: DeadlinePolicy::new(),
-        }
+        Self::from_arc(Arc::new(dispatcher))
     }
 
     /// Create a new ConnectRPC service from an Arc'd dispatcher.
@@ -1141,6 +1140,7 @@ impl<D: Dispatcher> ConnectRpcService<D> {
             compression: Arc::new(CompressionRegistry::default()),
             compression_policy: CompressionPolicy::default(),
             deadline_policy: DeadlinePolicy::new(),
+            interceptors: Arc::default(),
         }
     }
 
@@ -1192,6 +1192,29 @@ impl<D: Dispatcher> ConnectRpcService<D> {
     #[must_use]
     pub fn deadline_policy(&self) -> &DeadlinePolicy {
         &self.deadline_policy
+    }
+
+    /// Append a unary [`Interceptor`] to the chain.
+    ///
+    /// The first interceptor registered runs **outermost**: first on the
+    /// way in, last on the way out (matching `connect-go`'s
+    /// `WithInterceptors`). Interceptors run after envelope decoding,
+    /// decompression, and header parsing, and before the handler.
+    ///
+    /// When no interceptors are registered the dispatch path is identical
+    /// to a build without this call — there is no per-request allocation
+    /// or branch beyond a single `is_empty` check.
+    ///
+    /// Interceptors apply to **unary** calls only in this release.
+    /// Streaming calls bypass the chain.
+    #[must_use]
+    pub fn with_interceptor(mut self, interceptor: impl Interceptor) -> Self {
+        // The Arc<[..]> is shared across cloned service handles; rebuild
+        // it on registration. Registration is a cold path.
+        let mut v: Vec<Arc<dyn Interceptor>> = self.interceptors.to_vec();
+        v.push(Arc::new(interceptor));
+        self.interceptors = Arc::from(v);
+        self
     }
 
     /// Get the current limits configuration.
@@ -1293,6 +1316,7 @@ where
         let compression = Arc::clone(&self.compression);
         let compression_policy = self.compression_policy;
         let deadline_policy = self.deadline_policy.clone();
+        let interceptors = Arc::clone(&self.interceptors);
 
         // Only create and attach the tracing span when a subscriber would
         // actually observe it. For disabled-debug (the common production case),
@@ -1321,6 +1345,7 @@ where
                 compression,
                 &compression_policy,
                 &deadline_policy,
+                &interceptors,
             )
             .await
             {
@@ -1338,6 +1363,7 @@ where
 }
 
 /// Handle a ConnectRPC request (unary or streaming).
+#[allow(clippy::too_many_arguments)]
 async fn handle_request<D, B>(
     dispatcher: Arc<D>,
     req: Request<B>,
@@ -1345,6 +1371,7 @@ async fn handle_request<D, B>(
     compression: Arc<CompressionRegistry>,
     compression_policy: &CompressionPolicy,
     deadline_policy: &DeadlinePolicy,
+    interceptors: &[Arc<dyn Interceptor>],
 ) -> Result<Response<ConnectRpcBody>, ConnectError>
 where
     D: Dispatcher,
@@ -1371,6 +1398,7 @@ where
             compression,
             compression_policy,
             deadline_policy,
+            interceptors,
         )
         .await
         .map(|r| r.map(ConnectRpcBody::Full));
@@ -1456,6 +1484,7 @@ where
                         compression,
                         compression_policy,
                         deadline_policy,
+                        interceptors,
                     )
                     .await;
                     return Ok(response.map(ConnectRpcBody::GrpcUnary));
@@ -1472,6 +1501,7 @@ where
                 compression,
                 compression_policy,
                 deadline_policy,
+                interceptors,
             )
             .await;
             Ok(response.map(ConnectRpcBody::Streaming))
@@ -1485,6 +1515,7 @@ where
                 compression,
                 compression_policy,
                 deadline_policy,
+                interceptors,
             )
             .await
             .map(|r| r.map(ConnectRpcBody::Full))
@@ -1493,6 +1524,7 @@ where
 }
 
 /// Handle a unary ConnectRPC request.
+#[allow(clippy::too_many_arguments)]
 async fn handle_unary_request<D, B>(
     dispatcher: &D,
     req: Request<B>,
@@ -1500,6 +1532,7 @@ async fn handle_unary_request<D, B>(
     compression: Arc<CompressionRegistry>,
     compression_policy: &CompressionPolicy,
     deadline_policy: &DeadlinePolicy,
+    interceptors: &[Arc<dyn Interceptor>],
 ) -> Result<Response<Full<Bytes>>, ConnectError>
 where
     D: Dispatcher,
@@ -1634,12 +1667,12 @@ where
     let resp: EncodedResponse = if let Some(timeout) = metadata.timeout {
         tokio::time::timeout(
             timeout,
-            dispatcher.call_unary(&path, ctx, body, codec_format),
+            call_unary_intercepted(dispatcher, interceptors, &path, ctx, body, codec_format),
         )
         .await
         .map_err(|_| ConnectError::deadline_exceeded("request timeout"))?
     } else {
-        dispatcher.call_unary(&path, ctx, body, codec_format).await
+        call_unary_intercepted(dispatcher, interceptors, &path, ctx, body, codec_format).await
     }?;
 
     // Negotiate response compression
@@ -1708,6 +1741,7 @@ async fn handle_grpc_unary_request<D, B>(
     compression: Arc<CompressionRegistry>,
     compression_policy: &CompressionPolicy,
     deadline_policy: &DeadlinePolicy,
+    interceptors: &[Arc<dyn Interceptor>],
 ) -> Response<GrpcUnaryBody>
 where
     D: Dispatcher,
@@ -1852,7 +1886,14 @@ where
     let handler_result = if let Some(timeout) = metadata.timeout {
         match tokio::time::timeout(
             timeout,
-            dispatcher.call_unary(path, ctx, request_body, codec_format),
+            call_unary_intercepted(
+                dispatcher,
+                interceptors,
+                path,
+                ctx,
+                request_body,
+                codec_format,
+            ),
         )
         .await
         {
@@ -1863,9 +1904,15 @@ where
             }
         }
     } else {
-        dispatcher
-            .call_unary(path, ctx, request_body, codec_format)
-            .await
+        call_unary_intercepted(
+            dispatcher,
+            interceptors,
+            path,
+            ctx,
+            request_body,
+            codec_format,
+        )
+        .await
     };
 
     let resp = match handler_result {
@@ -1961,6 +2008,7 @@ async fn handle_streaming_request<D, B>(
     compression: Arc<CompressionRegistry>,
     compression_policy: &CompressionPolicy,
     deadline_policy: &DeadlinePolicy,
+    interceptors: &[Arc<dyn Interceptor>],
 ) -> Response<StreamingResponseBody>
 where
     D: Dispatcher,
@@ -2162,7 +2210,14 @@ where
             }
         }
         StreamingDispatchKind::Unary => {
-            let fut = dispatcher.call_unary(&path, ctx, request_body, codec_format);
+            let fut = call_unary_intercepted(
+                dispatcher,
+                interceptors,
+                &path,
+                ctx,
+                request_body,
+                codec_format,
+            );
             let handler_result = if let Some(timeout) = metadata.timeout {
                 match tokio::time::timeout(timeout, fut).await {
                     Ok(result) => result,
@@ -3573,6 +3628,7 @@ mod tests {
             Arc::new(CompressionRegistry::new()),
             &CompressionPolicy::default(),
             &DeadlinePolicy::new(),
+            &[],
         )
         .await
         .expect("dispatch should succeed");
@@ -3625,6 +3681,7 @@ mod tests {
             Arc::new(CompressionRegistry::new()),
             &CompressionPolicy::default(),
             &DeadlinePolicy::new(),
+            &[],
         )
         .await
         .expect("dispatch should succeed");
