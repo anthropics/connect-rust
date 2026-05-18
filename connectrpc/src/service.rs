@@ -2713,6 +2713,65 @@ fn error_response(err: ConnectError) -> Response<Full<Bytes>> {
     })
 }
 
+impl ConnectError {
+    /// Render this error as a complete HTTP response in the wire format
+    /// matching the inbound request's protocol.
+    ///
+    /// This is the building block for `tower::Layer`s that short-circuit a
+    /// request (auth, rate limiting, validation) before it reaches
+    /// [`ConnectRpcService`]. A layer cannot reuse the service's internal error
+    /// rendering, but still needs to produce a response that the calling
+    /// client will decode as a structured error rather than a transport
+    /// failure. Each protocol expects a different wire shape:
+    ///
+    /// - **Connect unary** (`application/proto`, `application/json`, or absent
+    ///   — Connect GET requests carry no request body or `Content-Type`):
+    ///   a non-200 HTTP status with a JSON error body. Connect unary error
+    ///   bodies are spec-required JSON regardless of the request codec.
+    /// - **Connect streaming** (`application/connect+{proto,json}`): HTTP 200
+    ///   with the error in an `EndStreamResponse` envelope.
+    /// - **gRPC / gRPC-Web** (`application/grpc*`): HTTP 200 with `grpc-status`
+    ///   and `grpc-message` trailers (as HTTP/2 trailers for gRPC, encoded in
+    ///   the body for gRPC-Web).
+    ///
+    /// The protocol is detected from `request_headers` via
+    /// [`Protocol::detect`]. When detection fails — an unrecognized
+    /// `Content-Type`, or none at all — the Connect unary JSON shape is used,
+    /// which is the most universally parseable fallback.
+    ///
+    /// gRPC and gRPC-Web use the same framed wire shape for unary and
+    /// streaming calls, so the trailers-only response is always correct
+    /// regardless of the method's cardinality.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use connectrpc::ConnectError;
+    ///
+    /// // Inside a tower::Service::call wrapping ConnectRpcService:
+    /// fn call(&mut self, req: http::Request<B>) -> Self::Future {
+    ///     if !self.is_authorized(&req) {
+    ///         let resp = ConnectError::permission_denied("access denied")
+    ///             .into_http_response(req.headers());
+    ///         return Box::pin(std::future::ready(Ok(resp)));
+    ///     }
+    ///     // ... call inner service ...
+    /// }
+    /// ```
+    #[must_use]
+    pub fn into_http_response(self, request_headers: &http::HeaderMap) -> Response<ConnectRpcBody> {
+        match Protocol::detect(request_headers) {
+            Some(rp) if rp.is_streaming => {
+                streaming_error_response(&self, rp.protocol, rp.codec_format)
+                    .map(ConnectRpcBody::Streaming)
+            }
+            // Connect unary, or unknown/absent Content-Type: a non-200 HTTP
+            // status with a JSON body is the only universally parseable shape.
+            _ => error_response_either(self),
+        }
+    }
+}
+
 // ============================================================================
 // Axum Integration
 // ============================================================================
@@ -3498,5 +3557,204 @@ mod tests {
             Some(PeerTag("10.0.0.1:54321")),
             "extension inserted on the http::Request must reach Context.extensions"
         );
+    }
+
+    // ========================================================================
+    // ConnectError::into_http_response tests
+    // ========================================================================
+
+    fn headers_with_content_type(ct: &str) -> http::HeaderMap {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            header::CONTENT_TYPE,
+            http::HeaderValue::from_str(ct).unwrap(),
+        );
+        headers
+    }
+
+    async fn body_bytes(body: ConnectRpcBody) -> Bytes {
+        body.collect().await.unwrap().to_bytes()
+    }
+
+    #[tokio::test]
+    async fn into_http_response_connect_unary() {
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&headers_with_content_type("application/proto"));
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            content_type::JSON
+        );
+        assert!(resp.headers().get(&GRPC_STATUS).is_none());
+
+        let body = body_bytes(resp.into_body()).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], "permission_denied");
+        assert_eq!(json["message"], "nope");
+    }
+
+    #[tokio::test]
+    async fn into_http_response_connect_streaming() {
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&headers_with_content_type("application/connect+proto"));
+
+        // Connect streaming errors are HTTP 200 with an EndStreamResponse envelope.
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/connect+proto"
+        );
+
+        let body = body_bytes(resp.into_body()).await;
+        // Envelope: 1 flag byte (0x02 end-stream) + 4 length bytes + JSON payload.
+        assert!(body.len() > 5, "envelope must contain a payload");
+        assert_eq!(body[0], 0x02, "end-stream flag bit must be set");
+        let json: serde_json::Value = serde_json::from_slice(&body[5..]).unwrap();
+        assert_eq!(json["error"]["code"], "permission_denied");
+    }
+
+    #[tokio::test]
+    async fn into_http_response_grpc() {
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&headers_with_content_type("application/grpc+proto"));
+
+        // gRPC trailers-only error response: HTTP 200, grpc-status echoed in headers.
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/grpc+proto"
+        );
+        assert_eq!(
+            resp.headers().get(&GRPC_STATUS).unwrap(),
+            &crate::ErrorCode::PermissionDenied.grpc_code().to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn into_http_response_grpc_web() {
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&headers_with_content_type("application/grpc-web+proto"));
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/grpc-web+proto"
+        );
+        // gRPC-Web encodes trailers in the body, not response headers.
+        assert!(resp.headers().get(&GRPC_STATUS).is_none());
+
+        let body = body_bytes(resp.into_body()).await;
+        // Trailer frame: flag byte 0x80 + 4 length bytes + headers.
+        assert!(body.len() > 5, "trailer frame must contain a payload");
+        assert_eq!(body[0], 0x80, "trailer flag bit must be set");
+        let trailer_text = std::str::from_utf8(&body[5..]).unwrap();
+        assert!(trailer_text.contains("grpc-status: 7"), "{trailer_text:?}");
+    }
+
+    #[tokio::test]
+    async fn into_http_response_connect_streaming_json_codec() {
+        // The codec format from the request Content-Type must round-trip into
+        // the response Content-Type, even though the EndStreamResponse payload
+        // itself is always JSON.
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&headers_with_content_type("application/connect+json"));
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/connect+json"
+        );
+    }
+
+    #[tokio::test]
+    async fn into_http_response_grpc_json_codec() {
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&headers_with_content_type("application/grpc+json"));
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/grpc+json"
+        );
+        assert_eq!(
+            resp.headers().get(&GRPC_STATUS).unwrap(),
+            &crate::ErrorCode::PermissionDenied.grpc_code().to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn into_http_response_grpc_web_text_mode() {
+        // gRPC-Web text mode (`application/grpc-web-text`) is detected as
+        // gRPC-Web; the trailers-only error body has the same wire shape as
+        // binary mode (the service rejects text-mode requests, but a layer
+        // running before dispatch must still produce *something* parseable).
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&headers_with_content_type("application/grpc-web-text"));
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(resp.headers().get(&GRPC_STATUS).is_none());
+
+        let body = body_bytes(resp.into_body()).await;
+        assert_eq!(body[0], 0x80, "trailer flag bit must be set");
+    }
+
+    #[tokio::test]
+    async fn into_http_response_content_type_with_parameters() {
+        // Parameters after `;` must not defeat protocol detection.
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&headers_with_content_type(
+            "application/grpc+proto; foo=bar",
+        ));
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(&GRPC_STATUS).unwrap(),
+            &crate::ErrorCode::PermissionDenied.grpc_code().to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn into_http_response_connect_unary_proto_request_returns_json_error() {
+        // Connect unary errors are spec-required to be JSON regardless of the
+        // request codec. A proto request must not get a proto-encoded error.
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&headers_with_content_type("application/proto"));
+
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            content_type::JSON,
+            "Connect unary error body must be JSON regardless of request codec"
+        );
+    }
+
+    #[tokio::test]
+    async fn into_http_response_no_content_type_falls_back_to_unary() {
+        // Connect GET requests have no request Content-Type; they expect the
+        // Connect unary JSON error shape.
+        let err = ConnectError::permission_denied("nope");
+        let resp = err.into_http_response(&http::HeaderMap::new());
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            content_type::JSON
+        );
+    }
+
+    #[tokio::test]
+    async fn into_http_response_unknown_content_type_falls_back_to_unary() {
+        let err = ConnectError::unauthenticated("who?");
+        let resp = err.into_http_response(&headers_with_content_type("text/plain"));
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            content_type::JSON
+        );
+
+        let body = body_bytes(resp.into_body()).await;
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["code"], "unauthenticated");
     }
 }
