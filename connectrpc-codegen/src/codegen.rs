@@ -1334,9 +1334,11 @@ fn method_spec_const_ident(service: &ServiceDescriptorProto, method_name: &str) 
 /// Emit one `pub const … : ::connectrpc::Spec` per method.
 ///
 /// Each constant captures the method's procedure path, stream type, and
-/// idempotency level; `is_client` defaults to `false` (server side). The
-/// constants are referenced by the generated `Dispatcher::lookup` impl and
-/// are also stable public API for user code.
+/// idempotency level. Constructed via `Spec::server(...)` so
+/// `Spec::origin == SpecOrigin::Server`; a future generated client will
+/// emit a sibling constant via `Spec::client(...)`. The constants are
+/// referenced by the generated `Dispatcher::lookup` impl and are also
+/// stable public API for user code.
 fn generate_spec_consts(
     full_service_name: &str,
     service: &ServiceDescriptorProto,
@@ -1356,7 +1358,7 @@ fn generate_spec_consts(
                 (false, true) => quote! { ::connectrpc::StreamType::ServerStream },
                 (false, false) => quote! { ::connectrpc::StreamType::Unary },
             };
-            let idempotency = match m.options.idempotency_level {
+            let idempotency_level = match m.options.idempotency_level {
                 Some(IdempotencyLevel::NO_SIDE_EFFECTS) => {
                     quote! { ::connectrpc::IdempotencyLevel::NoSideEffects }
                 }
@@ -1374,8 +1376,8 @@ fn generate_spec_consts(
             quote! {
                 #doc_tokens
                 pub const #spec_const: ::connectrpc::Spec =
-                    ::connectrpc::Spec::new(#procedure, #stream_type)
-                        .with_idempotency(#idempotency);
+                    ::connectrpc::Spec::server(#procedure, #stream_type)
+                        .with_idempotency_level(#idempotency_level);
             }
         })
         .collect()

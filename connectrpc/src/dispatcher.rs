@@ -41,7 +41,7 @@ pub struct MethodDescriptor {
     ///
     /// Only meaningful for `MethodKind::Unary`. Always `false` for streaming.
     ///
-    /// This is a *narrower* flag than [`Spec::idempotency`](crate::Spec):
+    /// This is a *narrower* flag than [`Spec::idempotency_level`](crate::Spec):
     /// it is `true` only for `IdempotencyLevel::NoSideEffects`. Methods
     /// declared `Idempotent` (safe to retry but side-effecting) report
     /// `idempotent == false` here while carrying the full level in `spec`.
@@ -412,6 +412,7 @@ mod tests {
         let u = MethodDescriptor::unary(false);
         assert_eq!(u.kind, MethodKind::Unary);
         assert!(!u.idempotent);
+        assert_eq!(u.spec, None);
 
         let ui = MethodDescriptor::unary(true);
         assert!(ui.idempotent);
@@ -428,5 +429,38 @@ mod tests {
             MethodDescriptor::bidi_streaming().kind,
             MethodKind::BidiStreaming
         );
+    }
+
+    #[test]
+    fn method_descriptor_from_kind_builder_chain() {
+        use crate::spec::{Spec, StreamType};
+
+        // `from_kind` + `with_idempotent` is exactly the shape `unary(...)`
+        // produces, so the convenience constructors stay thin shims.
+        for kind in [
+            MethodKind::Unary,
+            MethodKind::ServerStreaming,
+            MethodKind::ClientStreaming,
+            MethodKind::BidiStreaming,
+        ] {
+            let d = MethodDescriptor::from_kind(kind);
+            assert_eq!(d.kind, kind);
+            assert!(!d.idempotent);
+            assert_eq!(d.spec, None);
+        }
+        assert_eq!(
+            MethodDescriptor::from_kind(MethodKind::Unary).with_idempotent(true),
+            MethodDescriptor::unary(true)
+        );
+
+        // `with_spec` attaches the spec and preserves the rest. The whole
+        // chain is `const`-evaluable so codegen output lands in `.rodata`.
+        const SPEC: Spec = Spec::server("/pkg.Svc/M", StreamType::ServerStream);
+        const DESC: MethodDescriptor = MethodDescriptor::from_kind(MethodKind::ServerStreaming)
+            .with_idempotent(false)
+            .with_spec(SPEC);
+        assert_eq!(DESC.kind, MethodKind::ServerStreaming);
+        assert!(!DESC.idempotent);
+        assert_eq!(DESC.spec, Some(SPEC));
     }
 }

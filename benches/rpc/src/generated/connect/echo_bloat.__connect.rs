@@ -28,11 +28,11 @@ pub const BLOAT_ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.BloatEchoService";
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const BLOAT_ECHO_SERVICE_ECHO_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const BLOAT_ECHO_SERVICE_ECHO_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.v1.BloatEchoService/Echo",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// String-heavy echo payload for measuring ViewEncode impact through
 /// the connect-rust codec layer. ~20 fields covering plain strings,
 /// repeated strings, a string map, two singular sub-messages, and a

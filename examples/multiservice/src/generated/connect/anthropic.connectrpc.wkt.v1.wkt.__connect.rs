@@ -124,29 +124,29 @@ pub const WELL_KNOWN_TYPES_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.wk
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const WELL_KNOWN_TYPES_SERVICE_CREATE_EVENT_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const WELL_KNOWN_TYPES_SERVICE_CREATE_EVENT_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/anthropic.connectrpc.wkt.v1.WellKnownTypesService/CreateEvent",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Static [`Spec`](::connectrpc::Spec) for the server-side `CalculateDuration` RPC.
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const WELL_KNOWN_TYPES_SERVICE_CALCULATE_DURATION_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const WELL_KNOWN_TYPES_SERVICE_CALCULATE_DURATION_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/anthropic.connectrpc.wkt.v1.WellKnownTypesService/CalculateDuration",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Static [`Spec`](::connectrpc::Spec) for the server-side `ProcessMetadata` RPC.
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const WELL_KNOWN_TYPES_SERVICE_PROCESS_METADATA_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const WELL_KNOWN_TYPES_SERVICE_PROCESS_METADATA_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/anthropic.connectrpc.wkt.v1.WellKnownTypesService/ProcessMetadata",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// WellKnownTypesService provides operations using Timestamp, Duration, and Struct.
 ///
 /// # Implementing handlers

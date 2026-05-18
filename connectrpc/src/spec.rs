@@ -80,20 +80,48 @@ pub enum IdempotencyLevel {
     Idempotent,
 }
 
+/// Which generated artifact produced a [`Spec`].
+///
+/// `Spec` constants are emitted into both the server-side dispatcher
+/// (`FooServiceServer<T>`) and the generated client (`FooServiceClient<T>`).
+/// `SpecOrigin` records which artifact a particular `Spec` value came from,
+/// so an interceptor that runs on both sides can distinguish — e.g. open a
+/// `client` span on one side and a `server` span on the other, or inject
+/// trace-context headers only when [`Client`](SpecOrigin::Client).
+///
+/// This is an enum rather than a `bool` (`is_client`) because the domain is
+/// closed and two-valued: the variant name carries the meaning at the read
+/// site (`spec.origin == SpecOrigin::Client` reads better than
+/// `spec.is_client`), and codegen constructs the right value via
+/// [`Spec::server`] / [`Spec::client`] without a builder.
+///
+/// `SpecOrigin` is intentionally exhaustive — RPC artifacts are either a
+/// client or a server. It is **unrelated to the HTTP `Origin` header** or
+/// CORS; the name carries the `Spec` prefix to keep the distinction clear.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SpecOrigin {
+    /// The `Spec` was emitted by a generated server-side dispatcher.
+    Server,
+    /// The `Spec` was emitted by a generated client.
+    Client,
+}
+
 /// Static description of an RPC method.
 ///
 /// One `Spec` value exists per generated method, emitted as a
 /// `pub const … : Spec` in the generated service module and surfaced on
 /// [`RequestContext::spec`](crate::RequestContext::spec) for handlers. It
-/// names the method (`/package.Service/Method`), its stream shape, and its
-/// proto-declared idempotency contract.
+/// names the method (`/package.Service/Method`), its stream shape, its
+/// proto-declared idempotency contract, and which generated artifact
+/// (server or client) produced it.
 ///
 /// `Spec` is `Copy` and contains only `'static` data, so it can be stored,
 /// captured in closures, and compared freely with no allocation.
 ///
-/// Construct one with [`Spec::new`]. The struct is `#[non_exhaustive]` so
-/// future fields can be added without a breaking change; destructure with a
-/// trailing `..` (e.g. `let Spec { procedure, stream_type, .. } = spec`).
+/// Construct one with [`Spec::server`] or [`Spec::client`]. The struct is
+/// `#[non_exhaustive]` so future fields can be added without a breaking
+/// change; destructure with a trailing `..`
+/// (e.g. `let Spec { procedure, stream_type, .. } = spec`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct Spec {
@@ -106,14 +134,14 @@ pub struct Spec {
     pub procedure: &'static str,
     /// The message-flow shape of the method.
     pub stream_type: StreamType,
-    /// `true` when this `Spec` was produced by a generated client, `false`
-    /// for a server-side dispatcher.
+    /// Which generated artifact produced this `Spec`.
     ///
-    /// Generated server-side `*_SPEC` constants always carry `false`. Once
-    /// the client-side interceptor surface lands, the generated client will
-    /// supply specs with `is_client: true` so a single interceptor
-    /// registered on both sides can distinguish.
-    pub is_client: bool,
+    /// Server-side dispatchers (`FooServiceServer<T>`) emit
+    /// [`SpecOrigin::Server`]; generated clients emit
+    /// [`SpecOrigin::Client`]. An interceptor registered on both sides
+    /// reads this to pick the right span kind or trace-propagation
+    /// direction.
+    pub origin: SpecOrigin,
     /// The idempotency contract declared in the proto definition.
     ///
     /// This is the full three-valued proto enum. The boolean
@@ -121,30 +149,59 @@ pub struct Spec {
     /// is a *derived* "Connect GET-eligible" flag that is only `true` for
     /// [`NoSideEffects`](IdempotencyLevel::NoSideEffects) — `Idempotent`
     /// methods are safe to retry but not GET-eligible.
-    pub idempotency: IdempotencyLevel,
+    pub idempotency_level: IdempotencyLevel,
 }
 
 impl Spec {
-    /// Construct a `Spec` with default `is_client` (`false`) and
-    /// `idempotency` ([`IdempotencyLevel::Unknown`]).
+    /// Construct a server-side `Spec` ([`SpecOrigin::Server`]) with the
+    /// default `idempotency_level` ([`IdempotencyLevel::Unknown`]).
     ///
-    /// Generated code chains [`with_idempotency`](Spec::with_idempotency)
-    /// onto this constructor in `const` position, so `Spec` constants live
-    /// in `.rodata`.
-    pub const fn new(procedure: &'static str, stream_type: StreamType) -> Self {
+    /// Generated server-side dispatchers chain
+    /// [`with_idempotency_level`](Spec::with_idempotency_level) onto this
+    /// constructor in `const` position, so `Spec` constants live in
+    /// `.rodata`.
+    ///
+    /// In debug builds, asserts that `procedure` starts with `/` and
+    /// contains a `/Service/Method` separator so a malformed test fixture
+    /// fails loudly rather than producing misleading [`service`](Spec::service)
+    /// / [`method`](Spec::method) accessor results.
+    pub const fn server(procedure: &'static str, stream_type: StreamType) -> Self {
+        debug_assert_well_formed(procedure);
         Self {
             procedure,
             stream_type,
-            is_client: false,
-            idempotency: IdempotencyLevel::Unknown,
+            origin: SpecOrigin::Server,
+            idempotency_level: IdempotencyLevel::Unknown,
+        }
+    }
+
+    /// Construct a client-side `Spec` ([`SpecOrigin::Client`]) with the
+    /// default `idempotency_level` ([`IdempotencyLevel::Unknown`]).
+    ///
+    /// Generated clients chain
+    /// [`with_idempotency_level`](Spec::with_idempotency_level) onto this
+    /// constructor in `const` position, so `Spec` constants live in
+    /// `.rodata`.
+    ///
+    /// In debug builds, asserts that `procedure` starts with `/` and
+    /// contains a `/Service/Method` separator so a malformed test fixture
+    /// fails loudly rather than producing misleading [`service`](Spec::service)
+    /// / [`method`](Spec::method) accessor results.
+    pub const fn client(procedure: &'static str, stream_type: StreamType) -> Self {
+        debug_assert_well_formed(procedure);
+        Self {
+            procedure,
+            stream_type,
+            origin: SpecOrigin::Client,
+            idempotency_level: IdempotencyLevel::Unknown,
         }
     }
 
     /// Set the idempotency level. Returns `self` for chaining in `const`
     /// position.
     #[must_use]
-    pub const fn with_idempotency(mut self, idempotency: IdempotencyLevel) -> Self {
-        self.idempotency = idempotency;
+    pub const fn with_idempotency_level(mut self, idempotency_level: IdempotencyLevel) -> Self {
+        self.idempotency_level = idempotency_level;
         self
     }
 
@@ -153,7 +210,8 @@ impl Spec {
     /// `/Method`.
     ///
     /// Returns the whole procedure (sans leading `/`) if it contains no
-    /// method separator, which never happens for generated specs.
+    /// method separator, which never happens for generated specs (the
+    /// constructors `debug_assert!` on it).
     // TODO: make `const` once `str::rsplit_once` is const-stable.
     pub fn service(&self) -> &'static str {
         let p = self.procedure.trim_start_matches('/');
@@ -163,11 +221,46 @@ impl Spec {
     /// The bare method name (`"Method"`) from [`procedure`](Spec::procedure).
     ///
     /// Returns the whole procedure (sans leading `/`) if it contains no
-    /// method separator, which never happens for generated specs.
+    /// method separator, which never happens for generated specs (the
+    /// constructors `debug_assert!` on it).
     // TODO: make `const` once `str::rsplit_once` is const-stable.
     pub fn method(&self) -> &'static str {
         let p = self.procedure.trim_start_matches('/');
         p.rsplit_once('/').map(|(_, m)| m).unwrap_or(p)
+    }
+}
+
+/// `const fn` debug assertion that a procedure path looks like
+/// `"/package.Service/Method"`: leading slash and at least one interior
+/// slash separating the service from the method.
+///
+/// This is a `const fn` so [`Spec::server`] / [`Spec::client`] stay
+/// const-evaluable: a malformed procedure in a `const SPEC: Spec` will
+/// surface as a *compile-time* panic on a debug build of the consuming
+/// crate, not a silent mis-parse at runtime. Compiles to nothing in
+/// release builds.
+const fn debug_assert_well_formed(procedure: &str) {
+    if cfg!(debug_assertions) {
+        let bytes = procedure.as_bytes();
+        // Must start with '/'.
+        assert!(
+            !bytes.is_empty() && bytes[0] == b'/',
+            "Spec procedure must start with '/' (e.g. \"/pkg.Service/Method\")"
+        );
+        // Must have a second '/' separating Service from Method.
+        let mut has_inner_slash = false;
+        let mut i = 1;
+        while i < bytes.len() {
+            if bytes[i] == b'/' {
+                has_inner_slash = true;
+                break;
+            }
+            i += 1;
+        }
+        assert!(
+            has_inner_slash,
+            "Spec procedure must contain a '/Service/Method' separator (e.g. \"/pkg.Service/Method\")"
+        );
     }
 }
 
@@ -189,28 +282,54 @@ mod tests {
 
     #[test]
     fn spec_const_construction_and_accessors() {
-        const SPEC: Spec = Spec::new("/pkg.Greet/Say", StreamType::Unary)
-            .with_idempotency(IdempotencyLevel::NoSideEffects);
+        const SPEC: Spec = Spec::server("/pkg.Greet/Say", StreamType::Unary)
+            .with_idempotency_level(IdempotencyLevel::NoSideEffects);
         assert_eq!(SPEC.procedure, "/pkg.Greet/Say");
         assert_eq!(SPEC.service(), "pkg.Greet");
         assert_eq!(SPEC.method(), "Say");
         assert_eq!(SPEC.stream_type, StreamType::Unary);
-        assert_eq!(SPEC.idempotency, IdempotencyLevel::NoSideEffects);
-        const { assert!(!SPEC.is_client) };
+        assert_eq!(SPEC.idempotency_level, IdempotencyLevel::NoSideEffects);
+        const { assert!(matches!(SPEC.origin, SpecOrigin::Server)) };
+    }
+
+    #[test]
+    fn spec_client_const_construction() {
+        const SPEC: Spec = Spec::client("/pkg.Greet/Say", StreamType::Unary);
+        assert_eq!(SPEC.origin, SpecOrigin::Client);
+        assert_eq!(SPEC.idempotency_level, IdempotencyLevel::Unknown);
     }
 
     #[test]
     fn spec_defaults() {
-        let s = Spec::new("/a.B/C", StreamType::BidiStream);
-        assert_eq!(s.idempotency, IdempotencyLevel::Unknown);
-        assert!(!s.is_client);
+        let s = Spec::server("/a.B/C", StreamType::BidiStream);
+        assert_eq!(s.idempotency_level, IdempotencyLevel::Unknown);
+        assert_eq!(s.origin, SpecOrigin::Server);
     }
 
     #[test]
-    fn spec_service_method_no_separator() {
-        // Degenerate case: no '/Method' component. Both accessors fall back
-        // to the whole (de-slashed) string rather than panicking.
-        let s = Spec::new("nopath", StreamType::Unary);
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "Spec procedure must contain a '/Service/Method' separator")
+    )]
+    fn spec_malformed_path_no_method_separator_debug_asserts() {
+        let _ = Spec::server("/nopath", StreamType::Unary);
+    }
+
+    #[test]
+    #[cfg_attr(
+        debug_assertions,
+        should_panic(expected = "Spec procedure must start with '/'")
+    )]
+    fn spec_malformed_path_no_leading_slash_debug_asserts() {
+        let _ = Spec::server("pkg.Service/Method", StreamType::Unary);
+    }
+
+    #[test]
+    #[cfg(not(debug_assertions))]
+    fn spec_service_method_no_separator_release_fallback() {
+        // In release builds debug_assert_well_formed is a no-op, so this is
+        // the documented fallback behaviour.
+        let s = Spec::server("/nopath", StreamType::Unary);
         assert_eq!(s.service(), "nopath");
         assert_eq!(s.method(), "nopath");
     }

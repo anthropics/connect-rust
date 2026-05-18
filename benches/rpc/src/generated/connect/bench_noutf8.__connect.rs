@@ -32,11 +32,11 @@ pub const LOG_INGEST_SERVICE_SERVICE_NAME: &str = "bench.noutf8.v1.LogIngestServ
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const LOG_INGEST_SERVICE_INGEST_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const LOG_INGEST_SERVICE_INGEST_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.noutf8.v1.LogIngestService/Ingest",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Server trait for LogIngestService.
 ///
 /// # Implementing handlers

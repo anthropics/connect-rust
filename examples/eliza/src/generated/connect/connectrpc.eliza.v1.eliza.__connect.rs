@@ -88,29 +88,29 @@ pub const ELIZA_SERVICE_SERVICE_NAME: &str = "connectrpc.eliza.v1.ElizaService";
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const ELIZA_SERVICE_SAY_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const ELIZA_SERVICE_SAY_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/connectrpc.eliza.v1.ElizaService/Say",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::NoSideEffects);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::NoSideEffects);
 /// Static [`Spec`](::connectrpc::Spec) for the server-side `Converse` RPC.
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const ELIZA_SERVICE_CONVERSE_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const ELIZA_SERVICE_CONVERSE_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/connectrpc.eliza.v1.ElizaService/Converse",
         ::connectrpc::StreamType::BidiStream,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Static [`Spec`](::connectrpc::Spec) for the server-side `Introduce` RPC.
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const ELIZA_SERVICE_INTRODUCE_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const ELIZA_SERVICE_INTRODUCE_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/connectrpc.eliza.v1.ElizaService/Introduce",
         ::connectrpc::StreamType::ServerStream,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// ElizaService provides a way to talk to Eliza, a port of the DOCTOR script
 /// for Joseph Weizenbaum's original ELIZA program. Created in the mid-1960s at
 /// the MIT Artificial Intelligence Laboratory, ELIZA demonstrates the

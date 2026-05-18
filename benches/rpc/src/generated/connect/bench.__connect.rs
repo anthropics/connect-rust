@@ -112,56 +112,56 @@ pub const BENCH_SERVICE_SERVICE_NAME: &str = "bench.v1.BenchService";
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const BENCH_SERVICE_UNARY_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const BENCH_SERVICE_UNARY_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.v1.BenchService/Unary",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Static [`Spec`](::connectrpc::Spec) for the server-side `ServerStream` RPC.
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const BENCH_SERVICE_SERVER_STREAM_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const BENCH_SERVICE_SERVER_STREAM_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.v1.BenchService/ServerStream",
         ::connectrpc::StreamType::ServerStream,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Static [`Spec`](::connectrpc::Spec) for the server-side `ClientStream` RPC.
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const BENCH_SERVICE_CLIENT_STREAM_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const BENCH_SERVICE_CLIENT_STREAM_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.v1.BenchService/ClientStream",
         ::connectrpc::StreamType::ClientStream,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Static [`Spec`](::connectrpc::Spec) for the server-side `BidiStream` RPC.
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const BENCH_SERVICE_BIDI_STREAM_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const BENCH_SERVICE_BIDI_STREAM_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.v1.BenchService/BidiStream",
         ::connectrpc::StreamType::BidiStream,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Static [`Spec`](::connectrpc::Spec) for the server-side `LogUnary` RPC.
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const BENCH_SERVICE_LOG_UNARY_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const BENCH_SERVICE_LOG_UNARY_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.v1.BenchService/LogUnary",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Static [`Spec`](::connectrpc::Spec) for the server-side `LogUnaryOwned` RPC.
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const BENCH_SERVICE_LOG_UNARY_OWNED_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const BENCH_SERVICE_LOG_UNARY_OWNED_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.v1.BenchService/LogUnaryOwned",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Server trait for BenchService.
 ///
 /// # Implementing handlers
@@ -937,11 +937,11 @@ pub const ECHO_SERVICE_SERVICE_NAME: &str = "bench.v1.EchoService";
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const ECHO_SERVICE_ECHO_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const ECHO_SERVICE_ECHO_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.v1.EchoService/Echo",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Minimal echo service for measuring pure framework overhead.
 /// No database, no spawn_blocking, no complex payloads — just
 /// dispatch + proto encode/decode of a single string.
@@ -1281,11 +1281,11 @@ pub const LOG_INGEST_SERVICE_SERVICE_NAME: &str = "bench.v1.LogIngestService";
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const LOG_INGEST_SERVICE_INGEST_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const LOG_INGEST_SERVICE_INGEST_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/bench.v1.LogIngestService/Ingest",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Server trait for LogIngestService.
 ///
 /// # Implementing handlers

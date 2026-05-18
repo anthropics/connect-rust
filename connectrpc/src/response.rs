@@ -1288,4 +1288,27 @@ mod tests {
         let ctx = RequestContext::new(HeaderMap::new()).with_extensions(ext);
         assert_eq!(ctx.extensions().get::<Peer>(), Some(&Peer(7)));
     }
+
+    #[test]
+    fn request_context_with_spec_and_protocol() {
+        use crate::spec::{Spec, StreamType};
+
+        // Default-constructed context has neither.
+        let ctx = RequestContext::new(HeaderMap::new());
+        assert_eq!(ctx.spec(), None);
+        assert_eq!(ctx.protocol(), None);
+
+        // Both round-trip through the builders.
+        const SPEC: Spec = Spec::server("/pkg.Svc/M", StreamType::Unary);
+        let ctx = RequestContext::new(HeaderMap::new())
+            .with_spec(Some(SPEC))
+            .with_protocol(Some(crate::Protocol::Grpc));
+        assert_eq!(ctx.spec(), Some(SPEC));
+        assert_eq!(ctx.protocol(), Some(crate::Protocol::Grpc));
+
+        // Builders accept `None` to clear (matches `with_deadline`).
+        let ctx = ctx.with_spec(None).with_protocol(None);
+        assert_eq!(ctx.spec(), None);
+        assert_eq!(ctx.protocol(), None);
+    }
 }

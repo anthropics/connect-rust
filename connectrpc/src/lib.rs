@@ -274,6 +274,7 @@ pub use protocol::RequestProtocol;
 // Static method metadata
 pub use spec::IdempotencyLevel;
 pub use spec::Spec;
+pub use spec::SpecOrigin;
 pub use spec::StreamType;
 
 // ============================================================================

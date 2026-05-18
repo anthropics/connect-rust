@@ -36,11 +36,11 @@ pub const MATH_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.math.v1.MathSe
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const MATH_SERVICE_ADD_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const MATH_SERVICE_ADD_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/anthropic.connectrpc.math.v1.MathService/Add",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// MathService provides basic math operations.
 ///
 /// # Implementing handlers

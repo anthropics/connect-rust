@@ -32,11 +32,11 @@ pub const FORTUNE_SERVICE_SERVICE_NAME: &str = "fortune.v1.FortuneService";
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const FORTUNE_SERVICE_GET_FORTUNES_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const FORTUNE_SERVICE_GET_FORTUNES_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/fortune.v1.FortuneService/GetFortunes",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// Server trait for FortuneService.
 ///
 /// # Implementing handlers

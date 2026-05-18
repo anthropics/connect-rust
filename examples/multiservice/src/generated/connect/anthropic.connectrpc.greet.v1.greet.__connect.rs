@@ -44,11 +44,11 @@ pub const GREET_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.greet.v1.Gree
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const GREET_SERVICE_GREET_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const GREET_SERVICE_GREET_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/anthropic.connectrpc.greet.v1.GreetService/Greet",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::NoSideEffects);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::NoSideEffects);
 /// GreetService provides greeting functionality.
 ///
 /// # Implementing handlers

@@ -1156,8 +1156,8 @@ mod tests {
                 .unwrap_or_else(|| "<none>".into());
             let data = match ctx.spec() {
                 Some(s) => format!(
-                    "{}|{:?}|{proto}|{:?}",
-                    s.procedure, s.stream_type, s.idempotency
+                    "{}|{:?}|{proto}|{:?}|{:?}",
+                    s.procedure, s.stream_type, s.idempotency_level, s.origin
                 ),
                 None => format!("<none>|{proto}"),
             };
@@ -1220,7 +1220,7 @@ mod tests {
         let _h = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         assert_eq!(
             round_trip(addr).await,
-            "/test.echo.v1.EchoService/Echo|Unary|Connect|Unknown"
+            "/test.echo.v1.EchoService/Echo|Unary|Connect|Unknown|Server"
         );
 
         // Dynamic Router path → spec is None, protocol is still populated.
@@ -1237,7 +1237,7 @@ mod tests {
     /// (its keys are owned `String`s), so it must return `spec: None`.
     #[test]
     fn codegen_specs_thread_through_lookup() {
-        use connectrpc::{Dispatcher, IdempotencyLevel, MethodKind, StreamType};
+        use connectrpc::{Dispatcher, IdempotencyLevel, MethodKind, SpecOrigin, StreamType};
 
         // The codegen const carries the proto-level metadata.
         assert_eq!(
@@ -1246,10 +1246,10 @@ mod tests {
         );
         assert_eq!(ECHO_SERVICE_ECHO_SPEC.stream_type, StreamType::Unary);
         assert_eq!(
-            ECHO_SERVICE_ECHO_SPEC.idempotency,
+            ECHO_SERVICE_ECHO_SPEC.idempotency_level,
             IdempotencyLevel::Unknown
         );
-        const { assert!(!ECHO_SERVICE_ECHO_SPEC.is_client) };
+        const { assert!(matches!(ECHO_SERVICE_ECHO_SPEC.origin, SpecOrigin::Server)) };
         assert_eq!(ECHO_SERVICE_ECHO_SPEC.service(), "test.echo.v1.EchoService");
         assert_eq!(ECHO_SERVICE_ECHO_SPEC.method(), "Echo");
         assert_eq!(

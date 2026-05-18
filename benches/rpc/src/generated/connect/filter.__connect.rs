@@ -28,11 +28,11 @@ pub const FILTER_SERVICE_SERVICE_NAME: &str = "anthropic.connectrpc.filter.v1.Fi
 ///
 /// The dispatcher surfaces this on
 /// [`RequestContext::spec`](::connectrpc::RequestContext::spec).
-pub const FILTER_SERVICE_REDACT_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::new(
+pub const FILTER_SERVICE_REDACT_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::server(
         "/anthropic.connectrpc.filter.v1.FilterService/Redact",
         ::connectrpc::StreamType::Unary,
     )
-    .with_idempotency(::connectrpc::IdempotencyLevel::Unknown);
+    .with_idempotency_level(::connectrpc::IdempotencyLevel::Unknown);
 /// A redaction proxy: returns the input record with sensitive fields
 /// scrubbed. Models a filtering/mutating handler where the common case
 /// (no sensitive data present) can return the request view unchanged.
