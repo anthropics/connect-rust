@@ -199,6 +199,7 @@ pub mod client;
 
 // Optional: Standalone hyper-based server
 #[cfg(feature = "server")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server")))]
 pub mod server;
 
 // Optional: TLS-aware `axum::serve` counterpart with peer-identity passthrough.
@@ -299,18 +300,23 @@ pub use compression::DEFAULT_COMPRESSION_MIN_SIZE;
 pub use deadline::DeadlinePolicy;
 
 #[cfg(feature = "gzip")]
+#[cfg_attr(docsrs, doc(cfg(feature = "gzip")))]
 pub use compression::GzipProvider;
 
 #[cfg(feature = "zstd")]
+#[cfg_attr(docsrs, doc(cfg(feature = "zstd")))]
 pub use compression::ZstdProvider;
 
 #[cfg(feature = "streaming")]
+#[cfg_attr(docsrs, doc(cfg(feature = "streaming")))]
 pub use compression::BoxedAsyncBufRead;
 
 #[cfg(feature = "streaming")]
+#[cfg_attr(docsrs, doc(cfg(feature = "streaming")))]
 pub use compression::BoxedAsyncRead;
 
 #[cfg(feature = "streaming")]
+#[cfg_attr(docsrs, doc(cfg(feature = "streaming")))]
 pub use compression::StreamingCompressionProvider;
 
 // ============================================================================
@@ -318,14 +324,18 @@ pub use compression::StreamingCompressionProvider;
 // ============================================================================
 
 #[cfg(feature = "server")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server")))]
 pub use server::BoundServer;
 
 #[cfg(feature = "server")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server")))]
 pub use server::Server;
 
 #[cfg(feature = "server")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server")))]
 pub use server::PeerAddr;
 #[cfg(feature = "server-tls")]
+#[cfg_attr(docsrs, doc(cfg(feature = "server-tls")))]
 pub use server::PeerCerts;
 
 /// Re-export of `rustls` for TLS configuration.
@@ -334,6 +344,7 @@ pub use server::PeerCerts;
 /// or a [`rustls::ClientConfig`] for [`HttpClient::with_tls`](client::HttpClient::with_tls)
 /// / [`Http2Connection::connect_tls`](client::Http2Connection::connect_tls).
 #[cfg(any(feature = "server-tls", feature = "client-tls"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "server-tls", feature = "client-tls"))))]
 pub use rustls;
 
 /// Include the generated ConnectRPC file from `$OUT_DIR`.

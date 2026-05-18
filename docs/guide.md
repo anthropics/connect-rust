@@ -35,7 +35,7 @@ Add the runtime to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-connectrpc = "0.4"
+connectrpc = "0.5"
 ```
 
 The runtime depends on [`buffa`](https://github.com/anthropics/buffa)
@@ -69,16 +69,16 @@ Common combinations:
 
 ```toml
 # Just the server, behind axum
-connectrpc = { version = "0.4", features = ["axum"] }
+connectrpc = { version = "0.5", features = ["axum"] }
 
 # Server + client, both with TLS
-connectrpc = { version = "0.4", features = ["axum", "client", "tls"] }
+connectrpc = { version = "0.5", features = ["axum", "client", "tls"] }
 
 # Built-in server (no axum)
-connectrpc = { version = "0.4", features = ["server"] }
+connectrpc = { version = "0.5", features = ["server"] }
 
 # Minimal (wasm-friendly: no networking, no native compression)
-connectrpc = { version = "0.4", default-features = false }
+connectrpc = { version = "0.5", default-features = false }
 ```
 
 ## Quick start
@@ -102,7 +102,7 @@ Generate code with `connectrpc-build` in `build.rs`:
 
 ```toml
 [build-dependencies]
-connectrpc-build = "0.4"
+connectrpc-build = "0.5"
 ```
 
 ```rust

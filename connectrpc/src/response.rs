@@ -204,6 +204,7 @@ impl RequestContext {
     /// passes in unit tests, and panics in production behind a transport
     /// that didn't insert it.
     #[cfg(feature = "server")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server")))]
     pub fn peer_addr(&self) -> Option<std::net::SocketAddr> {
         self.extensions
             .get::<crate::server::PeerAddr>()
@@ -221,6 +222,7 @@ impl RequestContext {
     /// request extensions. Like [`peer_addr`](Self::peer_addr), prefer
     /// this over a raw `extensions().get()` + `unwrap()`.
     #[cfg(feature = "server-tls")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "server-tls")))]
     pub fn peer_certs(&self) -> Option<&[rustls::pki_types::CertificateDer<'static>]> {
         self.extensions
             .get::<crate::server::PeerCerts>()
