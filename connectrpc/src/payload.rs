@@ -46,6 +46,9 @@ use crate::error::ConnectError;
 /// [`encode`](AnyMessage::encode)`(format)` must decode back to an
 /// equivalent value in that same format — the dispatch path relies on it
 /// when re-encoding a replacement set via [`Payload::set_message`].
+/// Violating it does not panic or error — [`Payload::encoded`] silently
+/// produces wrong-shape bytes — so a manual impl must be tested for the
+/// round-trip explicitly.
 pub trait AnyMessage: Send + Sync + 'static {
     /// Borrow the message as `dyn Any` for downcasting.
     fn as_any(&self) -> &dyn Any;
@@ -68,7 +71,8 @@ pub trait AnyMessage: Send + Sync + 'static {
 
 impl<T> AnyMessage for T
 where
-    T: Message + Serialize + Send + Sync + 'static,
+    // Message already requires Send + Sync as supertraits.
+    T: Message + Serialize + 'static,
 {
     fn as_any(&self) -> &dyn Any {
         self
@@ -131,7 +135,10 @@ impl Payload {
         }
     }
 
-    /// The original wire bytes, regardless of any replacement.
+    /// The original wire bytes the peer sent, **ignoring** any
+    /// replacement set with [`set_message`](Payload::set_message). For
+    /// the bytes the dispatch path will actually send downstream, use
+    /// [`encoded()`](Payload::encoded).
     pub fn bytes(&self) -> &Bytes {
         &self.bytes
     }
@@ -149,12 +156,15 @@ impl Payload {
     ///
     /// # Errors
     ///
-    /// Returns an error if the bytes fail to decode, if a replacement set
-    /// with [`set_message`](Payload::set_message) is not an `M`, or if a
-    /// previous `message::<N>()` cached a different message type than `M`.
-    /// The last two are programming bugs — interceptors and handlers for
-    /// the same RPC must agree on the message types — and the cache holds
-    /// whichever type decoded first.
+    /// - [`invalid_argument`](ConnectError::invalid_argument) if the wire
+    ///   bytes fail to decode as `M` — peer-supplied data, not a server
+    ///   bug.
+    /// - [`internal`](ConnectError::internal) if a replacement set with
+    ///   [`set_message`](Payload::set_message) is not an `M`, or if a
+    ///   prior `message::<N>()` cached a different type than `M` — both
+    ///   are server-side programming errors (interceptors and handlers
+    ///   for the same RPC must agree on the message types), and the cache
+    ///   holds whichever type decoded first.
     pub fn message<M>(&self) -> Result<&M, ConnectError>
     where
         M: Message + Serialize + DeserializeOwned + 'static,
@@ -206,10 +216,18 @@ impl Payload {
     ///
     /// # Errors
     ///
-    /// Returns [`failed_precondition`](ConnectError::failed_precondition)
-    /// for JSON-encoded wires: JSON cannot back a zero-copy proto view.
-    /// Use [`message`](Payload::message) instead. Also returns an error if
-    /// the bytes fail to decode as `V`.
+    /// - [`internal`](ConnectError::internal) for JSON-encoded wires:
+    ///   JSON cannot back a zero-copy proto view. This is a server-side
+    ///   programming error and escapes to the peer as a 500 if uncaught —
+    ///   branch on [`format()`](Payload::format) and call
+    ///   [`message()`](Payload::message) for JSON wires instead.
+    /// - [`invalid_argument`](ConnectError::invalid_argument) if the wire
+    ///   bytes fail to decode as `V` — peer-supplied data, not a server
+    ///   bug.
+    /// - [`internal`](ConnectError::internal) if a replacement set with
+    ///   [`set_message`](Payload::set_message) fails to re-encode or
+    ///   decode as `V` — server-supplied data, so the asymmetry with the
+    ///   wire-bytes case is intentional.
     pub fn view<V>(&self) -> Result<OwnedView<V>, ConnectError>
     where
         V: MessageView<'static>,
@@ -221,7 +239,7 @@ impl Payload {
             });
         }
         if self.format != CodecFormat::Proto {
-            return Err(ConnectError::failed_precondition(
+            return Err(ConnectError::internal(
                 "Payload::view requires a proto-encoded wire; use Payload::message for JSON",
             ));
         }
@@ -240,9 +258,13 @@ impl Payload {
         M: AnyMessage,
     {
         self.replaced = Some(Box::new(message));
-        // The lazy-decode cache is now shadowed by `replaced`; drop it so
-        // the original message doesn't pin memory for the Payload's life.
-        self.decoded = OnceLock::new();
+        // Drop the prior decode cache so the original message doesn't pin
+        // memory for the Payload's lifetime. `replaced` is checked first,
+        // so a stale cache would never be visible — this is purely a
+        // memory concern.
+        if self.decoded.get().is_some() {
+            self.decoded = OnceLock::new();
+        }
     }
 
     /// The wire bytes the dispatch path should actually send.
@@ -406,6 +428,66 @@ mod tests {
         assert!(msg.contains("previously decoded as a"), "{err:?}");
         assert!(msg.contains("StringValue"), "{err:?}");
         assert!(msg.contains("Int32Value"), "{err:?}");
+    }
+
+    #[test]
+    fn message_decode_error_is_invalid_argument() {
+        use crate::ErrorCode;
+        // Bytes that cannot decode as a StringValue — peer-supplied data,
+        // so the error code blames the peer, not the server.
+        let p = Payload::new(Bytes::from_static(&[0xff, 0xff, 0xff]), CodecFormat::Proto);
+        let err = p.message::<StringValue>().unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidArgument, "{err:?}");
+    }
+
+    #[test]
+    fn message_replacement_wrong_type_errors() {
+        use buffa_types::google::protobuf::Int32Value;
+        let mut p = proto_payload("x");
+        p.set_message(Int32Value {
+            value: 7,
+            ..Default::default()
+        });
+        // The replacement path has a distinct error message from the
+        // post-decode wrong-type path covered by message_wrong_type_errors.
+        let err = p.message::<StringValue>().unwrap_err();
+        let msg = err.message.as_deref().unwrap_or_default();
+        assert!(msg.contains("replacement is a"), "{err:?}");
+        assert!(msg.contains("Int32Value"), "{err:?}");
+        assert!(msg.contains("StringValue"), "{err:?}");
+    }
+
+    #[test]
+    fn view_replaced_json_format_payload() {
+        // A replacement is always re-encoded to proto for view(), so a
+        // JSON-format payload with a replacement still views successfully.
+        let bytes = encode_json(&StringValue {
+            value: "before".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut p = Payload::new(bytes, CodecFormat::Json);
+        p.set_message(StringValue {
+            value: "after".into(),
+            ..Default::default()
+        });
+        let v = p.view::<StringValueView>().unwrap();
+        assert_eq!(v.value, "after");
+    }
+
+    #[test]
+    fn set_message_twice_supersedes() {
+        let mut p = proto_payload("original");
+        p.set_message(StringValue {
+            value: "first".into(),
+            ..Default::default()
+        });
+        p.set_message(StringValue {
+            value: "second".into(),
+            ..Default::default()
+        });
+        let m: &StringValue = p.message().unwrap();
+        assert_eq!(m.value, "second");
     }
 
     #[test]
