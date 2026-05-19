@@ -344,7 +344,7 @@ impl<T: ElizaService> ::connectrpc::Dispatcher for ElizaServiceServer<T> {
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("connectrpc.eliza.v1.ElizaService/") else {
@@ -357,7 +357,7 @@ impl<T: ElizaService> ::connectrpc::Dispatcher for ElizaServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::connectrpc::eliza::v1::__buffa::view::SayRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.say(ctx, req)
                         .await?
                         .encode::<

@@ -192,7 +192,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("bench.noutf8.v1.LogIngestService/") else {
@@ -205,7 +205,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::noutf8::v1::__buffa::view::LogRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.ingest(ctx, req)
                         .await?
                         .encode::<

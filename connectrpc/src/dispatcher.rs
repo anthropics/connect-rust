@@ -23,6 +23,7 @@ use crate::codec::CodecFormat;
 use crate::error::ConnectError;
 use crate::handler::BoxFuture;
 use crate::handler::BoxStream;
+use crate::payload::Payload;
 use crate::response::{EncodedResponse, RequestContext};
 use crate::router::MethodKind;
 use crate::spec::Spec;
@@ -152,14 +153,24 @@ pub trait Dispatcher: Send + Sync + 'static {
 
     /// Dispatch a unary call.
     ///
-    /// The caller decodes the request body to raw bytes (after envelope
-    /// stripping / decompression), and the dispatcher decodes it to the
-    /// concrete request type, invokes the handler, and encodes the response.
+    /// The caller wraps the body bytes (after envelope stripping /
+    /// decompression) in a [`Payload`], and the dispatcher decodes it to
+    /// the concrete request type, invokes the handler, and encodes the
+    /// response.
+    ///
+    /// The `request` is a [`Payload`] rather than raw `Bytes` so a
+    /// dispatcher backing an owned-message handler can call
+    /// [`Payload::take_message`] and reuse the decode an interceptor may
+    /// already have cached, instead of decoding the same bytes twice.
+    /// Dispatchers backing zero-copy view handlers call
+    /// [`Payload::encoded`] to recover the (post-replacement) wire bytes
+    /// — the cache stores owned messages, not views, so it cannot help
+    /// the view path.
     fn call_unary(
         &self,
         path: &str,
         ctx: RequestContext,
-        request: Bytes,
+        request: Payload,
         format: CodecFormat,
     ) -> UnaryResult;
 
@@ -255,7 +266,7 @@ impl<A: Dispatcher, B: Dispatcher> Dispatcher for Chain<A, B> {
         &self,
         path: &str,
         ctx: RequestContext,
-        request: Bytes,
+        request: Payload,
         format: CodecFormat,
     ) -> UnaryResult {
         if self.0.lookup(path).is_some() {

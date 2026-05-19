@@ -698,7 +698,7 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
@@ -712,7 +712,7 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.unary(ctx, req)
                         .await?
                         .encode::<
@@ -725,7 +725,7 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.unimplemented(ctx, req)
                         .await?
                         .encode::<
@@ -738,7 +738,7 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.idempotent_unary(ctx, req)
                         .await?
                         .encode::<

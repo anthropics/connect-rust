@@ -190,7 +190,7 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
@@ -204,7 +204,7 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.redact(ctx, req)
                         .await?
                         .encode::<

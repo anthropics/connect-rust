@@ -205,7 +205,7 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
@@ -219,7 +219,7 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.greet(ctx, req)
                         .await?
                         .encode::<

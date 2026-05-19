@@ -1486,7 +1486,11 @@ fn generate_service_server(
                 #method_name => {
                     let svc = ::std::sync::Arc::clone(&self.inner);
                     Box::pin(async move {
-                        let req = ::connectrpc::dispatcher::codegen::decode_request_view::<#input_view>(request, format)?;
+                        // Generated handlers are view-based, so the owned-message
+                        // cache an interceptor may have populated cannot be reused.
+                        // `encoded()` returns the (post-replacement) wire bytes —
+                        // a cheap `Bytes` clone for the common no-replacement case.
+                        let req = ::connectrpc::dispatcher::codegen::decode_request_view::<#input_view>(request.encoded()?, format)?;
                         svc.#method_snake(ctx, req).await?.encode::<#output_type>(format)
                     })
                 }
@@ -1547,7 +1551,7 @@ fn generate_service_server(
                 &self,
                 path: &str,
                 ctx: ::connectrpc::RequestContext,
-                request: ::buffa::bytes::Bytes,
+                request: ::connectrpc::Payload,
                 format: ::connectrpc::CodecFormat,
             ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
                 let Some(method) = path.strip_prefix(#path_prefix) else {

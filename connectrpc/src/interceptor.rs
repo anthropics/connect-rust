@@ -340,7 +340,9 @@ where
 ///
 /// The empty-chain path makes a single `is_empty` check and delegates;
 /// it does not build a [`UnaryRequest`], a [`Next`], or any chain
-/// machinery. A service with no interceptors pays nothing.
+/// machinery. The [`Payload::new`] wrap is plain struct construction —
+/// no allocation, no decode — so a service with no interceptors pays
+/// nothing.
 pub(crate) async fn call_unary_intercepted<D: crate::Dispatcher>(
     dispatcher: &D,
     interceptors: &[Arc<dyn Interceptor>],
@@ -350,7 +352,9 @@ pub(crate) async fn call_unary_intercepted<D: crate::Dispatcher>(
     format: CodecFormat,
 ) -> Result<EncodedResponse, ConnectError> {
     if interceptors.is_empty() {
-        return dispatcher.call_unary(path, ctx, body, format).await;
+        return dispatcher
+            .call_unary(path, ctx, Payload::new(body, format), format)
+            .await;
     }
     let terminal = DispatchTerminal {
         dispatcher,
@@ -373,10 +377,11 @@ struct DispatchTerminal<'a, D> {
 impl<D: crate::Dispatcher> UnaryTerminal for DispatchTerminal<'_, D> {
     async fn call(&self, req: UnaryRequest) -> Result<UnaryResponse, ConnectError> {
         let UnaryRequest { ctx, payload } = req;
-        let body = payload.encoded()?;
+        // Hand the Payload — not raw bytes — to the dispatcher, so an
+        // owned-message handler can reuse a decode an interceptor cached.
         let resp = self
             .dispatcher
-            .call_unary(self.path, ctx, body, self.format)
+            .call_unary(self.path, ctx, payload, self.format)
             .await?;
         Ok(UnaryResponse::from_encoded(resp, self.format))
     }
@@ -542,7 +547,7 @@ mod tests {
                 &self,
                 _: &str,
                 _: RequestContext,
-                _: Bytes,
+                _: Payload,
                 _: CodecFormat,
             ) -> crate::dispatcher::UnaryResult {
                 unreachable!("dispatcher must not be reached when an interceptor short-circuits")
@@ -691,10 +696,10 @@ mod tests {
                 &self,
                 _: &str,
                 _: RequestContext,
-                request: Bytes,
+                request: Payload,
                 _: CodecFormat,
             ) -> crate::dispatcher::UnaryResult {
-                Box::pin(async move { Ok(EncodedResponse::new(request)) })
+                Box::pin(async move { Ok(EncodedResponse::new(request.encoded()?)) })
             }
             fn call_server_streaming(
                 &self,
@@ -737,5 +742,107 @@ mod tests {
         .unwrap();
         // Same backing storage — no copy through Payload.
         assert!(std::ptr::eq(resp.body.as_ptr(), body.as_ptr()));
+    }
+
+    /// `DispatchTerminal` hands the `Payload` — not raw bytes — to the
+    /// dispatcher, so an owned-message handler can `take_message()` and
+    /// reuse the decode an interceptor cached.
+    ///
+    /// Pinned by handing the dispatcher a `Payload` whose wire bytes are
+    /// *garbage* but whose cache an interceptor populated by replacement.
+    /// If the terminal stripped the `Payload` to bytes (the pre-this-PR
+    /// behavior), the dispatcher's `take_message` would error on the
+    /// garbage; if it forwards the `Payload`, the dispatcher sees the
+    /// replacement.
+    #[tokio::test]
+    async fn dispatch_terminal_forwards_payload_to_handler() {
+        let captured = Arc::new(Mutex::new(None::<String>));
+
+        // A dispatcher that decodes via `take_message` — the path an
+        // owned-message `Router::route` handler takes.
+        struct Capture(Arc<Mutex<Option<String>>>);
+        impl crate::Dispatcher for Capture {
+            fn lookup(&self, _: &str) -> Option<crate::dispatcher::MethodDescriptor> {
+                None
+            }
+            fn call_unary(
+                &self,
+                _: &str,
+                _: RequestContext,
+                request: Payload,
+                _: CodecFormat,
+            ) -> crate::dispatcher::UnaryResult {
+                let captured = Arc::clone(&self.0);
+                Box::pin(async move {
+                    let m: StringValue = request.take_message()?;
+                    *captured.lock().unwrap() = Some(m.value);
+                    Ok(EncodedResponse::new(Bytes::new()))
+                })
+            }
+            fn call_server_streaming(
+                &self,
+                _: &str,
+                _: RequestContext,
+                _: Bytes,
+                _: CodecFormat,
+            ) -> crate::dispatcher::StreamingResult {
+                unreachable!()
+            }
+            fn call_client_streaming(
+                &self,
+                _: &str,
+                _: RequestContext,
+                _: crate::dispatcher::RequestStream,
+                _: CodecFormat,
+            ) -> crate::dispatcher::UnaryResult {
+                unreachable!()
+            }
+            fn call_bidi_streaming(
+                &self,
+                _: &str,
+                _: RequestContext,
+                _: crate::dispatcher::RequestStream,
+                _: CodecFormat,
+            ) -> crate::dispatcher::StreamingResult {
+                unreachable!()
+            }
+        }
+
+        // Interceptor that replaces the request body. The original wire
+        // bytes are garbage — only the replacement is valid.
+        struct Replace;
+        #[async_trait::async_trait]
+        impl Interceptor for Replace {
+            async fn intercept_unary(
+                &self,
+                mut req: UnaryRequest,
+                next: Next<'_>,
+            ) -> Result<UnaryResponse, ConnectError> {
+                req.payload.set_message(StringValue {
+                    value: "from interceptor".into(),
+                    ..Default::default()
+                });
+                next.run(req).await
+            }
+        }
+
+        let chain: Vec<Arc<dyn Interceptor>> = vec![Arc::new(Replace)];
+        call_unary_intercepted(
+            &Capture(Arc::clone(&captured)),
+            &chain,
+            "p",
+            RequestContext::default(),
+            // Garbage wire bytes: would error on a fresh decode.
+            Bytes::from_static(&[0xff, 0xff, 0xff]),
+            CodecFormat::Proto,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            captured.lock().unwrap().as_deref(),
+            Some("from interceptor"),
+            "the dispatcher must see the interceptor's replacement, not re-decode the wire bytes"
+        );
     }
 }

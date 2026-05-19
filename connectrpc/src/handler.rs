@@ -89,11 +89,14 @@ where
 
 /// Type-erased unary handler for use in the router.
 pub(crate) trait ErasedHandler: Send + Sync {
-    /// Handle a request with raw bytes and specified codec format.
+    /// Handle a request, decoding the [`Payload`] to the concrete request
+    /// type. Owned-message handlers should call [`Payload::take_message`]
+    /// to reuse a decode an interceptor may already have cached; view
+    /// handlers should call [`Payload::encoded`] for the wire bytes.
     fn call_erased(
         &self,
         ctx: RequestContext,
-        request: Bytes,
+        request: crate::Payload,
         format: CodecFormat,
     ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>>;
 
@@ -241,12 +244,14 @@ where
     fn call_erased(
         &self,
         ctx: RequestContext,
-        request: Bytes,
+        request: crate::Payload,
         format: CodecFormat,
     ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
-            let req: Req = decode_request(&request, format)?;
+            // `take_message` reuses an interceptor's decode when one ran
+            // and cached this `Req`, instead of decoding the bytes again.
+            let req: Req = request.take_message()?;
             handler.call(ctx, req).await?.encode::<Res>(format)
         })
     }
@@ -783,12 +788,16 @@ where
     fn call_erased(
         &self,
         ctx: RequestContext,
-        request: Bytes,
+        request: crate::Payload,
         format: CodecFormat,
     ) -> BoxFuture<'static, Result<EncodedResponse, ConnectError>> {
         let handler = Arc::clone(&self.handler);
         Box::pin(async move {
-            let req = decode_request_view::<ReqView>(request, format)?;
+            // The cache stores owned messages, not views, so it can't help
+            // here. `encoded()` is the wire bytes — a cheap `Bytes` clone
+            // unless an interceptor replaced the body, in which case it
+            // re-encodes the replacement.
+            let req = decode_request_view::<ReqView>(request.encoded()?, format)?;
             handler.call(ctx, req, format).await
         })
     }

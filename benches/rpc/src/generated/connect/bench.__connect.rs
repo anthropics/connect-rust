@@ -490,7 +490,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("bench.v1.BenchService/") else {
@@ -503,7 +503,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::BenchRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.unary(ctx, req)
                         .await?
                         .encode::<crate::proto::bench::v1::BenchResponse>(format)
@@ -514,7 +514,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::LogRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.log_unary(ctx, req)
                         .await?
                         .encode::<crate::proto::bench::v1::LogResponse>(format)
@@ -525,7 +525,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::LogRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.log_unary_owned(ctx, req)
                         .await?
                         .encode::<crate::proto::bench::v1::LogResponse>(format)
@@ -1097,7 +1097,7 @@ impl<T: EchoService> ::connectrpc::Dispatcher for EchoServiceServer<T> {
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("bench.v1.EchoService/") else {
@@ -1110,7 +1110,7 @@ impl<T: EchoService> ::connectrpc::Dispatcher for EchoServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::EchoRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.echo(ctx, req)
                         .await?
                         .encode::<crate::proto::bench::v1::EchoResponse>(format)
@@ -1441,7 +1441,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("bench.v1.LogIngestService/") else {
@@ -1454,7 +1454,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::LogRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.ingest(ctx, req)
                         .await?
                         .encode::<crate::proto::bench::v1::LogIngestResponse>(format)

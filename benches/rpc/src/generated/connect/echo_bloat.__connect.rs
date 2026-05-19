@@ -191,7 +191,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("bench.v1.BloatEchoService/") else {
@@ -204,7 +204,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::bench::v1::__buffa::view::BloatEchoView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.echo(ctx, req)
                         .await?
                         .encode::<crate::proto::bench::v1::BloatEcho>(format)

@@ -430,7 +430,7 @@ impl crate::dispatcher::Dispatcher for Router {
         &self,
         path: &str,
         ctx: crate::response::RequestContext,
-        request: bytes::Bytes,
+        request: crate::Payload,
         format: crate::codec::CodecFormat,
     ) -> crate::dispatcher::UnaryResult {
         match self.methods.get(path) {

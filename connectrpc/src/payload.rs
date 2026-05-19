@@ -54,6 +54,11 @@ pub trait AnyMessage: Send + Sync + 'static {
     fn as_any(&self) -> &dyn Any;
     /// Mutably borrow the message as `dyn Any` for downcasting.
     fn as_any_mut(&mut self) -> &mut dyn Any;
+    /// Convert the boxed message into a `Box<dyn Any>` for owned downcasting.
+    ///
+    /// [`Payload::take_message`] uses this to move the cached decode out
+    /// of the `Payload` and into the handler without a clone.
+    fn into_any(self: Box<Self>) -> Box<dyn Any>;
     /// Serialize the message to wire bytes in the given format.
     ///
     /// # Errors
@@ -78,6 +83,9 @@ where
         self
     }
     fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
     }
     fn encode(&self, format: CodecFormat) -> Result<Bytes, ConnectError> {
@@ -202,6 +210,75 @@ impl Payload {
                 std::any::type_name::<M>()
             ))
         })
+    }
+
+    /// Decode the body into an owned `M`, consuming `self`.
+    ///
+    /// If the body was already decoded — an interceptor called
+    /// [`message`](Payload::message) — and the cached value is an `M`,
+    /// it is moved out: no second decode, no clone. If a replacement was
+    /// set with [`set_message`](Payload::set_message), it is moved out
+    /// instead. Otherwise the wire bytes are decoded fresh.
+    ///
+    /// The dispatch path uses this to hand the request to the handler
+    /// without re-decoding bytes an interceptor already decoded. Because
+    /// it consumes the `Payload`, it must be the last access — call
+    /// [`message`](Payload::message) (which caches a borrow) for repeated
+    /// reads.
+    ///
+    /// # Errors
+    ///
+    /// The same error contract as [`message`](Payload::message), with one
+    /// behavioral difference worth noting: a wrong-typed cache that an
+    /// interceptor created is now an error *for the handler*. Before
+    /// `take_message`, the handler decoded the wire bytes independently
+    /// and never saw the interceptor's cache, so an interceptor that
+    /// decoded as the wrong `M` failed silently. Surfacing it loudly is
+    /// the intent — interceptors and handlers for the same RPC must agree
+    /// on the message types.
+    ///
+    /// - [`invalid_argument`](ConnectError::invalid_argument) if there is
+    ///   no cache and the wire bytes fail to decode as `M` — peer-supplied
+    ///   data, not a server bug.
+    /// - [`internal`](ConnectError::internal) if a cached decode or a
+    ///   replacement set with [`set_message`](Payload::set_message) is not
+    ///   an `M` — a server-side type bug.
+    pub fn take_message<M>(self) -> Result<M, ConnectError>
+    where
+        // Unlike `message()`, this never *populates* the cache, so it
+        // does not need `M: Serialize` (the bound `message()` carries to
+        // box `M` as `dyn AnyMessage`). It only reads the cache or
+        // decodes fresh.
+        M: Message + DeserializeOwned + 'static,
+    {
+        if let Some(replaced) = self.replaced {
+            let type_name = replaced.type_name();
+            return replaced
+                .into_any()
+                .downcast::<M>()
+                .map(|b| *b)
+                .map_err(|_| {
+                    ConnectError::internal(format!(
+                        "payload replacement is a {}, not a {}",
+                        type_name,
+                        std::any::type_name::<M>()
+                    ))
+                });
+        }
+        if let Some(cached) = self.decoded.into_inner() {
+            let type_name = cached.type_name();
+            return cached.into_any().downcast::<M>().map(|b| *b).map_err(|_| {
+                ConnectError::internal(format!(
+                    "payload was previously decoded as a {}, not a {}",
+                    type_name,
+                    std::any::type_name::<M>()
+                ))
+            });
+        }
+        match self.format {
+            CodecFormat::Proto => decode_proto(&self.bytes),
+            CodecFormat::Json => decode_json(&self.bytes),
+        }
     }
 
     /// Decode the body as a zero-copy [`OwnedView`].
@@ -488,6 +565,79 @@ mod tests {
         });
         let m: &StringValue = p.message().unwrap();
         assert_eq!(m.value, "second");
+    }
+
+    #[test]
+    fn take_message_decodes_fresh_when_no_cache() {
+        let p = proto_payload("fresh");
+        let m: StringValue = p.take_message().unwrap();
+        assert_eq!(m.value, "fresh");
+    }
+
+    #[test]
+    fn take_message_reuses_cache() {
+        let p = proto_payload("cached");
+        // Populate the cache (an interceptor would do this).
+        let _ = p.message::<StringValue>().unwrap();
+        // `take_message` reads the cache, not the wire bytes. The
+        // no-second-decode property has no observable proof in safe Rust
+        // (the cached value and a fresh decode are bitwise identical), so
+        // it's pinned indirectly by `take_message_returns_replacement` —
+        // if `take_message` decoded the bytes there, it would never see
+        // the replacement. The wrong-type test below pins the other
+        // direction (the cache, not the bytes, is the source of truth).
+        let m: StringValue = p.take_message().unwrap();
+        assert_eq!(m.value, "cached");
+    }
+
+    #[test]
+    fn take_message_returns_replacement() {
+        // Build a payload whose wire bytes are *garbage* — not a valid
+        // proto. If `take_message` decoded the bytes instead of moving
+        // the replacement out, this would error.
+        let mut p = Payload::new(Bytes::from_static(&[0xff, 0xff, 0xff]), CodecFormat::Proto);
+        p.set_message(StringValue {
+            value: "replaced".into(),
+            ..Default::default()
+        });
+        let m: StringValue = p.take_message().unwrap();
+        assert_eq!(m.value, "replaced");
+    }
+
+    #[test]
+    fn take_message_wrong_cached_type_errors() {
+        use buffa_types::google::protobuf::Int32Value;
+        let p = proto_payload("x");
+        // An interceptor cached the wrong type for this route. Before
+        // `take_message`, the handler would silently re-decode and never
+        // notice. Now the bug is loud.
+        let _: &StringValue = p.message().unwrap();
+        let err = p.take_message::<Int32Value>().unwrap_err();
+        let msg = err.message.as_deref().unwrap_or_default();
+        assert!(msg.contains("previously decoded as a"), "{err:?}");
+        assert!(msg.contains("StringValue"), "{err:?}");
+        assert!(msg.contains("Int32Value"), "{err:?}");
+    }
+
+    #[test]
+    fn take_message_wrong_replacement_type_errors() {
+        use buffa_types::google::protobuf::Int32Value;
+        let mut p = proto_payload("x");
+        p.set_message(Int32Value {
+            value: 7,
+            ..Default::default()
+        });
+        let err = p.take_message::<StringValue>().unwrap_err();
+        let msg = err.message.as_deref().unwrap_or_default();
+        assert!(msg.contains("replacement is a"), "{err:?}");
+    }
+
+    #[test]
+    fn take_message_decode_error_is_invalid_argument() {
+        use crate::ErrorCode;
+        let p = Payload::new(Bytes::from_static(&[0xff, 0xff, 0xff]), CodecFormat::Proto);
+        let err = p.take_message::<StringValue>().unwrap_err();
+        assert_eq!(err.code, ErrorCode::InvalidArgument, "{err:?}");
     }
 
     #[test]

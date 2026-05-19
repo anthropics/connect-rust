@@ -378,7 +378,7 @@ for WellKnownTypesServiceServer<T> {
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path
@@ -392,7 +392,7 @@ for WellKnownTypesServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.create_event(ctx, req)
                         .await?
                         .encode::<
@@ -405,7 +405,7 @@ for WellKnownTypesServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.calculate_duration(ctx, req)
                         .await?
                         .encode::<
@@ -418,7 +418,7 @@ for WellKnownTypesServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.process_metadata(ctx, req)
                         .await?
                         .encode::<

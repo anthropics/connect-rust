@@ -192,7 +192,7 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
         &self,
         path: &str,
         ctx: ::connectrpc::RequestContext,
-        request: ::buffa::bytes::Bytes,
+        request: ::connectrpc::Payload,
         format: ::connectrpc::CodecFormat,
     ) -> ::connectrpc::dispatcher::codegen::UnaryResult {
         let Some(method) = path.strip_prefix("fortune.v1.FortuneService/") else {
@@ -205,7 +205,7 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
                 Box::pin(async move {
                     let req = ::connectrpc::dispatcher::codegen::decode_request_view::<
                         crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView,
-                    >(request, format)?;
+                    >(request.encoded()?, format)?;
                     svc.get_fortunes(ctx, req)
                         .await?
                         .encode::<crate::proto::fortune::v1::GetFortunesResponse>(format)
