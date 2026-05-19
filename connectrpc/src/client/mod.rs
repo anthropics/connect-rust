@@ -314,6 +314,16 @@ enum HttpClientInner {
 #[cfg(feature = "client")]
 #[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 impl HttpClient {
+    /// Returns a builder for configuring connector-level options before
+    /// choosing a transport flavour.
+    ///
+    /// `HttpClient::plaintext()` is equivalent to
+    /// `HttpClient::builder().plaintext()`, and likewise for the other
+    /// constructors.
+    pub fn builder() -> HttpClientBuilder {
+        HttpClientBuilder::default()
+    }
+
     /// Create a **plaintext** HTTP client. Only for `http://` URIs.
     ///
     /// Errors at send-time if given an `https://` URI — use
@@ -323,17 +333,7 @@ impl HttpClient {
     /// over cleartext. TCP_NODELAY is enabled to avoid Nagle + delayed ACK
     /// latency on small messages.
     pub fn plaintext() -> Self {
-        use hyper_util::client::legacy::Client;
-        use hyper_util::client::legacy::connect::HttpConnector;
-        use hyper_util::rt::TokioExecutor;
-
-        let mut connector = HttpConnector::new();
-        connector.set_nodelay(true);
-        let client = Client::builder(TokioExecutor::new()).build(connector);
-
-        Self {
-            inner: HttpClientInner::Plain(client),
-        }
+        Self::builder().plaintext()
     }
 
     /// Create a **plaintext** HTTP client with HTTP/2 prior-knowledge (h2c) only.
@@ -350,19 +350,7 @@ impl HttpClient {
     /// it has honest `poll_ready` and composes with `tower::balance`. This
     /// method pins you to one connection per host with no way to scale out.
     pub fn plaintext_http2_only() -> Self {
-        use hyper_util::client::legacy::Client;
-        use hyper_util::client::legacy::connect::HttpConnector;
-        use hyper_util::rt::TokioExecutor;
-
-        let mut connector = HttpConnector::new();
-        connector.set_nodelay(true);
-        let client = Client::builder(TokioExecutor::new())
-            .http2_only(true)
-            .build(connector);
-
-        Self {
-            inner: HttpClientInner::Plain(client),
-        }
+        Self::builder().plaintext_http2_only()
     }
 
     /// Create a **TLS** HTTP client. Only for `https://` URIs.
@@ -400,12 +388,87 @@ impl HttpClient {
     #[cfg(feature = "client-tls")]
     #[cfg_attr(docsrs, doc(cfg(feature = "client-tls")))]
     pub fn with_tls(tls_config: std::sync::Arc<rustls::ClientConfig>) -> Self {
+        Self::builder().with_tls(tls_config)
+    }
+}
+
+/// Builder for [`HttpClient`] connector-level options.
+///
+/// Use [`HttpClient::builder`] to obtain one. The terminal methods mirror the
+/// associated constructors on `HttpClient`; the existing constructors delegate
+/// here, so `HttpClient::plaintext()` is exactly `HttpClient::builder().plaintext()`.
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+#[derive(Debug, Default, Clone)]
+pub struct HttpClientBuilder {
+    connect_timeout: Option<Duration>,
+}
+
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+impl HttpClientBuilder {
+    /// Bound the TCP connect phase.
+    ///
+    /// This is hyper's [`HttpConnector::set_connect_timeout`][hyper-ct],
+    /// applied to the inner connector for all three transport flavours. It
+    /// covers only the TCP `connect(2)` call (per resolved address — hyper
+    /// divides the timeout evenly across the address set). It does **not**
+    /// cover DNS resolution or, for [`with_tls`](Self::with_tls), the TLS
+    /// handshake. Use a per-request timeout (e.g.
+    /// [`CallOptions::with_timeout`]) to bound DNS+connect+TLS+request as a
+    /// whole.
+    ///
+    /// Unset (the default) means no explicit bound: TCP connect is governed by
+    /// the kernel's `tcp_syn_retries` (typically ~130s on Linux). Set this when
+    /// the network path can silently drop SYNs and you'd rather fail fast than
+    /// stall on kernel retransmits.
+    ///
+    /// [hyper-ct]: hyper_util::client::legacy::connect::HttpConnector::set_connect_timeout
+    pub fn connect_timeout(mut self, dur: Duration) -> Self {
+        self.connect_timeout = Some(dur);
+        self
+    }
+
+    fn http_connector(&self) -> hyper_util::client::legacy::connect::HttpConnector {
+        let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
+        connector.set_nodelay(true);
+        connector.set_connect_timeout(self.connect_timeout);
+        connector
+    }
+
+    /// Finish building as a plaintext client. See [`HttpClient::plaintext`].
+    pub fn plaintext(self) -> HttpClient {
         use hyper_util::client::legacy::Client;
-        use hyper_util::client::legacy::connect::HttpConnector;
         use hyper_util::rt::TokioExecutor;
 
-        let mut http = HttpConnector::new();
-        http.set_nodelay(true);
+        let client = Client::builder(TokioExecutor::new()).build(self.http_connector());
+        HttpClient {
+            inner: HttpClientInner::Plain(client),
+        }
+    }
+
+    /// Finish building as an h2c-only plaintext client. See
+    /// [`HttpClient::plaintext_http2_only`].
+    pub fn plaintext_http2_only(self) -> HttpClient {
+        use hyper_util::client::legacy::Client;
+        use hyper_util::rt::TokioExecutor;
+
+        let client = Client::builder(TokioExecutor::new())
+            .http2_only(true)
+            .build(self.http_connector());
+        HttpClient {
+            inner: HttpClientInner::Plain(client),
+        }
+    }
+
+    /// Finish building as a TLS client. See [`HttpClient::with_tls`].
+    #[cfg(feature = "client-tls")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "client-tls")))]
+    pub fn with_tls(self, tls_config: std::sync::Arc<rustls::ClientConfig>) -> HttpClient {
+        use hyper_util::client::legacy::Client;
+        use hyper_util::rt::TokioExecutor;
+
+        let mut http = self.http_connector();
         // HttpConnector rejects https:// by default; disable so the scheme
         // passes through to the HttpsConnector for TLS handling.
         http.enforce_http(false);
@@ -428,8 +491,7 @@ impl HttpClient {
             .wrap_connector(http);
 
         let client = Client::builder(TokioExecutor::new()).build(https);
-
-        Self {
+        HttpClient {
             inner: HttpClientInner::Tls(client),
         }
     }
@@ -3418,6 +3480,37 @@ mod tests {
 
         assert_eq!(config.codec_format, CodecFormat::Json);
         assert_eq!(config.request_compression, Some("gzip".to_string()));
+    }
+
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn http_client_connect_timeout_bounds_tcp_connect() {
+        use std::time::Instant;
+
+        // RFC 5737 TEST-NET-1: guaranteed unroutable. SYNs are dropped, so an
+        // unbounded connect would stall on kernel retransmits (~130s on Linux
+        // defaults). With a 100ms connect timeout, hyper aborts the connect
+        // future and surfaces the failure promptly.
+        let target = "http://192.0.2.1:9/";
+        let timeout = Duration::from_millis(100);
+
+        let http = HttpClient::builder().connect_timeout(timeout).plaintext();
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(target)
+            .body(full_body(Bytes::new()))
+            .unwrap();
+
+        let start = Instant::now();
+        let err = http.send(req).await.expect_err("connect must fail");
+        let elapsed = start.elapsed();
+
+        // Generous slack for CI scheduling jitter — but well under the
+        // multi-second kernel SYN-retry floor we'd hit without the bound.
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "connect_timeout(100ms) should abort within ~2s, took {elapsed:?}: {err}"
+        );
     }
 
     #[test]
