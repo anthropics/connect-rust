@@ -189,11 +189,13 @@ impl RequestContext {
 
     /// Static metadata for the dispatched RPC method, when known.
     ///
-    /// Populated by code-generated `FooServiceServer<T>` dispatchers;
-    /// `None` when the dynamic [`Router`](crate::Router) handled dispatch
-    /// (its method paths are owned `String`s and can't supply
-    /// [`Spec::procedure`](crate::Spec::procedure)'s `&'static str`).
-    /// See [`path`](Self::path) for the always-present procedure path.
+    /// Populated by code-generated `FooServiceServer<T>` dispatchers and
+    /// by the dynamic [`Router`](crate::Router) when registered through
+    /// the generated `register()` (which chains
+    /// [`Router::with_spec`](crate::Router::with_spec) per route).
+    /// `None` only for routes registered through the manual `route_*`
+    /// builders without a `with_spec` call. See [`path`](Self::path) for
+    /// the always-present procedure path.
     pub fn spec(&self) -> Option<crate::spec::Spec> {
         self.spec
     }
