@@ -46,9 +46,17 @@ increment the patch version.
   switch to the generated dispatcher if you need `Spec` in handlers or
   middleware.
 
+- **`Server::with_interceptor` and `Server::with_interceptor_arc`**
+  ([#123]). Proxies to the same methods on `ConnectRpcService`, completing
+  the proxy set started in [#105]. Standalone `Server` users can now
+  register interceptors without dropping down to
+  `Server::from_service(ConnectRpcService::new(...).with_interceptor(...))`.
+
 [#87]: https://github.com/anthropics/connect-rust/issues/87
+[#105]: https://github.com/anthropics/connect-rust/pull/105
 [#110]: https://github.com/anthropics/connect-rust/issues/110
 [#112]: https://github.com/anthropics/connect-rust/pull/112
+[#123]: https://github.com/anthropics/connect-rust/pull/123
 [`Router`]: https://docs.rs/connectrpc/latest/connectrpc/struct.Router.html
 
 ## [0.5.0] - 2026-05-18
