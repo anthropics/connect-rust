@@ -7,6 +7,7 @@
 //! [`grpc.health.v1.Health`]: https://github.com/grpc/grpc-proto/blob/master/grpc/health/v1/health.proto
 
 mod checker;
+mod static_checker;
 mod status;
 
 #[allow(clippy::upper_case_acronyms)]
@@ -17,6 +18,7 @@ mod connect;
 mod proto;
 
 pub use checker::{Checker, StatusStream};
+pub use static_checker::StaticChecker;
 pub use status::Status;
 
 /// Generated client for calling a `grpc.health.v1.Health` server.
