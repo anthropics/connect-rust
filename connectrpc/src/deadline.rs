@@ -318,7 +318,12 @@ impl<S> DeadlineStream<S> {
         Self {
             inner: Some(inner),
             absolute: absolute.map(tokio::time::sleep),
-            per_item: inter_message.map(tokio::time::sleep),
+            // Do NOT arm the inter-message timer at construction. There is no
+            // prior message yet, so starting the timer here would measure
+            // stream-setup latency rather than the gap between items. The
+            // re-arm in `poll_next` starts the timer after each yielded item,
+            // which is the correct measurement point.
+            per_item: None,
             inter_message,
             finished: false,
         }
@@ -326,6 +331,8 @@ impl<S> DeadlineStream<S> {
 }
 
 impl<S> Stream for DeadlineStream<S>
+where
+    S: Stream<Item = Result<Bytes, ConnectError>>,
 where
     S: Stream<Item = Result<Bytes, ConnectError>>,
 {
