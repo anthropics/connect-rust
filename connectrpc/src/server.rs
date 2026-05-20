@@ -264,6 +264,35 @@ impl Server {
         self
     }
 
+    /// Append an [`Interceptor`](crate::Interceptor) to the chain on the
+    /// underlying service.
+    ///
+    /// Delegates to [`ConnectRpcService::with_interceptor`]. Interceptors
+    /// run after envelope decoding, decompression, and protocol header
+    /// parsing, and before the handler — they see the parsed request, not
+    /// the wire bytes. The first interceptor registered runs **outermost**:
+    /// first on the way in, last on the way out. To share one interceptor
+    /// instance across several `Server`s, use
+    /// [`with_interceptor_arc`](Self::with_interceptor_arc).
+    #[must_use]
+    pub fn with_interceptor(mut self, interceptor: impl crate::Interceptor) -> Self {
+        self.service = self.service.with_interceptor(interceptor);
+        self
+    }
+
+    /// Append an already-`Arc`'d [`Interceptor`](crate::Interceptor) to the
+    /// chain on the underlying service.
+    ///
+    /// Delegates to [`ConnectRpcService::with_interceptor_arc`]. Same
+    /// ordering and semantics as [`with_interceptor`](Self::with_interceptor);
+    /// use this when one interceptor instance is shared across multiple
+    /// services or `Server`s.
+    #[must_use]
+    pub fn with_interceptor_arc(mut self, interceptor: Arc<dyn crate::Interceptor>) -> Self {
+        self.service = self.service.with_interceptor_arc(interceptor);
+        self
+    }
+
     /// Get a reference to the underlying router.
     pub fn router(&self) -> &Router {
         self.service.dispatcher()
@@ -826,6 +855,37 @@ mod tests {
         assert_eq!(server.service.limits().max_request_body_size, 1024);
         assert_eq!(server.service.limits().max_message_size, 512);
         assert!(!server.http1_keep_alive);
+    }
+
+    /// `Server::with_interceptor` / `with_interceptor_arc` must reach the
+    /// underlying `ConnectRpcService` chain. The interceptor list has no
+    /// public read path, so the test pins delegation through `Arc` strong
+    /// counts: registering a shared `Arc<dyn Interceptor>` on the `Server`
+    /// must bump the count exactly as registering it on the service
+    /// directly would, and dropping the `Server` must release it.
+    #[test]
+    fn test_server_interceptor_proxies() {
+        struct Noop;
+        #[async_trait::async_trait]
+        impl crate::Interceptor for Noop {}
+
+        let shared: Arc<dyn crate::Interceptor> = Arc::new(Noop);
+        assert_eq!(Arc::strong_count(&shared), 1);
+
+        let server = Server::new(Router::new())
+            // `with_interceptor` Arc::new()s internally; only proves the
+            // proxy compiles and chains.
+            .with_interceptor(Noop)
+            // `with_interceptor_arc` must store a clone of `shared`.
+            .with_interceptor_arc(Arc::clone(&shared));
+        assert_eq!(
+            Arc::strong_count(&shared),
+            2,
+            "Server::with_interceptor_arc must reach the underlying service"
+        );
+
+        drop(server);
+        assert_eq!(Arc::strong_count(&shared), 1);
     }
 
     #[tokio::test]
