@@ -8,9 +8,40 @@ with the [Rust 0.x convention](https://doc.rust-lang.org/cargo/reference/semver.
 breaking changes increment the minor version (0.2 → 0.3), additive changes
 increment the patch version.
 
-## [Unreleased]
+## [0.6.0] - 2026-05-20
+
+The headline feature is **server-side interceptors** ([#114], [#121]) —
+typed, async middleware that wraps a single RPC after envelope decoding,
+decompression, and header parsing, and before the handler. Interceptors
+see the resolved [`Spec`], headers, deadline, extensions, and a lazily
+decoded [`Payload`], can rewrite the request and response, and can
+short-circuit. Both unary (`Interceptor::intercept_unary`) and streaming
+(`Interceptor::intercept_streaming`, covering server-, client-, and
+bidi-streaming with one `Stream`-shaped hook) are supported. See the
+[interceptors](docs/guide.md#interceptors) section of the user guide.
+
+The supporting types — [`Spec`] static method metadata ([#112]),
+[`Payload`] / [`AnyMessage`] type-erased message bodies ([#113]),
+`RequestContext::path()` / `spec()` / `protocol()` ([#112], [#116],
+[#120]) — are useful on their own for tracing, auth, and routing layers
+that need to know which RPC is in flight.
+
+**Consumers with checked-in `protoc-gen-connect-rust` output must
+regenerate** with the 0.6.0 toolchain: the generated `Dispatcher::lookup`
+emits per-method `Spec` constants ([#112]), `register()` chains
+`.with_spec(...)` ([#120]), and `call_unary` takes [`Payload`] ([#119]).
+`connectrpc-build` users (build.rs integration) are unaffected — Cargo
+rebuilds `OUT_DIR` automatically.
 
 ### Breaking
+
+- **`Dispatcher::call_unary` takes `Payload`, not `Bytes`** ([#119]).
+  The [`Payload`] carries the wire bytes plus an interceptor's lazy
+  decode cache; an owned-message handler calls `Payload::take_message()`
+  to reuse a decode an interceptor already paid for, instead of decoding
+  the same bytes twice. Generated dispatchers and `Router` impls follow.
+  Any hand-rolled `impl Dispatcher` must update the `call_unary`
+  signature; the streaming `call_*` methods are unchanged.
 
 - **`MethodDescriptor` is now `#[non_exhaustive]`** ([#112]). It gains a
   `spec: Option<Spec>` field and `from_kind` / `with_idempotent` /
@@ -19,13 +50,54 @@ increment the patch version.
   builders (`MethodDescriptor::unary(idempotent)`,
   `MethodDescriptor::from_kind(kind)`, …); destructuring patterns need a
   trailing `..`. Reads of the existing `kind` / `idempotent` `pub` fields
-  are unaffected. **Consumers with checked-in `protoc-gen-connect-rust`
-  output must regenerate** — the generated `Dispatcher::lookup` references
-  per-method `Spec` constants emitted alongside the dispatcher.
+  are unaffected.
+
+- **`AnyMessage` gained a required `into_any` method** ([#119]). The
+  blanket `impl<T: Message + Serialize> AnyMessage for T` covers every
+  generated message type, so this only affects manual `AnyMessage`
+  impls — which the trait docs already discourage.
 
 ### Added
 
-- **`Spec` static method metadata** ([#112], refs [#87], [#110]). New
+- **`Interceptor` trait, `Next` continuation, and server registration**
+  ([#114]). `Interceptor` is an `async_trait` with default-passthrough
+  `intercept_unary(req, next)`. `Next<'_>` holds the rest of the chain;
+  `next.run(req).await` invokes it (consume-once, enforced by the type
+  system); not calling it short-circuits. Register with
+  `ConnectRpcService::with_interceptor(...)`. The first-registered
+  interceptor runs outermost, matching `connect-go::WithInterceptors`.
+  A service with no interceptors pays one `is_empty()` branch and no
+  per-request allocation. The `unary_interceptor` helper turns a closure
+  returning a boxed future into an `Interceptor` for one-off use, and
+  `#[connectrpc::async_trait]` is re-exported so downstream crates don't
+  need an `async-trait` dep.
+
+- **`Interceptor::intercept_streaming`** ([#121]). One `Stream`-shaped
+  hook covers server-streaming, client-streaming, and bidi: interceptors
+  receive an inbound `PayloadStream` and a `NextStream<'_>` continuation
+  and return a `StreamResponse` carrying the outbound `PayloadStream`,
+  response headers, trailers, and a compression hint. Cross-stream
+  coordination is shared state captured by the inbound and outbound
+  adapter closures. The `streaming_interceptor` closure helper mirrors
+  the unary one. The empty-chain fast path is preserved.
+
+- **`with_interceptor_arc`** ([#118]). Register an already-`Arc`'d
+  `Arc<dyn Interceptor>` so several `ConnectRpcService` instances can
+  share one interceptor (a process-wide auth token cache, rate-limit
+  counter, connection pool). `with_interceptor` is now a thin wrapper
+  over it.
+
+- **`Payload` and `AnyMessage`** ([#113]). [`Payload`] holds the wire
+  `Bytes` + `CodecFormat` plus a lazy decode cache and an optional
+  replacement (`set_message`). Typed access via `message::<M>()` (decode
+  once, proto and JSON), `view::<V>()` (zero-copy proto view), and
+  `take_message::<M>()` ([#119], consume the cache or decode fresh).
+  Most interceptors only read `Spec` and headers, never the body — so
+  the body is never decoded unless someone asks. `AnyMessage` is the
+  object-safe surface for type-erased messages, with a blanket impl over
+  every `T: Message + Serialize` (no codegen required).
+
+- **`Spec` static method metadata** ([#112], refs [#87]). New
   `connectrpc::spec` module with `Spec`, `StreamType`, `IdempotencyLevel`,
   and `SpecOrigin` types describing a single RPC method: its
   fully-qualified `procedure` path (`"/package.Service/Method"`), message
@@ -34,17 +106,34 @@ increment the patch version.
   with `const fn` constructors (`Spec::server(...)`, `Spec::client(...)`)
   so generated `Spec` constants live in `.rodata`. Code generation emits a
   `pub const <SERVICE>_<METHOD>_SPEC: Spec` per method that user code can
-  reference directly. This is the registration-time half of the planned
-  interceptor surface; per-request state stays on `RequestContext`.
+  reference directly — this also closes [#110], which asked for
+  connect-go-style procedure-path constants.
 
-- **`RequestContext::spec()` and `RequestContext::protocol()`** ([#112]).
-  Two new accessors and matching `with_spec` / `with_protocol` builders
-  surface the dispatched method's `Spec` and the negotiated `Protocol` on
-  every request handled by a code-generated `FooServiceServer<T>`
-  dispatcher. The dynamic [`Router`] can't supply a `Spec` (its method
-  paths are owned `String`s, not `&'static str`) and returns `None` —
-  switch to the generated dispatcher if you need `Spec` in handlers or
-  middleware.
+- **`RequestContext::spec()`, `protocol()`, and `path()`** ([#112],
+  [#116]). `spec()` returns the resolved [`Spec`] for the dispatched
+  method; `protocol()` returns the negotiated wire protocol (`Connect` /
+  `Grpc` / `GrpcWeb`); `path()` returns the requested procedure path
+  taken directly from the request URI. `path()` is the wire truth and is
+  populated unconditionally; `spec()` carries the richer static metadata
+  but requires the route to have a `Spec` attached.
+
+- **`Router::with_spec`** ([#120]). The dynamic `Router` can now carry a
+  [`Spec`] per route, attached after registration via
+  `.with_spec(SPEC_CONST)`. The generated `register()` chains it after
+  every `route_*` call, so handlers and interceptors see the same
+  `RequestContext::spec()` whether the host wired up the codegen
+  dispatcher or the dynamic `Router`. Routes registered without
+  `with_spec` behave exactly as before (`spec() == None`).
+
+- **`HttpClientBuilder` with `connect_timeout`** ([#117]).
+  `HttpClient::builder().connect_timeout(dur).plaintext()` (or
+  `plaintext_http2_only()`, `with_tls(...)`) bounds the TCP `connect(2)`
+  call so a silently dropped SYN fails in milliseconds instead of the
+  kernel's `tcp_syn_retries` default (~130s). The existing constructors
+  delegate to the builder with no timeout, so behaviour is unchanged for
+  current callers. `connect_timeout` covers TCP connect only, not DNS
+  resolution or the TLS handshake — use `CallOptions::with_timeout` for
+  an end-to-end bound.
 
 - **`Server::with_interceptor` and `Server::with_interceptor_arc`**
   ([#123]). Proxies to the same methods on `ConnectRpcService`, completing
@@ -56,8 +145,18 @@ increment the patch version.
 [#105]: https://github.com/anthropics/connect-rust/pull/105
 [#110]: https://github.com/anthropics/connect-rust/issues/110
 [#112]: https://github.com/anthropics/connect-rust/pull/112
+[#113]: https://github.com/anthropics/connect-rust/pull/113
+[#114]: https://github.com/anthropics/connect-rust/pull/114
+[#116]: https://github.com/anthropics/connect-rust/pull/116
+[#117]: https://github.com/anthropics/connect-rust/pull/117
+[#118]: https://github.com/anthropics/connect-rust/pull/118
+[#119]: https://github.com/anthropics/connect-rust/pull/119
+[#120]: https://github.com/anthropics/connect-rust/pull/120
+[#121]: https://github.com/anthropics/connect-rust/pull/121
 [#123]: https://github.com/anthropics/connect-rust/pull/123
-[`Router`]: https://docs.rs/connectrpc/latest/connectrpc/struct.Router.html
+[`Spec`]: https://docs.rs/connectrpc/latest/connectrpc/struct.Spec.html
+[`Payload`]: https://docs.rs/connectrpc/latest/connectrpc/struct.Payload.html
+[`AnyMessage`]: https://docs.rs/connectrpc/latest/connectrpc/trait.AnyMessage.html
 
 ## [0.5.0] - 2026-05-18
 

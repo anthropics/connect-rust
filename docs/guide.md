@@ -15,6 +15,7 @@ with the [README quick start](../README.md#quick-start) and the
 - [Implementing servers](#implementing-servers)
 - [Streaming RPCs](#streaming-rpcs)
 - [Tower middleware](#tower-middleware)
+- [Interceptors](#interceptors)
 - [Hosting](#hosting)
 - [Clients](#clients)
 - [Errors and status codes](#errors-and-status-codes)
@@ -297,7 +298,8 @@ methods (new request-scoped metadata can then be added in minor releases):
 | `ctx.deadline()` | Absolute `Instant` if the caller set a timeout |
 | `ctx.time_remaining()` | Saturating `Duration` until the deadline — budget downstream calls with this |
 | `ctx.extensions()` | `http::Extensions` carried from the underlying `http::Request` |
-| `ctx.spec()` | Static metadata for the dispatched RPC method ([`Spec`](#static-method-metadata-spec)) — `None` under the dynamic `Router` |
+| `ctx.path()` | Requested procedure path (`/package.Service/Method`) from the request URI |
+| `ctx.spec()` | Static metadata for the dispatched RPC method ([`Spec`](#static-method-metadata-spec)); `None` only for `route_*` registrations without `with_spec` |
 | `ctx.protocol()` | The negotiated wire protocol for this request (`Connect` / `Grpc` / `GrpcWeb`) |
 | `ctx.peer_addr()` | Remote socket address (requires the `server` feature; `None` when the transport didn't insert it) |
 | `ctx.peer_certs()` | TLS client cert chain (requires the `server-tls` feature; `None` for plaintext or no client cert) |
@@ -693,14 +695,15 @@ assert_eq!(GREET_SERVICE_GREET_SPEC.stream_type, StreamType::Unary);
 assert_eq!(GREET_SERVICE_GREET_SPEC.origin, SpecOrigin::Server);
 ```
 
-> **`Router` returns `None`.** `ctx.spec()` is only populated when the
-> request was dispatched through a code-generated `FooServiceServer<T>`.
-> The dynamic `Router` (used by `FooServiceExt::register(Router)`) keys
-> its method table on owned `String`s and cannot supply
-> `Spec::procedure`'s `&'static str`, so handlers registered through it
-> see `ctx.spec() == None`. If your tracing or auth layer reads
-> `ctx.spec()`, switch to the generated server dispatcher — it's also the
-> faster path (compile-time dispatch, no `HashMap` lookup).
+> **Both dispatch paths populate `ctx.spec()`.** A code-generated
+> `FooServiceServer<T>` always supplies a `Spec`. The dynamic `Router`
+> (used by `FooServiceExt::register(Router)`) does too — the generated
+> `register()` chains `.with_spec(SPEC_CONST)` after each route. The
+> only handlers that see `ctx.spec() == None` are those registered
+> through the manual `route_*` builders without a `with_spec` call.
+> `ctx.path()` is populated unconditionally regardless of dispatch path
+> — use it when you only need the procedure name and want to be robust
+> to a missing `Spec`.
 
 ### Short-circuit responses
 
@@ -709,6 +712,184 @@ the inner service. The middleware example does this for unauthorized
 requests, returning a 401 with a Connect-protocol JSON error body so
 clients see the failure on the same code path they use for handler
 errors.
+
+## Interceptors
+
+Tower middleware (above) operates on `http::Request` / `http::Response`
+— it's the right level for cross-cutting concerns that don't need to
+know they're wrapping an RPC: connection-scoped tracing, gzip, raw
+header manipulation. **Interceptors** are the typed RPC layer on top: a
+single async hook per call that runs after envelope decoding,
+decompression, and protocol header parsing, and before the handler.
+Interceptors see the resolved [`Spec`](#static-method-metadata-spec),
+the parsed headers, the deadline, the negotiated protocol, the request
+extensions, and a lazily decoded message body — everything an auth
+boundary, span builder, validator, or rate limiter actually wants.
+
+```rust,ignore
+use connectrpc::{ConnectError, Interceptor, Next, UnaryRequest, UnaryResponse};
+
+struct Logging;
+
+#[connectrpc::async_trait]
+impl Interceptor for Logging {
+    async fn intercept_unary(
+        &self,
+        req: UnaryRequest,
+        next: Next<'_>,
+    ) -> Result<UnaryResponse, ConnectError> {
+        let path = req.ctx.path().unwrap_or("<unknown>").to_owned();
+        let started = std::time::Instant::now();
+        let resp = next.run(req).await;
+        tracing::info!(rpc = %path, elapsed = ?started.elapsed(), ok = resp.is_ok());
+        resp
+    }
+}
+
+let server = GreetServiceServer::new(GreetServiceImpl);
+let service = ConnectRpcService::new(server).with_interceptor(Logging);
+```
+
+Annotate impls with the re-exported `#[connectrpc::async_trait]` — there
+is no separate `async-trait` dependency for downstream crates. The
+default impls are passthroughs, so you only override the hook you need.
+For one-off interceptors, the `unary_interceptor` and
+`streaming_interceptor` closure helpers skip the struct boilerplate.
+
+### Ordering and registration
+
+`with_interceptor` registers in **outermost-first** order, matching
+`connect-go`'s `WithInterceptors`: the first interceptor registered
+sees the request first and the response last.
+
+```text
+.with_interceptor(A).with_interceptor(B)
+
+request:   A → B → handler
+response:  A ← B ← handler
+```
+
+A service with no interceptors registered pays one `is_empty()` branch
+on the dispatch path — no per-request allocation, no `Payload`
+construction, no `Box`ing.
+
+To share one interceptor instance across several `ConnectRpcService`s
+(an auth interceptor whose token cache or rate-limit counter is
+process-wide), use `with_interceptor_arc(Arc<dyn Interceptor>)`.
+`with_interceptor` allocates a fresh `Arc` per registration;
+`with_interceptor_arc` accepts the one you already hold.
+
+### Reading and rewriting the request
+
+`UnaryRequest` is `{ ctx: RequestContext, payload: Payload }`. Mutating
+`ctx` (headers, extensions) before `next.run` propagates to the handler.
+The `payload` is the request body — wire bytes plus a lazy decode
+cache. Most interceptors never read it; ones that do call
+`payload.message::<M>()` to decode once and cache, so the handler's
+decode is free:
+
+```rust,ignore
+async fn intercept_unary(
+    &self,
+    mut req: UnaryRequest,
+    next: Next<'_>,
+) -> Result<UnaryResponse, ConnectError> {
+    // Decode once; the handler reuses this decode via the Payload cache.
+    let body = req.payload.message::<GreetRequest>()?;
+    if body.name.is_empty() {
+        return Err(ConnectError::invalid_argument("name is required"));
+    }
+    // Replace the body — the handler sees the replacement.
+    let mut rewritten = body.clone();
+    rewritten.name = rewritten.name.trim().to_owned();
+    req.payload.set_message(rewritten);
+    next.run(req).await
+}
+```
+
+### Short-circuiting
+
+Returning without calling `next.run()` short-circuits the chain —
+neither inner interceptors nor the handler run. Returning `Err`
+surfaces the error on the protocol's normal error path, including
+any `response_headers` the error carries:
+
+```rust,ignore
+async fn intercept_unary(
+    &self,
+    req: UnaryRequest,
+    next: Next<'_>,
+) -> Result<UnaryResponse, ConnectError> {
+    let Some(token) = req.ctx.header("authorization") else {
+        let mut err = ConnectError::unauthenticated("missing bearer token");
+        err.response_headers_mut().insert(
+            http::header::WWW_AUTHENTICATE,
+            http::HeaderValue::from_static("Bearer"),
+        );
+        return Err(err);
+    };
+    self.tokens.verify(token)?;
+    next.run(req).await
+}
+```
+
+### Streaming RPCs
+
+`intercept_streaming` covers server-streaming, client-streaming, and
+bidi with one `Stream`-shaped hook. It runs once at stream
+establishment — before any messages flow — and receives an inbound
+`PayloadStream` plus a `NextStream<'_>` continuation. The returned
+`StreamResponse` carries the outbound `PayloadStream` and response
+metadata.
+
+```rust,ignore
+use connectrpc::{Interceptor, NextStream, PayloadStream, StreamRequest, StreamResponse};
+
+#[connectrpc::async_trait]
+impl Interceptor for AuthInterceptor {
+    async fn intercept_streaming(
+        &self,
+        req: StreamRequest,
+        inbound: PayloadStream,
+        next: NextStream<'_>,
+    ) -> Result<StreamResponse, ConnectError> {
+        // Auth runs once at establishment, not per message.
+        self.check(&req.ctx)?;
+        let resp = next.run(req, inbound).await?;
+        Ok(resp.with_header("x-served-by", &self.node_id))
+    }
+}
+```
+
+To observe or transform individual messages, wrap `inbound` (or the
+returned `resp.body`) with a `futures::Stream` adapter — `.map()`,
+`.then()`, `.filter()`. There is no per-message `send()` call site to
+hook because Rust handlers *return* a `Stream`, they don't *push* into
+a connection. This is the same shape `tower`, `tonic`, and `axum` use
+for body interception. Cross-stream coordination (deciding on an
+outbound item based on what was observed inbound) needs shared state
+captured by both adapter closures (`Arc<Mutex<..>>`); this is rare —
+most interceptors observe one direction or none.
+
+For server-streaming the inbound stream yields exactly one item; for
+client-streaming the outbound stream yields exactly one item. Read
+`req.ctx.spec().map(|s| s.stream_type)` to branch on cardinality.
+
+### Interceptors vs. Tower middleware
+
+| | Tower middleware | Interceptor |
+|---|---|---|
+| Operates on | `http::Request` / `http::Response` | Decoded RPC: `Spec`, headers, deadline, `Payload` |
+| Runs | Before envelope decode + protocol parse | After envelope decode + protocol parse |
+| Sees the RPC method | No (must re-parse the URI) | Yes (`ctx.path()`, `ctx.spec()`) |
+| Sees the message body | Compressed/enveloped wire bytes | Lazily decoded, codec-aware `Payload` |
+| Short-circuits | By returning an `http::Response` | By returning `Err` or a `UnaryResponse` |
+| Best for | gzip, raw header rewriting, generic HTTP concerns | Auth, RPC-aware tracing, validation, rate limiting |
+
+Both compose: a Tower layer wraps the whole `ConnectRpcService`
+(including its interceptor chain). An interceptor that needs an
+HTTP-level fact (e.g. the remote socket address) reads it from
+`ctx.extensions()` after a Tower layer inserts it.
 
 ## Hosting
 

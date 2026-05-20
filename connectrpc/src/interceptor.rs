@@ -301,8 +301,10 @@ pub(crate) trait UnaryTerminal: Send + Sync {
 /// the mutated request to [`Next::run`].
 ///
 /// `ctx.spec` is `Some(..)` for generated `FooServiceServer<T>`
-/// dispatchers and `None` for the dynamic [`Router`](crate::Router)
-/// (its method paths are owned `String`s, not `&'static str`).
+/// dispatchers and for [`Router`](crate::Router) routes registered
+/// through the generated `register()`; it is `None` only for manual
+/// `route_*` registrations without a
+/// [`Router::with_spec`](crate::Router::with_spec) call.
 ///
 /// `#[non_exhaustive]` so future fields can be added without a
 /// breaking change. Construct with [`UnaryRequest::new`]; destructure
