@@ -62,6 +62,7 @@ pub struct Config {
     out_dir: Option<PathBuf>,
     descriptor_source: DescriptorSource,
     include_file: Option<String>,
+    emit_descriptor_set: Option<String>,
     emit_rerun_directives: bool,
     options: Options,
 }
@@ -75,6 +76,7 @@ impl Config {
             out_dir: None,
             descriptor_source: DescriptorSource::default(),
             include_file: None,
+            emit_descriptor_set: None,
             emit_rerun_directives: true,
             options: Options::default(),
         }
@@ -220,6 +222,35 @@ impl Config {
         self
     }
 
+    /// Also write the parsed `FileDescriptorSet` (the descriptors used for
+    /// codegen) to `<out_dir>/<name>` as wire-format bytes.
+    ///
+    /// The set carries the full transitive import closure for every descriptor
+    /// source (`protoc --include_imports`, `buf --as-file-descriptor-set`, or a
+    /// precompiled set), so it is ready to back `grpc.reflection.v1.ServerReflection`
+    /// for clients such as `grpcurl`. Pair it with `include_bytes!`:
+    ///
+    /// ```ignore
+    /// // build.rs
+    /// connectrpc_build::Config::new()
+    ///     .files(&["proto/svc.proto"])
+    ///     .includes(&["proto/"])
+    ///     .emit_descriptor_set("svc_descriptor.bin")
+    ///     .compile()?;
+    /// // src/lib.rs
+    /// pub const FILE_DESCRIPTOR_SET: &[u8] =
+    ///     include_bytes!(concat!(env!("OUT_DIR"), "/svc_descriptor.bin"));
+    /// ```
+    ///
+    /// The inverse of [`Config::descriptor_set`], which *reads* a precompiled
+    /// set; this *writes* the one connectrpc-build already computed, so build
+    /// scripts no longer need a second `protoc --descriptor_set_out` pass.
+    #[must_use]
+    pub fn emit_descriptor_set(mut self, name: impl Into<String>) -> Self {
+        self.emit_descriptor_set = Some(name.into());
+        self
+    }
+
     /// Emit an `include!`-based module tree file alongside the per-file
     /// `.rs` outputs.
     ///
@@ -304,6 +335,13 @@ impl Config {
         //    stitchers.
         std::fs::create_dir_all(&out_dir)
             .with_context(|| format!("failed to create out_dir '{}'", out_dir.display()))?;
+
+        // Emit the parsed descriptor set for gRPC server reflection, if requested.
+        // `descriptor_bytes` already carries the full import closure for every
+        // descriptor source, so the written set is reflection-ready as-is.
+        if let Some(name) = &self.emit_descriptor_set {
+            write_if_changed(&out_dir.join(name), &descriptor_bytes)?;
+        }
 
         let mut entries: Vec<(String, String)> = Vec::new();
         for file in &generated {
@@ -669,6 +707,48 @@ mod tests {
             Config::new().descriptor_set("x.bin").descriptor_source,
             DescriptorSource::Precompiled(_)
         ));
+    }
+
+    #[test]
+    fn config_emit_descriptor_set_toggle() {
+        let cfg = Config::new().emit_descriptor_set("d.bin");
+        assert_eq!(cfg.emit_descriptor_set.as_deref(), Some("d.bin"));
+    }
+
+    /// `emit_descriptor_set` writes the descriptor set used for codegen to
+    /// `<out_dir>/<name>` as a wire-format `FileDescriptorSet` ready for gRPC
+    /// server reflection. A precompiled source passes the bytes through
+    /// unchanged, so the emitted file round-trips the input set.
+    #[test]
+    fn emit_descriptor_set_writes_reflection_bin() {
+        let fixture = format!("{}/tests/fixtures/echo.fds.bin", env!("CARGO_MANIFEST_DIR"));
+        let out = tempfile::tempdir().unwrap();
+
+        Config::new()
+            .descriptor_set(&fixture)
+            .files(&["echo.proto"])
+            .out_dir(out.path())
+            .emit_descriptor_set("echo_descriptor.bin")
+            .compile()
+            .unwrap();
+
+        let emitted = out.path().join("echo_descriptor.bin");
+        assert!(emitted.exists(), "expected {emitted:?} to be written");
+
+        let bytes = std::fs::read(&emitted).unwrap();
+        let fds = FileDescriptorSet::decode_from_slice(&bytes)
+            .expect("emitted descriptor set must decode");
+        assert!(
+            !fds.file.is_empty(),
+            "emitted set should contain file descriptors"
+        );
+
+        // Precompiled source passes bytes through unchanged → exact round-trip.
+        let fixture_bytes = std::fs::read(&fixture).unwrap();
+        assert_eq!(
+            bytes, fixture_bytes,
+            "emitted bytes must equal the source set"
+        );
     }
 
     /// End-to-end: precompiled descriptor set → generated Rust in a tempdir.
