@@ -127,11 +127,16 @@ pub trait CompressionProvider: Send + Sync + 'static {
     fn decompress_with_limit(&self, data: &[u8], max_size: usize) -> Result<Bytes, ConnectError> {
         use std::io::Read;
         let reader = self.decompressor(data)?;
-        let capacity = if max_size < 64 * 1024 * 1024 {
-            max_size.saturating_add(1)
-        } else {
-            256
-        };
+        // Size the initial buffer from the compressed input rather than the
+        // limit: this buffer becomes the backing allocation of the returned
+        // `Bytes`, so a limit-sized allocation would stay resident for the
+        // lifetime of every (possibly tiny) message. `read_to_end` grows the
+        // buffer on demand and the `take` below still bounds the total.
+        let capacity = data
+            .len()
+            .saturating_mul(2)
+            .max(256)
+            .min(max_size.saturating_add(1));
         let mut buf = Vec::with_capacity(capacity);
         reader
             .take((max_size as u64).saturating_add(1))
@@ -752,12 +757,15 @@ impl GzipProvider {
         let deflate_start = gzip_header_len(data)?;
         let stream_data = &data[deflate_start..];
 
-        let capacity = match max_size {
-            // For very large limits (e.g. usize::MAX),
-            // use a growth-based strategy instead of pre-allocating.
-            Some(limit) if limit < 64 * 1024 * 1024 => limit.saturating_add(1),
-            _ => data.len().saturating_mul(2).max(256),
-        };
+        // Size the initial buffer from the compressed input rather than the
+        // limit: this buffer becomes the backing allocation of the returned
+        // `Bytes`, so a limit-sized allocation would stay resident for the
+        // lifetime of every (possibly tiny) message. The loop below grows
+        // the buffer on demand and enforces the limit as it grows.
+        let mut capacity = data.len().saturating_mul(2).max(256);
+        if let Some(limit) = max_size {
+            capacity = capacity.min(limit.saturating_add(1));
+        }
         let mut output = Vec::with_capacity(capacity);
 
         // Decompress the deflate stream, letting the decompressor find its
@@ -1026,13 +1034,15 @@ impl ZstdProvider {
         let mut decoder = zstd::Decoder::new(data)
             .map_err(|e| ConnectError::internal(format!("zstd decompression failed: {e}")))?;
 
-        // Pre-size the output buffer using the same heuristic as GzipProvider:
-        // for reasonable limits, reserve limit+1; for huge/no limits, guess
-        // from input size. Avoids repeated reallocation in read_to_end.
-        let capacity = match max_size {
-            Some(limit) if limit < 64 * 1024 * 1024 => limit.saturating_add(1),
-            _ => data.len().saturating_mul(4).max(256),
-        };
+        // Size the initial buffer from the compressed input rather than the
+        // limit: this buffer becomes the backing allocation of the returned
+        // `Bytes`, so a limit-sized allocation would stay resident for the
+        // lifetime of every (possibly tiny) message. `read_to_end` grows the
+        // buffer on demand and the `take` below still bounds the total.
+        let mut capacity = data.len().saturating_mul(4).max(256);
+        if let Some(limit) = max_size {
+            capacity = capacity.min(limit.saturating_add(1));
+        }
         let mut decompressed = Vec::with_capacity(capacity);
 
         match max_size {
@@ -1377,6 +1387,75 @@ mod tests {
             .decompress_with_limit(&compressed, usize::MAX)
             .unwrap();
         assert_eq!(&decompressed[..], data);
+    }
+
+    /// Limit used by the small-message allocation tests: the default
+    /// per-message limit configured by `Limits::default()`.
+    const ALLOCATION_TEST_LIMIT: usize = 4 * 1024 * 1024;
+
+    /// Returns the capacity of the allocation backing `bytes`.
+    ///
+    /// `Bytes::try_into_mut` reuses the original allocation when the handle
+    /// is unique, so the resulting `BytesMut::capacity()` exposes how much
+    /// memory the decompressed message actually retains.
+    fn backing_capacity(bytes: Bytes) -> usize {
+        bytes
+            .try_into_mut()
+            .expect("freshly decompressed Bytes has no other references")
+            .capacity()
+    }
+
+    /// Decompressing a small gzip message must not retain a buffer sized by
+    /// the configured limit: the returned `Bytes` should be backed by an
+    /// allocation proportional to the actual message.
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn test_gzip_decompress_small_message_allocation() {
+        let provider = GzipProvider::default();
+        let compressed = provider.compress(b"tiny payload").unwrap();
+        let out = provider
+            .decompress_with_limit(&compressed, ALLOCATION_TEST_LIMIT)
+            .unwrap();
+        assert_eq!(&out[..], b"tiny payload");
+        let capacity = backing_capacity(out);
+        assert!(
+            capacity < 64 * 1024,
+            "small gzip message retained a {capacity}-byte backing buffer"
+        );
+    }
+
+    /// Same as the gzip allocation test, for the zstd provider.
+    #[cfg(feature = "zstd")]
+    #[test]
+    fn test_zstd_decompress_small_message_allocation() {
+        let provider = ZstdProvider::default();
+        let compressed = provider.compress(b"tiny payload").unwrap();
+        let out = provider
+            .decompress_with_limit(&compressed, ALLOCATION_TEST_LIMIT)
+            .unwrap();
+        assert_eq!(&out[..], b"tiny payload");
+        let capacity = backing_capacity(out);
+        assert!(
+            capacity < 64 * 1024,
+            "small zstd message retained a {capacity}-byte backing buffer"
+        );
+    }
+
+    /// Same as the gzip allocation test, for the trait's default
+    /// `decompress_with_limit` implementation (used by custom providers).
+    #[test]
+    fn test_default_trait_decompress_small_message_allocation() {
+        let provider = MockProvider;
+        let compressed = provider.compress(b"tiny payload").unwrap();
+        let out = provider
+            .decompress_with_limit(&compressed, ALLOCATION_TEST_LIMIT)
+            .unwrap();
+        assert_eq!(&out[..], b"tiny payload");
+        let capacity = backing_capacity(out);
+        assert!(
+            capacity < 64 * 1024,
+            "small message retained a {capacity}-byte backing buffer via the default impl"
+        );
     }
 
     #[cfg(feature = "gzip")]
