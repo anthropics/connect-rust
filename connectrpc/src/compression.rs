@@ -782,8 +782,19 @@ impl GzipProvider {
                     flate2::FlushDecompress::None,
                 )
                 .map_err(|e| ConnectError::internal(format!("gzip decompression failed: {e}")))?;
-            if status == flate2::Status::StreamEnd {
-                break;
+            match status {
+                flate2::Status::StreamEnd => break,
+                flate2::Status::Ok => {}
+                // Output capacity is always available at this point (ensured
+                // above), so `BufError` means the decompressor cannot make
+                // progress with the remaining input: the deflate stream ended
+                // without an end-of-stream marker. Without this check the
+                // loop would never terminate on such input.
+                flate2::Status::BufError => {
+                    return Err(ConnectError::internal(
+                        "gzip decompression failed: truncated or invalid deflate stream",
+                    ));
+                }
             }
         }
 
@@ -1377,6 +1388,115 @@ mod tests {
             .decompress_with_limit(&compressed, usize::MAX)
             .unwrap();
         assert_eq!(&decompressed[..], data);
+    }
+
+    /// Run `f` on a separate thread and require it to produce a result within
+    /// `timeout`, failing the test immediately otherwise.
+    ///
+    /// Threads cannot be killed in Rust, so on timeout the worker is simply
+    /// abandoned (it ends when the test process exits). The point is that the
+    /// test itself fails fast with a clear message, instead of hanging until
+    /// the CI job timeout, if decompression of the input ever stops
+    /// terminating.
+    #[cfg(feature = "gzip")]
+    fn run_with_timeout<T, F>(timeout: std::time::Duration, f: F) -> T
+    where
+        T: Send + 'static,
+        F: FnOnce() -> T + Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        match rx.recv_timeout(timeout) {
+            Ok(value) => value,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("operation did not complete within {timeout:?}; decompression appears stuck")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("worker thread panicked before producing a result")
+            }
+        }
+    }
+
+    /// Deadline for the truncated-input decompression tests; generous so the
+    /// tests stay deterministic on slow CI runners while still failing fast
+    /// compared to the job timeout.
+    #[cfg(feature = "gzip")]
+    const TRUNCATION_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+    /// A gzip member that is only a header — no deflate data, no trailer —
+    /// must be rejected rather than treated as an incomplete stream to wait
+    /// on.
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn test_gzip_decompress_header_only() {
+        let header_only = [0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff];
+        let err = run_with_timeout(TRUNCATION_TEST_TIMEOUT, move || {
+            GzipProvider::default().decompress_with_limit(&header_only, 1024)
+        })
+        .expect_err("header-only gzip member must be rejected");
+        assert!(
+            err.to_string()
+                .contains("truncated or invalid deflate stream"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    /// A gzip stream cut off in the middle of the deflate data must produce
+    /// an error.
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn test_gzip_decompress_truncated_deflate_stream() {
+        let provider = GzipProvider::default();
+        let data = b"hello world, this is a test of gzip compression";
+        let compressed = provider.compress(data).unwrap();
+
+        let err = run_with_timeout(TRUNCATION_TEST_TIMEOUT, move || {
+            // Keep the 10-byte header plus a prefix of the deflate stream,
+            // drop the rest (including the 8-byte trailer).
+            provider.decompress_with_limit(&compressed[..14], 1024)
+        })
+        .expect_err("truncated deflate stream must be rejected");
+        assert!(
+            err.to_string()
+                .contains("truncated or invalid deflate stream"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    /// A truncated gzip payload is also rejected when it arrives through the
+    /// registry (the path the request/response handling code uses).
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn test_gzip_registry_decompress_truncated() {
+        let registry = CompressionRegistry::new().register(GzipProvider::default());
+        let header_only = [0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff];
+        let result = run_with_timeout(TRUNCATION_TEST_TIMEOUT, move || {
+            registry.decompress_with_limit("gzip", Bytes::copy_from_slice(&header_only), 1024)
+        });
+        assert!(result.is_err());
+    }
+
+    /// A complete deflate stream with the 8-byte CRC/length trailer cut off
+    /// must produce an error. (The deflate stream itself decodes fully here;
+    /// this is rejected by the trailer-length check rather than the
+    /// truncated-stream handling.)
+    #[cfg(feature = "gzip")]
+    #[test]
+    fn test_gzip_decompress_missing_trailer() {
+        let provider = GzipProvider::default();
+        let data = b"hello world, this is a test of gzip compression";
+        let compressed = provider.compress(data).unwrap();
+
+        let missing_trailer = &compressed[..compressed.len() - 8];
+        let err = provider
+            .decompress_with_limit(missing_trailer, 1024)
+            .expect_err("gzip member without its trailer must be rejected");
+        assert!(
+            err.to_string().contains("too short for trailer"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[cfg(feature = "gzip")]
