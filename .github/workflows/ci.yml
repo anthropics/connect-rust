@@ -89,6 +89,12 @@ jobs:
     name: Check generated code
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Note: the workspace has no committed Cargo.lock, so `cargo
+    # generate-lockfile` below resolves buffa and prettyplease (which formats
+    # the generated code) to the latest compatible releases at run time. A new
+    # release of either can therefore make this job fail on PRs that did not
+    # touch the protos or codegen — the fix is to run `task generate:all` on
+    # main and commit the resulting diff.
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -100,6 +106,10 @@ jobs:
       - uses: bufbuild/buf-action@fd21066df7214747548607aaa45548ba2b9bc1ff # v1 (sha-pinned)
         with:
           setup_only: true
+          # Pinned so the job's behaviour does not drift with new buf
+          # releases; keep in sync with the version used for local
+          # regeneration when bumping.
+          version: 1.69.0
       - uses: go-task/setup-task@01a4adf9db2d14c1de7a560f09170b6e0df736aa # v2 (sha-pinned)
       - name: Generate lockfile
         run: cargo generate-lockfile
