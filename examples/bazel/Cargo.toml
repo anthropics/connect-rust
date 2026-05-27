@@ -17,7 +17,7 @@ path = "stub.rs"
 
 [dependencies]
 buffa = { version = "0.6.0", features = ["json"] }
-connectrpc = { version = "0.6.0", default-features = false, features = ["server", "client"] }
+connectrpc = { version = "0.6.1", default-features = false, features = ["server", "client"] }
 futures = "0.3"
 http-body = "1"
 serde = { version = "1", features = ["derive"] }
