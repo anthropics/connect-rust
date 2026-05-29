@@ -353,6 +353,49 @@ serde_json = "1"
 http-body = "1"
 ```
 
+### Optional: gate the client behind a Cargo feature
+
+If you want a server-only build of your crate to drop the
+`connectrpc/client` transport stack, opt in to the cfg gate. With
+`buf generate`:
+
+```yaml
+# buf.gen.yaml
+plugins:
+  - local: protoc-gen-connect-rust
+    out: src/gen/connect
+    opt: [buffa_module=crate::proto, gate_client_feature]
+```
+
+Or with `connectrpc-build` in `build.rs`:
+
+```rust
+// build.rs
+connectrpc_build::Config::new()
+    .files(&["proto/greet.proto"])
+    .includes(&["proto/"])
+    .gate_client_feature(true)
+    .compile()?;
+```
+
+The codegen then prefixes every emitted `FooClient<T>` struct and its
+`impl` block with `#[cfg(feature = "client")]`. Declare the feature in
+your `Cargo.toml` to forward it through to the runtime dep:
+
+```toml
+[features]
+default = ["client"]
+client = ["connectrpc/client"]
+
+[dependencies]
+connectrpc = { version = "0.6", features = ["server"] }  # no "client"
+```
+
+`cargo build --no-default-features` now leaves out the `FooClient` items
+*and* drops `connectrpc/client` (the HTTP/2 transport stack) from the
+dependency graph. See `connectrpc-health` for the minimal example. The
+option is opt-in; the default emission is unconditional.
+
 ## Protocol Support
 
 | Protocol | Status |
