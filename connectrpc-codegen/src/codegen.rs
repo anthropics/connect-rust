@@ -56,6 +56,15 @@ pub struct Options {
     /// absolute paths into service stubs (set a `(".", "crate::proto")`
     /// catch-all so every type resolves); it is ignored by
     /// [`generate_files`] (the unified `super::`-relative path).
+    ///
+    /// Every `extern_path` target must be buffa-generated code from
+    /// buffa ≥ 0.7.0 with views enabled (and, if the crate feature-gates
+    /// its generated impls, with that feature turned on): the service
+    /// stubs rely on the `buffa::HasMessageView` impls and `FooOwnedView`
+    /// wrappers emitted alongside each message, the same way they rely on
+    /// the JSON/`Serialize` impls. `buffa-types` 0.7+ satisfies this for
+    /// the well-known types. A crate generated without them fails to
+    /// compile against the stubs (missing `HasMessageView` impl).
     pub buffa: CodeGenConfig,
 }
 
@@ -404,6 +413,10 @@ pub fn generate_services(
 ///   to a Rust module path. Repeatable; longest-prefix-match wins.
 ///   `extern_path=.=<path>` is the catch-all (equivalent to `buffa_module`).
 ///   At least one catch-all mapping is required so every type resolves.
+///   Every mapped path must point at buffa-generated code from
+///   buffa ≥ 0.7.0 with views enabled — the stubs use the
+///   `buffa::HasMessageView` impls and owned-view wrappers generated with
+///   each message (`buffa-types` 0.7+ qualifies for the well-known types).
 /// - `file_per_package` — emit one `<dotted.pkg>.rs` per proto package
 ///   instead of the per-proto split + stitcher. Set `protoc-gen-buffa`'s
 ///   own `file_per_package` option to the same value — the BSR/`tonic`
@@ -721,7 +734,7 @@ fn generate_connect_services(
     tokens.extend(generate_encodable_view_impls(file, resolver, batch)?);
 
     for service in &file.service {
-        tokens.extend(generate_service(file, service, resolver, batch)?);
+        tokens.extend(generate_service(file, service, resolver)?);
     }
 
     Ok(tokens)
@@ -747,104 +760,52 @@ fn alias_collides(batch: &BatchState, current_package: &str, proto_fqn: &str) ->
         .contains(&(current_package.to_string(), alias))
 }
 
-/// Trait-method input-type tokens for an RPC: either the local
-/// `Owned<Msg>View` alias (the common case) or the inlined
-/// `::buffa::view::OwnedView<Path::To::<Msg>View<'static>>` form for
-/// types whose alias would collide with another type in the same target
-/// Rust module (issue #75). The inlined form mirrors what the generated
-/// client method signatures already emit for response types.
-fn owned_view_input_arg_type(
-    resolver: &TypeResolver<'_>,
-    batch: &BatchState,
-    proto_fqn: &str,
-    current_package: &str,
-) -> Result<TokenStream> {
-    if alias_collides(batch, current_package, proto_fqn) {
-        let view = resolver.rust_view_type(proto_fqn, current_package)?;
-        Ok(quote!(::buffa::view::OwnedView<#view<'static>>))
-    } else {
-        let alias = owned_view_alias_ident(proto_fqn);
-        Ok(quote!(#alias))
-    }
-}
-
 /// Statement converting the Router-path `ServiceStream<OwnedView<…>>` into
-/// `StreamMessage<Req>` items before calling the handler. Empty for foreign
-/// (`extern_path`) inputs, which keep the raw `OwnedView` item form.
+/// `StreamMessage<Req>` items before calling the handler. Applies to every
+/// input type, including ones mapped via `extern_path`: the backing
+/// `buffa::HasMessageView` impl is emitted by buffa's codegen in the crate
+/// that owns the type (`extern_path` targets are required to be generated
+/// with buffa ≥ 0.7.0 and views enabled).
 fn router_stream_items_tokens(
     resolver: &TypeResolver<'_>,
     method: &MethodDescriptorProto,
     package: &str,
 ) -> TokenStream {
     let input_fqn = method.input_type.as_deref().unwrap_or("");
-    // A resolution failure must not silently degrade to "not extern" (which
-    // would emit a conversion referencing a type that failed to resolve);
-    // panic like the surrounding route-registration code does on resolver
-    // errors. (Threading `Result` through the registration builder is a
+    // Panic on resolver errors like the surrounding route-registration code
+    // does. (Threading `Result` through the registration builder is a
     // follow-up.)
-    let is_extern = resolver
-        .resolve_path(input_fqn, package)
-        .expect("resolve_path failed for streaming input type")
-        .starts_with("::");
-    if is_extern {
-        quote! {}
-    } else {
-        let input_owned = resolver
-            .rust_type(input_fqn, package)
-            .expect("rust_type failed for streaming input type");
-        quote! {
-            let req = ::connectrpc::dispatcher::codegen::into_stream_messages::<#input_owned>(req);
-        }
+    let input_owned = resolver
+        .rust_type(input_fqn, package)
+        .expect("rust_type failed for streaming input type");
+    quote! {
+        let req = ::connectrpc::dispatcher::codegen::into_stream_messages::<#input_owned>(req);
     }
 }
 
 /// Doc lines describing the inbound stream item type on a client-streaming /
-/// bidi trait method, matching whichever form [`stream_item_arg`] selects.
-fn stream_items_doc(
-    resolver: &TypeResolver<'_>,
-    method: &MethodDescriptorProto,
-    package: &str,
-) -> Result<TokenStream> {
-    let input_fqn = method.input_type.as_deref().unwrap_or("");
-    let is_extern = resolver.resolve_path(input_fqn, package)?.starts_with("::");
-    Ok(if is_extern {
-        quote! {
-            #[doc = ""]
-            #[doc = " Each `requests` item is an `OwnedView` of the request view (the"]
-            #[doc = " input type is foreign, so the `StreamMessage` wrapper is not"]
-            #[doc = " available); read fields via `.reborrow()` or convert with"]
-            #[doc = " `.to_owned_message()`."]
-        }
-    } else {
-        quote! {
-            #[doc = ""]
-            #[doc = " Each `requests` item is a [`StreamMessage`](::connectrpc::StreamMessage):"]
-            #[doc = " it owns its buffer, is `Send + 'static`, and exposes zero-copy"]
-            #[doc = " accessor methods (`item.name()`), `.view()`, and"]
-            #[doc = " `.to_owned_message()`. Items can be yielded back unchanged"]
-            #[doc = " (`StreamMessage<M>` implements `Encodable<M>`)."]
-        }
-    })
+/// bidi trait method.
+fn stream_items_doc() -> TokenStream {
+    quote! {
+        #[doc = ""]
+        #[doc = " Each `requests` item is a [`StreamMessage`](::connectrpc::StreamMessage):"]
+        #[doc = " it owns its buffer, is `Send + 'static`, and exposes zero-copy"]
+        #[doc = " accessor methods (`item.name()`), `.view()`, and"]
+        #[doc = " `.to_owned_message()`. Items can be yielded back unchanged"]
+        #[doc = " (`StreamMessage<M>` implements `Encodable<M>`)."]
+    }
 }
 
 /// Inbound stream item type for a client-streaming / bidi RPC:
-/// `StreamMessage<Req>` keyed by the owned message. Foreign (`extern_path`)
-/// inputs fall back to the `Owned<Msg>View` alias / inlined `OwnedView<…>`
-/// form, because the `HasMessageView` impl backing `StreamMessage` would be
-/// an orphan in the user's crate.
+/// `StreamMessage<Req>` keyed by the owned message.
 fn stream_item_arg(
     resolver: &TypeResolver<'_>,
-    batch: &BatchState,
     method: &MethodDescriptorProto,
     package: &str,
 ) -> Result<TokenStream> {
     let input_fqn = method.input_type.as_deref().unwrap_or("");
-    if resolver.resolve_path(input_fqn, package)?.starts_with("::") {
-        owned_view_input_arg_type(resolver, batch, input_fqn, package)
-    } else {
-        let input_owned = resolver.rust_type(input_fqn, package)?;
-        Ok(quote! { ::connectrpc::StreamMessage<#input_owned> })
-    }
+    let input_owned = resolver.rust_type(input_fqn, package)?;
+    Ok(quote! { ::connectrpc::StreamMessage<#input_owned> })
 }
 
 /// Walk every service's method input/output FQNs across `file_to_generate`
@@ -903,16 +864,15 @@ fn collect_alias_collisions(
 
 /// Emit `pub type Owned#{Msg}View = OwnedView<#{Msg}View<'static>>;` for
 /// every distinct RPC input/output type referenced by services in this
-/// file. The alias is what handlers see in trait method signatures and
-/// what users write in their `impl` blocks.
+/// file. The alias names the owned-view form of a message in handler code
+/// (e.g. an `OwnedOutView` response body or a decoded client response).
 ///
 /// Aliases whose name would collide with another distinct type's alias
 /// in the same target package (per [`BatchState::colliding_aliases`]) are
-/// suppressed — the trait method signature inlines the
-/// `OwnedView<…<'static>>` form for those types instead (see
-/// [`owned_view_input_arg_type`]). This is the issue [#75] fix; the
-/// non-colliding common case (including well-known types like
-/// `.google.protobuf.Empty`) keeps its alias.
+/// suppressed — users spell the inlined `OwnedView<…<'static>>` form for
+/// those types instead. This is the issue [#75] fix; the non-colliding
+/// common case (including well-known types like `.google.protobuf.Empty`)
+/// keeps its alias.
 ///
 /// Deduped on `(package, fqn)` across the batch so two files in the same
 /// package don't both emit the alias (E0428).
@@ -1045,7 +1005,6 @@ fn generate_service(
     file: &FileDescriptorProto,
     service: &ServiceDescriptorProto,
     resolver: &TypeResolver<'_>,
-    batch: &BatchState,
 ) -> Result<TokenStream> {
     let package = file.package.as_deref().unwrap_or("");
     let service_name = service.name.as_deref().unwrap_or("");
@@ -1103,9 +1062,9 @@ fn generate_service(
          convert with `.to_owned_message()`, or yield an item back unchanged —\n\
          `StreamMessage<M>` implements `Encodable<M>`.\n\n\
          Request types resolved through `extern_path` (e.g. well-known types\n\
-         from another crate) cannot use these wrappers (the backing trait\n\
-         impls would be orphans); those parameters are spelled as\n\
-         `&FooView<'_>` / `OwnedView<FooView<'static>>` items instead.\n\n\
+         from another crate) use the same wrappers; the crate that owns the\n\
+         type must be generated with buffa ≥ 0.7.0 and views enabled so the\n\
+         backing `HasMessageView` impl exists.\n\n\
          The `impl Encodable<Out>` return bound accepts the owned `Out`, the\n\
          generated `OutView<'_>` / `OwnedOutView`,\n\
          [`MaybeBorrowed`](::connectrpc::MaybeBorrowed), or\n\
@@ -1130,7 +1089,7 @@ fn generate_service(
     let trait_methods: Vec<TokenStream> = service
         .method
         .iter()
-        .map(|m| generate_trait_method(file, service, m, resolver, batch, package))
+        .map(|m| generate_trait_method(file, service, m, resolver, package))
         .collect::<Result<Vec<_>>>()?;
 
     // Generate route registrations for extension trait
@@ -1159,17 +1118,9 @@ fn generate_service(
                 let input_fqn = m.input_type.as_deref().unwrap_or("");
                 let input_view = resolver.rust_view_type(input_fqn, package).unwrap();
                 let input_owned = resolver.rust_type(input_fqn, package).unwrap();
-                let input_is_extern = resolver
-                    .resolve_path(input_fqn, package)
-                    .map(|p| p.starts_with("::"))
-                    .unwrap_or(false);
-                let call_handler = if input_is_extern {
-                    quote! { svc.#method_snake(ctx, req.reborrow()).await }
-                } else {
-                    quote! {
-                        let sreq = ::connectrpc::ServiceRequest::<#input_owned>::from_parts(req.reborrow(), req.bytes());
-                        svc.#method_snake(ctx, sreq).await
-                    }
+                let call_handler = quote! {
+                    let sreq = ::connectrpc::ServiceRequest::<#input_owned>::from_parts(req.reborrow(), req.bytes());
+                    svc.#method_snake(ctx, sreq).await
                 };
                 quote! {
                     .route_view_server_stream::<_, _, #output_type>(
@@ -1255,19 +1206,9 @@ fn generate_service(
                 let input_fqn = m.input_type.as_deref().unwrap_or("");
                 let input_view = resolver.rust_view_type(input_fqn, package).unwrap();
                 let input_owned = resolver.rust_type(input_fqn, package).unwrap();
-                let input_is_extern = resolver
-                    .resolve_path(input_fqn, package)
-                    .map(|p| p.starts_with("::"))
-                    .unwrap_or(false);
-                let call_handler = if input_is_extern {
-                    quote! {
-                        svc.#method_snake(ctx, req.reborrow()).await?.encode::<#output_type>(format)
-                    }
-                } else {
-                    quote! {
-                        let sreq = ::connectrpc::ServiceRequest::<#input_owned>::from_parts(req.reborrow(), req.bytes());
-                        svc.#method_snake(ctx, sreq).await?.encode::<#output_type>(format)
-                    }
+                let call_handler = quote! {
+                    let sreq = ::connectrpc::ServiceRequest::<#input_owned>::from_parts(req.reborrow(), req.bytes());
+                    svc.#method_snake(ctx, sreq).await?.encode::<#output_type>(format)
                 };
 
                 quote! {
@@ -1603,16 +1544,11 @@ fn generate_service_server(
         let ss = m.server_streaming.unwrap_or(false);
 
         // Inbound stream decoding for client-streaming / bidi: typed
-        // `StreamMessage<Req>` items, except for foreign (`extern_path`)
-        // inputs which keep the raw `OwnedView` item form.
+        // `StreamMessage<Req>` items.
         let stream_decode = {
             let input_fqn = m.input_type.as_deref().unwrap_or("");
-            if resolver.resolve_path(input_fqn, package)?.starts_with("::") {
-                quote! { ::connectrpc::dispatcher::codegen::decode_view_request_stream::<#input_view>(requests, format) }
-            } else {
-                let input_owned = resolver.rust_type(input_fqn, package)?;
-                quote! { ::connectrpc::dispatcher::codegen::decode_message_request_stream::<#input_owned>(requests, format) }
-            }
+            let input_owned = resolver.rust_type(input_fqn, package)?;
+            quote! { ::connectrpc::dispatcher::codegen::decode_message_request_stream::<#input_owned>(requests, format) }
         };
 
         if cs && ss {
@@ -1642,16 +1578,9 @@ fn generate_service_server(
             // Server streaming
             let input_fqn = m.input_type.as_deref().unwrap_or("");
             let input_owned = resolver.rust_type(input_fqn, package)?;
-            let input_is_extern = resolver.resolve_path(input_fqn, package)?.starts_with("::");
-            let call_handler = if input_is_extern {
-                quote! {
-                    let resp = svc.#method_snake(ctx, &req).await?;
-                }
-            } else {
-                quote! {
-                    let req = ::connectrpc::ServiceRequest::<#input_owned>::from_parts(&req, &body);
-                    let resp = svc.#method_snake(ctx, req).await?;
-                }
+            let call_handler = quote! {
+                let req = ::connectrpc::ServiceRequest::<#input_owned>::from_parts(&req, &body);
+                let resp = svc.#method_snake(ctx, req).await?;
             };
             call_ss_arms.push(quote! {
                 #method_name => {
@@ -1670,20 +1599,9 @@ fn generate_service_server(
             // Unary
             let input_fqn = m.input_type.as_deref().unwrap_or("");
             let input_owned = resolver.rust_type(input_fqn, package)?;
-            let input_is_extern = resolver.resolve_path(input_fqn, package)?.starts_with("::");
-            // Foreign (`extern_path`) input types take the raw borrowed view:
-            // whether the extern crate's generated code provides
-            // `buffa::HasMessageView` depends on how it was generated, so the
-            // conservative fallback keeps working either way.
-            let call_handler = if input_is_extern {
-                quote! {
-                    svc.#method_snake(ctx, &req).await?.encode::<#output_type>(format)
-                }
-            } else {
-                quote! {
-                    let req = ::connectrpc::ServiceRequest::<#input_owned>::from_parts(&req, &body);
-                    svc.#method_snake(ctx, req).await?.encode::<#output_type>(format)
-                }
+            let call_handler = quote! {
+                let req = ::connectrpc::ServiceRequest::<#input_owned>::from_parts(&req, &body);
+                svc.#method_snake(ctx, req).await?.encode::<#output_type>(format)
             };
             call_unary_arms.push(quote! {
                 #method_name => {
@@ -1837,7 +1755,6 @@ fn generate_trait_method(
     service: &ServiceDescriptorProto,
     method: &MethodDescriptorProto,
     resolver: &TypeResolver<'_>,
-    batch: &BatchState,
     package: &str,
 ) -> Result<TokenStream> {
     let method_name = method.name.as_deref().unwrap_or("");
@@ -1870,32 +1787,15 @@ fn generate_trait_method(
         // stream cannot borrow from the request — anything the stream needs
         // must be copied or converted to owned before returning it.
         let input_fqn = method.input_type.as_deref().unwrap_or("");
-        let input_view = resolver.rust_view_type(input_fqn, package)?;
         let input_owned = resolver.rust_type(input_fqn, package)?;
-        let input_is_extern = resolver.resolve_path(input_fqn, package)?.starts_with("::");
-        let request_param = if input_is_extern {
-            quote! { &#input_view<'_> }
-        } else {
-            quote! { ::connectrpc::ServiceRequest<'_, #input_owned> }
-        };
-        let request_doc = if input_is_extern {
-            quote! {
-                #[doc = ""]
-                #[doc = " `request` is a zero-copy view borrowed from the request body, valid"]
-                #[doc = " until the response stream is returned. The stream cannot borrow"]
-                #[doc = " from it — copy the specific fields you need, or convert with"]
-                #[doc = " `to_owned_message()` (a `buffa::view::MessageView` trait method;"]
-                #[doc = " bring the trait into scope to call it)."]
-            }
-        } else {
-            quote! {
-                #[doc = ""]
-                #[doc = " `request` is borrowed from the request body and is valid for the"]
-                #[doc = " duration of the call (until the response stream is returned);"]
-                #[doc = " message fields are read directly on it (zero-copy). Data the"]
-                #[doc = " returned stream needs must be copied out or converted via"]
-                #[doc = " `.to_owned_message()`."]
-            }
+        let request_param = quote! { ::connectrpc::ServiceRequest<'_, #input_owned> };
+        let request_doc = quote! {
+            #[doc = ""]
+            #[doc = " `request` is borrowed from the request body and is valid for the"]
+            #[doc = " duration of the call (until the response stream is returned);"]
+            #[doc = " message fields are read directly on it (zero-copy). Data the"]
+            #[doc = " returned stream needs must be copied out or converted via"]
+            #[doc = " `.to_owned_message()`."]
         };
         Ok(quote! {
             #method_doc_tokens
@@ -1910,10 +1810,9 @@ fn generate_trait_method(
         // Client streaming method. Inbound items are `StreamMessage<Req>` —
         // each received message owns its decoded buffer (zero-copy reads via
         // `.view()`, conversion via `.to_owned_message()`, and items can be
-        // forwarded as-is since `StreamMessage<M>: Encodable<M>`). Foreign
-        // (`extern_path`) inputs fall back to the OwnedView alias form.
-        let stream_item_arg = stream_item_arg(resolver, batch, method, package)?;
-        let items_doc = stream_items_doc(resolver, method, package)?;
+        // forwarded as-is since `StreamMessage<M>: Encodable<M>`).
+        let stream_item_arg = stream_item_arg(resolver, method, package)?;
+        let items_doc = stream_items_doc();
         Ok(quote! {
             #method_doc_tokens
             #borrow_doc
@@ -1928,8 +1827,8 @@ fn generate_trait_method(
         // Bidi streaming method. Same `impl Encodable<...>` item type and
         // `use<Self>` capture clause as server streaming above; inbound items
         // are `StreamMessage<Req>` as for client streaming.
-        let stream_item_arg = stream_item_arg(resolver, batch, method, package)?;
-        let items_doc = stream_items_doc(resolver, method, package)?;
+        let stream_item_arg = stream_item_arg(resolver, method, package)?;
+        let items_doc = stream_items_doc();
         Ok(quote! {
             #method_doc_tokens
             #items_doc
@@ -1950,37 +1849,16 @@ fn generate_trait_method(
         // still owning the body. The response's `use<'a, Self>` deliberately
         // excludes the request lifetime: the response must not borrow from
         // the request.
-        //
-        // Foreign (`extern_path`) input types fall back to the raw borrowed
-        // view form, because the `HasMessageView` impl backing
-        // `ServiceRequest` would be an orphan in the user's crate.
         let input_fqn = method.input_type.as_deref().unwrap_or("");
-        let input_view = resolver.rust_view_type(input_fqn, package)?;
         let input_owned = resolver.rust_type(input_fqn, package)?;
-        let input_is_extern = resolver.resolve_path(input_fqn, package)?.starts_with("::");
-        let request_param = if input_is_extern {
-            quote! { &#input_view<'_> }
-        } else {
-            quote! { ::connectrpc::ServiceRequest<'_, #input_owned> }
-        };
-        let request_doc = if input_is_extern {
-            quote! {
-                #[doc = ""]
-                #[doc = " `request` is a zero-copy view borrowed from the request body, valid"]
-                #[doc = " for the duration of the call. The response cannot borrow from it —"]
-                #[doc = " copy the specific fields you need, or convert with"]
-                #[doc = " `to_owned_message()` (a `buffa::view::MessageView` trait method;"]
-                #[doc = " bring the trait into scope to call it)."]
-            }
-        } else {
-            quote! {
-                #[doc = ""]
-                #[doc = " `request` is borrowed from the request body and is valid for the"]
-                #[doc = " duration of the call; message fields are read directly on it"]
-                #[doc = " (zero-copy). The response cannot borrow from `request` — use"]
-                #[doc = " `.to_owned_message()` (or copy the specific fields) for anything"]
-                #[doc = " returned, stored, or moved into `tokio::spawn`."]
-            }
+        let request_param = quote! { ::connectrpc::ServiceRequest<'_, #input_owned> };
+        let request_doc = quote! {
+            #[doc = ""]
+            #[doc = " `request` is borrowed from the request body and is valid for the"]
+            #[doc = " duration of the call; message fields are read directly on it"]
+            #[doc = " (zero-copy). The response cannot borrow from `request` — use"]
+            #[doc = " `.to_owned_message()` (or copy the specific fields) for anything"]
+            #[doc = " returned, stored, or moved into `tokio::spawn`."]
         };
         Ok(quote! {
             #method_doc_tokens
@@ -2327,11 +2205,7 @@ mod tests {
         let resolver = TypeResolver::new(files, &target_name, &config, require_extern);
         let file = &files[target_idx];
         let service = &file.service[0];
-        let batch = BatchState {
-            colliding_aliases: collect_alias_collisions(files, &target_name),
-            ..BatchState::default()
-        };
-        Ok(generate_service(file, service, &resolver, &batch)?.to_string())
+        Ok(generate_service(file, service, &resolver)?.to_string())
     }
 
     /// Assert that `formatted` (a Rust source string) contains no `use`
@@ -2505,16 +2379,15 @@ mod tests {
             "WKT cross-package input should keep its alias: {code}"
         );
         // `.google.protobuf.Empty` resolves through the default extern_path to
-        // `::buffa_types::…`. The unary input falls back to the raw
-        // borrowed-view parameter form: connect-codegen cannot know whether
-        // an extern crate's generated code provides `buffa::HasMessageView`
-        // (it depends on the buffa version and view settings it was generated
-        // with), so the conservative fallback is kept even though buffa-types
-        // itself does provide the impls. Lifting this for known-good extern
-        // crates is a possible follow-up.
+        // `::buffa_types::…`. extern_path targets are required to be
+        // buffa ≥ 0.7.0 generated code with views enabled, so the unary input
+        // uses the same `ServiceRequest<'_, Req>` form as local types — the
+        // backing `buffa::HasMessageView` impl ships with buffa-types.
         assert!(
-            code.contains("request : &") && code.contains("EmptyView < '_ >"),
-            "extern unary input should fall back to the borrowed view form: {code}"
+            code.contains(
+                "request : :: connectrpc :: ServiceRequest < '_ , :: buffa_types :: google :: protobuf :: Empty >"
+            ),
+            "extern unary input should use ServiceRequest over the extern owned type: {code}"
         );
     }
 

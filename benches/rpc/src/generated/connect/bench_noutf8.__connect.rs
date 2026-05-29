@@ -63,9 +63,9 @@ pub const LOG_INGEST_SERVICE_INGEST_SPEC: ::connectrpc::Spec = ::connectrpc::Spe
 /// `StreamMessage<M>` implements `Encodable<M>`.
 ///
 /// Request types resolved through `extern_path` (e.g. well-known types
-/// from another crate) cannot use these wrappers (the backing trait
-/// impls would be orphans); those parameters are spelled as
-/// `&FooView<'_>` / `OwnedView<FooView<'static>>` items instead.
+/// from another crate) use the same wrappers; the crate that owns the
+/// type must be generated with buffa ≥ 0.7.0 and views enabled so the
+/// backing `HasMessageView` impl exists.
 ///
 /// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
 /// generated `OutView<'_>` / `OwnedOutView`,

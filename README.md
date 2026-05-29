@@ -154,7 +154,12 @@ Changing the mount point requires regenerating.
 
 > The underlying option is `extern_path=.=crate::proto` - same format the
 > Buf Schema Registry uses when generating Cargo SDKs. `buffa_module=X`
-> is shorthand for the `.` catch-all case.
+> is shorthand for the `.` catch-all case. Any module an `extern_path`
+> points at must be buffa-generated code from buffa 0.7.0 or newer with
+> views enabled (buffa-types 0.7+ for the well-known types): the service
+> stubs rely on the `HasMessageView` impls and owned-view wrappers that
+> buffa generates alongside each message, just as they rely on the JSON
+> serialization impls.
 
 #### Option B - `build.rs` (generated at build time)
 
