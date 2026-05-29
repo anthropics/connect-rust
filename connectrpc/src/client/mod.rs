@@ -116,6 +116,7 @@ use http_body_util::combinators::BoxBody;
 
 use buffa::view::MessageView;
 use buffa::view::OwnedView;
+use buffa::view::ViewReborrow;
 
 use crate::codec::CodecFormat;
 use crate::codec::content_type;
@@ -1037,33 +1038,14 @@ impl<Resp> UnaryResponse<Resp> {
         &self.headers
     }
 
-    /// Borrow the response body.
-    ///
-    /// For generated clients the body is an [`OwnedView`], which derefs to
-    /// the view type — so field access is zero-copy:
-    ///
-    /// ```rust,ignore
-    /// let resp = client.foo(req).await?;
-    /// assert_eq!(resp.view().name, "expected");  // &str, no allocation
-    /// ```
-    ///
-    /// See also [`into_view()`](Self::into_view) to consume and
-    /// [`into_owned()`](Self::into_owned) for an owned struct.
-    #[must_use]
-    pub fn view(&self) -> &Resp {
-        &self.body
-    }
-
     /// Consume the response, returning just the body.
     ///
     /// For generated clients this is an [`OwnedView`] — zero-copy, move
-    /// semantics. If you need the owned struct instead, use
+    /// semantics, suitable for keeping the decoded body around without
+    /// copying. Field access on it goes through
+    /// [`reborrow()`](OwnedView::reborrow); for inline reads prefer
+    /// [`view()`](Self::view), and for an owned struct use
     /// [`into_owned()`](Self::into_owned).
-    ///
-    /// ```rust,ignore
-    /// let view = client.foo(req).await?.into_view();
-    /// assert_eq!(view.name, "expected");  // &str via Deref
-    /// ```
     #[must_use]
     pub fn into_view(self) -> Resp {
         self.body
@@ -1093,9 +1075,8 @@ where
     ///
     /// This allocates and copies all borrowed fields (strings, bytes, nested
     /// messages). Prefer zero-copy view access via
-    /// [`view()`](UnaryResponse::view) / [`into_view()`](UnaryResponse::into_view)
-    /// unless you need to pass the owned struct to code that expects it, or
-    /// store it in a collection.
+    /// [`view()`](UnaryResponse::view) unless you need to pass the owned
+    /// struct to code that expects it, or store it in a collection.
     ///
     /// ```rust,ignore
     /// let owned: FooResponse = client.foo(req).await?.into_owned();
@@ -1103,6 +1084,30 @@ where
     #[must_use]
     pub fn into_owned(self) -> V::Owned {
         self.body.to_owned_message()
+    }
+}
+
+/// Zero-copy read access for [`OwnedView`] bodies whose view supports
+/// reborrowing (every buffa-generated view does).
+impl<V> UnaryResponse<OwnedView<V>>
+where
+    V: MessageView<'static> + ViewReborrow,
+{
+    /// Borrow the response message view, tied to `&self`.
+    ///
+    /// Field access on the returned view is zero-copy:
+    ///
+    /// ```rust,ignore
+    /// let resp = client.foo(req).await?;
+    /// assert_eq!(resp.view().name, "expected");  // &str, no allocation
+    /// ```
+    ///
+    /// See also [`into_view()`](UnaryResponse::into_view) to keep the decoded
+    /// body and [`into_owned()`](UnaryResponse::into_owned) for an owned
+    /// struct.
+    #[must_use]
+    pub fn view(&self) -> &V::Reborrowed<'_> {
+        self.body.reborrow()
     }
 }
 

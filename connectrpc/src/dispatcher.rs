@@ -347,7 +347,9 @@ pub mod codegen {
 
     // Re-exports that generated code needs direct access to.
     pub use crate::handler::BoxFuture;
+    pub use crate::handler::decode_borrowed_request_view;
     pub use crate::handler::decode_request_view;
+    pub use crate::handler::unary_request_proto_bytes;
     pub use crate::response::EncodedResponse;
 
     pub use super::MethodDescriptor;
@@ -411,6 +413,40 @@ pub mod codegen {
         Box::pin(
             requests.map(move |r| r.and_then(|raw| decode_request_view::<ReqView>(raw, format))),
         )
+    }
+
+    /// Convert a stream of decoded `OwnedView` items into
+    /// [`StreamMessage`](crate::StreamMessage)s.
+    ///
+    /// Used by generated Router-registration glue, whose runtime handler
+    /// wrappers produce `ServiceStream<OwnedView<…>>`.
+    pub fn into_stream_messages<M>(
+        requests: crate::ServiceStream<OwnedView<M::View<'static>>>,
+    ) -> crate::ServiceStream<crate::StreamMessage<M>>
+    where
+        M: crate::HasMessageView + 'static,
+        M::View<'static>: 'static,
+    {
+        Box::pin(requests.map(|r| r.map(crate::StreamMessage::from_owned_view)))
+    }
+
+    /// Map a stream of raw request bytes into typed
+    /// [`StreamMessage`](crate::StreamMessage) items.
+    ///
+    /// Used by generated `call_client_streaming` and `call_bidi_streaming`
+    /// arms; the per-item decode is shared with
+    /// [`decode_view_request_stream`].
+    pub fn decode_message_request_stream<M>(
+        requests: BoxStream<Result<Bytes, ConnectError>>,
+        format: CodecFormat,
+    ) -> crate::ServiceStream<crate::StreamMessage<M>>
+    where
+        M: crate::HasMessageView + DeserializeOwned + 'static,
+        M::View<'static>: 'static,
+    {
+        into_stream_messages::<M>(decode_view_request_stream::<M::View<'static>>(
+            requests, format,
+        ))
     }
 }
 
