@@ -1978,6 +1978,11 @@ where
                     if !self.poll_body().await? {
                         // Body exhausted — check buffer for remaining trailer data
                         self.done = true;
+                        if matches!(self.protocol, Protocol::Connect) {
+                            return Err(ConnectError::unavailable(
+                                "Connect streaming response ended without END_STREAM envelope",
+                            ));
+                        }
                         if matches!(self.protocol, Protocol::GrpcWeb)
                             && !self.buf.is_empty()
                             && self.buf[0] & 0x80 != 0
@@ -3649,6 +3654,48 @@ mod tests {
         // Transports — manual impls that print mode/connection state.
         #[cfg(feature = "client")]
         assert_debug::<HttpClient>();
+    }
+
+    #[tokio::test]
+    async fn connect_server_stream_truncated_after_data_errors() {
+        use buffa::Message;
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+
+        let body = Full::new(Envelope::data(StringValue::from("hello").encode_to_bytes()).encode());
+        let mut stream: ServerStream<_, StringValueView<'static>> = ServerStream {
+            headers: http::HeaderMap::new(),
+            body,
+            buf: BytesMut::new(),
+            encoding: None,
+            compression: CompressionRegistry::new(),
+            codec_format: CodecFormat::Proto,
+            protocol: Protocol::Connect,
+            max_message_size: Some(1024),
+            deadline: None,
+            trailers: None,
+            error: None,
+            done: false,
+            _phantom: PhantomData,
+        };
+
+        let msg = stream
+            .message()
+            .await
+            .expect("first message should decode")
+            .expect("stream should yield the data envelope before EOF");
+        assert_eq!(msg.value, "hello");
+
+        let err = match stream.message().await {
+            Err(err) => err,
+            Ok(Some(_)) => panic!("truncated stream unexpectedly yielded another message"),
+            Ok(None) => panic!("truncated stream ended cleanly without END_STREAM"),
+        };
+        assert_eq!(err.code, ErrorCode::Unavailable);
+        assert!(
+            err.to_string().contains("END_STREAM"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg(feature = "client")]

@@ -8,6 +8,13 @@ with the [Rust 0.x convention](https://doc.rust-lang.org/cargo/reference/semver.
 breaking changes increment the minor version (0.2 → 0.3), additive changes
 increment the patch version.
 
+## [Unreleased]
+
+### Fixed
+
+- Connect streaming clients now report an error when a response body ends
+  without the required END_STREAM envelope ([#140]).
+
 ## [0.6.1] - 2026-05-27
 
 A patch release focused on the robustness of the streaming request and
@@ -46,6 +53,7 @@ now 1.6.
 [#131]: https://github.com/anthropics/connect-rust/pull/131
 [#132]: https://github.com/anthropics/connect-rust/pull/132
 [#133]: https://github.com/anthropics/connect-rust/pull/133
+[#140]: https://github.com/anthropics/connect-rust/issues/140
 
 ## [0.6.0] - 2026-05-20
 
