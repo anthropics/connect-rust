@@ -36,9 +36,9 @@ use crate::handler::BoxStream;
 /// mid-write — or an absurdly long one — holding server resources for
 /// hours. `DeadlinePolicy` clamps the client value to a server-controlled
 /// range, applies a server-side default when the client asserts nothing,
-/// and can extend enforcement to streaming bodies (whose initial setup is
-/// already bounded by the server's `tokio::time::timeout`, but whose item
-/// stream is unbounded by default).
+/// and can extend enforcement to streaming response bodies (whose request
+/// receipt and initial setup are already bounded by the server timeout, but
+/// whose item stream is unbounded by default).
 ///
 /// Construct via [`DeadlinePolicy::new`] and the `with_*` builders; the
 /// field set is `#[non_exhaustive]` so struct-literal construction is not

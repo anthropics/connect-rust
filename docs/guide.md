@@ -1010,7 +1010,8 @@ Why each knob:
   stays busy. Set it to your longest acceptable handler runtime.
 - **`with_default_timeout`** matters because the timeout header is
   optional. A request that omits it has no bound at all unless you set
-  one. Set it to your SLA.
+  one. Set it to your SLA. For unary and server-streaming RPCs, the
+  budget includes receiving the request body as well as handler execution.
 - **`with_min`** protects against a misbehaving or adversarial client
   cancelling the handler before it can do anything (e.g. mid-write on a
   streaming response). A few milliseconds is usually enough.
