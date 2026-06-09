@@ -66,6 +66,24 @@ toolchain and buffa ≥ 0.7.0.**
   `grpc.reflection.v1.ServerReflection` (e.g. for `grpcurl`). The inverse
   of `Config::descriptor_set`, which reads a precompiled set; build
   scripts no longer need a second `protoc --descriptor_set_out` pass.
+- **New `connectrpc-reflection` crate** ([#129]) — gRPC server reflection,
+  wire-compatible with `grpc.reflection.v1.ServerReflection` and its
+  `v1alpha` predecessor, so `grpcurl`, `buf curl`, Postman, and `grpcui`
+  work against connectrpc servers over gRPC, gRPC-Web, and Connect alike.
+  Build a `Reflector` from `emit_descriptor_set` output (responses carry
+  the compiler's original per-file descriptor bytes) or adopt an existing
+  `buffa_descriptor::DescriptorPool` (e.g. the `descriptor_pool()`
+  accessor emitted by reflection-enabled buffa codegen); `install(router,
+  reflector)` mounts both protocol versions. `Reflector::with_services`
+  curates the advertised service list, mirroring Go `grpcreflect`'s
+  `Namer`. The service is self-describing: queries about
+  `grpc.reflection.*` fall back to the crate's own descriptors and
+  `ListServices` advertises the reflection services, matching grpc-go —
+  no setup needed for schema-free clients like `buf curl`. The
+  multiservice example mounts it with both sources selectable via
+  `REFLECTION_SOURCE=fds|pool`;
+  `examples/multiservice/reflection-demo.sh` walks through discovery
+  and schema-free calls with `buf curl`.
 
 ### Fixed
 
@@ -118,6 +136,7 @@ toolchain and buffa ≥ 0.7.0.**
   Client- and bidi-streaming RPCs are unchanged — their bodies are
   consumed inside the handler, already within the handler deadline.
 
+[#129]: https://github.com/anthropics/connect-rust/issues/129
 [#136]: https://github.com/anthropics/connect-rust/issues/136
 [#140]: https://github.com/anthropics/connect-rust/issues/140
 [#141]: https://github.com/anthropics/connect-rust/pull/141

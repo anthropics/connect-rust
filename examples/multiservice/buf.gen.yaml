@@ -2,7 +2,16 @@ version: v2
 plugins:
   - local: ../../../buffa/target/release/protoc-gen-buffa
     out: src/generated/buffa
-    opt: [views=true, json=true]
+    # `reflect_mode=bridge` makes each generated package embed its
+    # descriptors and expose `descriptor_pool()`, which the server can
+    # hand to `connectrpc_reflection::Reflector::from_descriptor_pool`
+    # (the REFLECTION_SOURCE=pool mode) instead of a separate
+    # FileDescriptorSet file. `strategy: all` is required with it: under
+    # buf's default per-directory strategy each plugin invocation sees
+    # only one package, so the embedded pools would not cover the other
+    # packages' services.
+    strategy: all
+    opt: [views=true, json=true, reflect_mode=bridge]
   - local: ../../../buffa/target/release/protoc-gen-buffa-packaging
     out: src/generated/buffa
     strategy: all

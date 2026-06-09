@@ -1,5 +1,5 @@
 [workspace]
-members = ["connectrpc", "connectrpc-codegen", "connectrpc-build", "connectrpc-health", "conformance", "examples/eliza", "examples/middleware", "examples/mtls-identity", "examples/multiservice", "examples/streaming-tour", "examples/wasm-client", "tests/streaming", "benches/rpc", "benches/rpc-tonic"]
+members = ["connectrpc", "connectrpc-codegen", "connectrpc-build", "connectrpc-health", "connectrpc-reflection", "conformance", "examples/eliza", "examples/middleware", "examples/mtls-identity", "examples/multiservice", "examples/streaming-tour", "examples/wasm-client", "tests/streaming", "benches/rpc", "benches/rpc-tonic"]
 resolver = "2"
 
 [workspace.package]
@@ -39,6 +39,8 @@ async-trait = "0.1"
 buffa = { version = "0.7", features = ["json"] }
 buffa-types = { version = "0.7", features = ["json"] }
 buffa-codegen = { version = "0.7" }
+# `reflect` is needed for `DescriptorPool`, which backs connectrpc-reflection.
+buffa-descriptor = { version = "0.7", features = ["reflect"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

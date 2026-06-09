@@ -1,0 +1,42 @@
+[package]
+name = "connectrpc-reflection"
+version = "0.6.1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "../README.md"
+description = "gRPC server reflection service for connectrpc (wire-compatible with grpc.reflection.v1 and v1alpha)"
+keywords = ["connectrpc", "grpc", "reflection", "rpc"]
+categories = ["network-programming", "web-programming::http-server"]
+
+[features]
+default = ["client"]
+# Pulls in `connectrpc/client` and exposes the generated
+# `ServerReflectionClient` re-export for callers that want to query a
+# reflection server (integration tests, CLI tooling, dev binaries).
+# Server-only deployments opt out with `default-features = false` to
+# drop the client transport stack from the dependency graph.
+client = ["connectrpc/client"]
+
+[dependencies]
+connectrpc = { path = "../connectrpc", version = "0.6", features = ["server"] }
+
+# Protobuf + serde (pulled in by the generated module paths)
+buffa = { workspace = true }
+buffa-descriptor = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+http-body = { workspace = true }
+
+# Async
+futures = { workspace = true }
+
+[dev-dependencies]
+connectrpc = { path = "../connectrpc", features = ["axum", "client", "server"] }
+tokio = { workspace = true, features = ["full"] }
+axum = { workspace = true, features = ["tokio", "http1"] }
+
+[lints]
+workspace = true

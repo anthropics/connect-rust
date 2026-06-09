@@ -128,6 +128,15 @@ tasks:
     cmds:
       - buf generate
 
+  connectrpc-reflection:generate:
+    desc: Regenerate connectrpc-reflection Rust code from the BSR grpc.reflection protos
+    dir: "{{.ROOT_DIR}}/connectrpc-reflection"
+    cmds:
+      - BUF_TOKEN="" buf generate
+      # The crate's own descriptor set, exposed as FILE_DESCRIPTOR_SET so
+      # servers can let the reflection service describe itself.
+      - BUF_TOKEN="" buf build buf.build/grpc/grpc --path grpc/reflection/v1/reflection.proto --path grpc/reflection/v1alpha/reflection.proto -o descriptor/reflection.fds.bin
+
   example:multiservice:server:
     desc: Run the multi-service server (greet, math, well-known types)
     cmds:
@@ -148,6 +157,16 @@ tasks:
     dir: "{{.ROOT_DIR}}/examples/multiservice"
     cmds:
       - buf generate
+      # The descriptor set feeding the server's reflection mount. Lives
+      # outside src/generated/ so the CI stale-check (which pins a buf
+      # version) is not sensitive to byte-level drift between buf releases.
+      - buf build -o descriptor/services.fds.bin
+
+  example:multiservice:reflection-demo:
+    desc: Run the multiservice server and exercise reflection with buf curl
+    dir: "{{.ROOT_DIR}}/examples/multiservice"
+    cmds:
+      - ./reflection-demo.sh
 
   # ===========================================================================
   # Protocol specifications (fetched locally, gitignored)
@@ -381,6 +400,7 @@ tasks:
       - task: conformance:generate
       - task: bench:generate
       - task: connectrpc-health:generate
+      - task: connectrpc-reflection:generate
 
 
   # ===========================================================================

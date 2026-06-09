@@ -1,0 +1,32 @@
+# Code generation configuration for connectrpc-reflection.
+#
+# The grpc.reflection.v1 / v1alpha protos are pulled from the public Buf
+# Schema Registry (the canonical gRPC module) rather than vendored — the
+# generated code and descriptor/reflection.fds.bin are checked in, so the
+# registry is only needed at regeneration time:
+#   task connectrpc-reflection:generate
+version: v2
+inputs:
+  - module: buf.build/grpc/grpc
+    paths:
+      - grpc/reflection/v1
+      - grpc/reflection/v1alpha
+plugins:
+  - local: ../../buffa/target/release/protoc-gen-buffa
+    out: src/generated/buffa
+    opt: [views=true, json=true]
+  - local: ../../buffa/target/release/protoc-gen-buffa-packaging
+    out: src/generated/buffa
+    strategy: all
+  - local: ../target/release/protoc-gen-connect-rust
+    out: src/generated/connect
+    # `gate_client_feature` puts the emitted `ServerReflectionClient<T>`
+    # items behind `#[cfg(feature = "client")]` so a server-only build of
+    # `connectrpc-reflection` can drop `connectrpc/client` from the
+    # dependency graph. The feature is wired up in this crate's
+    # Cargo.toml under `[features] client = ["connectrpc/client"]`.
+    opt: [buffa_module=crate::proto, gate_client_feature]
+  - local: ../../buffa/target/release/protoc-gen-buffa-packaging
+    out: src/generated/connect
+    strategy: all
+    opt: [filter=services]

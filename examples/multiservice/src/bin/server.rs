@@ -8,6 +8,11 @@
 //! Test with:
 //!   - `curl http://localhost:8080/health`
 //!   - `cargo run --bin multiservice-client`
+//!
+//! The server also mounts gRPC server reflection (`grpc.reflection.v1` +
+//! `v1alpha`), so schema-aware tools can discover and call the services
+//! with no local proto files — see `./reflection-demo.sh` for a `buf curl`
+//! walkthrough.
 
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -20,7 +25,43 @@ use buffa_types::google::protobuf::{Duration, Struct, Timestamp, Value, value};
 use connectrpc::ConnectError;
 use connectrpc::Router as ConnectRouter;
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
+use connectrpc_reflection::Reflector;
 use multiservice_example::*;
+
+/// The `FileDescriptorSet` for every proto this server compiles, with the
+/// full import closure — the input to gRPC server reflection.
+///
+/// This example uses checked-in generated code, so the set is produced by
+/// `buf build` during `task example:multiservice:generate` and checked in
+/// alongside it. A `build.rs`-based project gets the same bytes from
+/// `connectrpc_build::Config::emit_descriptor_set("services.fds.bin")` and
+/// would point this `include_bytes!` at `concat!(env!("OUT_DIR"), ...)`.
+const DESCRIPTOR_SET: &[u8] = include_bytes!("../../descriptor/services.fds.bin");
+
+/// Build the reflection index from one of the two supported descriptor
+/// sources, selected by `REFLECTION_SOURCE`:
+///
+/// - `fds` (default) — the checked-in `FileDescriptorSet` bytes above.
+///   Responses carry those exact per-file bytes.
+/// - `pool` — the `descriptor_pool()` that buffa codegen emits with
+///   `reflect_mode=bridge` (see `buf.gen.yaml`). The pool covers the whole
+///   codegen run, so any one package's accessor works; no descriptor file
+///   is needed at all.
+fn build_reflector() -> Reflector {
+    match std::env::var("REFLECTION_SOURCE").as_deref() {
+        Ok("pool") => {
+            tracing::info!("reflection source: generated descriptor_pool()");
+            let pool = proto::anthropic::connectrpc::greet::v1::descriptor_pool();
+            Reflector::from_descriptor_pool(Arc::clone(pool))
+                .expect("generated descriptor pool is valid")
+        }
+        _ => {
+            tracing::info!("reflection source: checked-in FileDescriptorSet");
+            Reflector::from_descriptor_set_bytes(DESCRIPTOR_SET)
+                .expect("checked-in descriptor set is valid")
+        }
+    }
+}
 
 /// Implementation of the GreetService trait.
 struct MyGreetService;
@@ -241,6 +282,12 @@ async fn main() {
     let connect_router = greet_service.register(ConnectRouter::new());
     let connect_router = math_service.register(connect_router);
     let connect_router = well_known_types_service.register(connect_router);
+
+    // Mount gRPC server reflection (v1 + v1alpha) so `grpcurl`, `buf curl`,
+    // Postman, and `grpcui` can discover and call the services above with
+    // no local proto files. The reflector is self-describing, so this is
+    // all the setup there is.
+    let connect_router = connectrpc_reflection::install(connect_router, build_reflector());
 
     tracing::info!("Registered RPC methods:");
     for method in connect_router.methods() {

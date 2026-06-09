@@ -16,9 +16,14 @@ path = "src/bin/client.rs"
 
 [dependencies]
 connectrpc = { path = "../../connectrpc", features = ["server", "axum", "client"] }
+# Server reflection (grpc.reflection.v1 + v1alpha); server side only, so
+# the generated reflection client is dropped via default-features = false.
+connectrpc-reflection = { path = "../../connectrpc-reflection", default-features = false }
 
-# Protobuf
+# Protobuf. buffa-descriptor backs the generated `descriptor_pool()`
+# accessors (reflect_mode=bridge in buf.gen.yaml).
 buffa = { workspace = true }
+buffa-descriptor = { workspace = true }
 buffa-types = { workspace = true }
 
 # Serialization (for generated message types)
