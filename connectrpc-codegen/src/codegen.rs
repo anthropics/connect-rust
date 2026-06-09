@@ -785,7 +785,7 @@ fn generate_connect_services(
     tokens.extend(generate_encodable_view_impls(file, resolver, batch)?);
 
     for service in &file.service {
-        tokens.extend(generate_service(file, service, resolver)?);
+        tokens.extend(generate_service(file, service, resolver, batch)?);
     }
 
     Ok(tokens)
@@ -1056,6 +1056,7 @@ fn generate_service(
     file: &FileDescriptorProto,
     service: &ServiceDescriptorProto,
     resolver: &TypeResolver<'_>,
+    batch: &BatchState,
 ) -> Result<TokenStream> {
     let package = file.package.as_deref().unwrap_or("");
     let service_name = service.name.as_deref().unwrap_or("");
@@ -2271,7 +2272,11 @@ mod tests {
         let resolver = TypeResolver::new(files, &target_name, &config, require_extern);
         let file = &files[target_idx];
         let service = &file.service[0];
-        Ok(generate_service(file, service, &resolver)?.to_string())
+        let batch = BatchState {
+            colliding_aliases: collect_alias_collisions(files, &target_name),
+            ..BatchState::default()
+        };
+        Ok(generate_service(file, service, &resolver, &batch)?.to_string())
     }
 
     /// Assert that `formatted` (a Rust source string) contains no `use`
