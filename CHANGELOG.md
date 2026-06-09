@@ -10,6 +10,16 @@ increment the patch version.
 
 ## [Unreleased]
 
+### Added
+
+- **`connectrpc_build::Config::emit_descriptor_set(name)`** ([#141]) —
+  also write the input `FileDescriptorSet` (full transitive import
+  closure, regardless of descriptor source) to `<out_dir>/<name>` as
+  wire-format bytes, ready to `include_bytes!` and serve via
+  `grpc.reflection.v1.ServerReflection` (e.g. for `grpcurl`). The inverse
+  of `Config::descriptor_set`, which reads a precompiled set; build
+  scripts no longer need a second `protoc --descriptor_set_out` pass.
+
 ### Fixed
 
 - **The gRPC and gRPC-Web unary response parsers enforce the
@@ -63,6 +73,7 @@ increment the patch version.
 
 [#136]: https://github.com/anthropics/connect-rust/issues/136
 [#140]: https://github.com/anthropics/connect-rust/issues/140
+[#141]: https://github.com/anthropics/connect-rust/pull/141
 [#147]: https://github.com/anthropics/connect-rust/pull/147
 [#150]: https://github.com/anthropics/connect-rust/pull/150
 
