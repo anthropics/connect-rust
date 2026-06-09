@@ -66,7 +66,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned (not @stable) so new-stable clippy lints don't break CI
+      # unannounced and local runs agree with CI. Bump deliberately.
+      - uses: dtolnay/rust-toolchain@1.95
         with:
           components: clippy
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1 (sha-pinned)
@@ -82,10 +84,15 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      # Dated nightly (not @nightly): rustfmt output drifts across releases
+      # even with default settings, so a moving nightly can start rejecting
+      # checked-in code overnight. Nightly is required at all because
+      # format_generated_files=false in rustfmt.toml is a nightly-only
+      # option. Keep in sync with the version named in CONTRIBUTING.md.
+      - uses: dtolnay/rust-toolchain@nightly-2026-02-27
         with:
           components: rustfmt
-      - run: cargo +nightly fmt --all -- --check
+      - run: cargo +nightly-2026-02-27 fmt --all -- --check
 
   check-generated-code:
     name: Check generated code
