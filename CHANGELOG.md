@@ -31,8 +31,19 @@ increment the patch version.
   request was invalid. The client-side remap deliberately diverges from
   connect-go, which reports `invalid_argument` in both directions;
   `data_loss` is more descriptive of what actually happened.
+- **Client-streaming and bidi handlers see request body failures as
+  stream errors** ([#150]). A request body that fails mid-upload
+  (truncated or broken transport) now yields `Err(internal)` from the
+  handler's inbound stream instead of ending it cleanly, so partial input
+  is no longer mistaken for a complete client stream. This refines the
+  [#130] behavior, which logged transport errors at debug level in all
+  cases; errors after END_STREAM (or after the handler stopped reading)
+  remain diagnostic-only. Handlers that `?`-propagate stream items now
+  fail the RPC on truncated uploads — the right default for aggregation;
+  handlers that want to tolerate truncation must match on the error.
 
 [#147]: https://github.com/anthropics/connect-rust/pull/147
+[#150]: https://github.com/anthropics/connect-rust/pull/150
 
 ## [0.6.1] - 2026-05-27
 

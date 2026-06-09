@@ -2636,6 +2636,13 @@ impl BodyReader {
     /// Once the reader is only draining trailing bytes (after END_STREAM, a
     /// decode error, or the handler dropping the request stream), the error is
     /// diagnostic-only — the handler has already seen the terminal outcome.
+    ///
+    /// The code is `internal` deliberately, for parity with the unary
+    /// body-read path (`collect_body_limited`): the same transport failure
+    /// reports the same code regardless of RPC shape. connect-go reports
+    /// `unknown` here; if the attribution is ever revisited (a broken
+    /// inbound transport is arguably `unavailable`), change both paths
+    /// together.
     async fn on_body_error(&mut self, err: impl std::fmt::Display + Send) {
         tracing::debug!(error = %err, "request body error, stopping reader");
 
