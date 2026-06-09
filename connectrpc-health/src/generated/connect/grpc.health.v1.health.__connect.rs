@@ -316,7 +316,7 @@ impl<T: Health> ::connectrpc::Dispatcher for HealthServer<T> {
             "Check" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::grpc::health::v1::HealthCheckRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::grpc::health::v1::__buffa::view::HealthCheckRequestView<
@@ -352,7 +352,7 @@ impl<T: Health> ::connectrpc::Dispatcher for HealthServer<T> {
             "Watch" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::grpc::health::v1::HealthCheckRequest,
                     >(request, format)?;
                     let req: crate::proto::grpc::health::v1::__buffa::view::HealthCheckRequestView<

@@ -242,7 +242,7 @@ impl<T: MathService> ::connectrpc::Dispatcher for MathServiceServer<T> {
             "Add" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::anthropic::connectrpc::math::v1::AddRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::anthropic::connectrpc::math::v1::__buffa::view::AddRequestView<

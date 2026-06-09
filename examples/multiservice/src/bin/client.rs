@@ -178,11 +178,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let response = wkt_client
         .heartbeat(buffa_types::google::protobuf::Empty::default())
         .await?;
-    tracing::info!(
-        "Heartbeat: server time {}s {}ns",
-        response.view().seconds,
-        response.view().nanos
-    );
+    let now = response.view();
+    tracing::info!("Heartbeat: server time {}s {}ns", now.seconds, now.nanos);
 
     tracing::info!("All tests completed successfully!");
     Ok(())

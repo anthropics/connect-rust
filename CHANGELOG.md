@@ -24,7 +24,8 @@ toolchain and buffa ≥ 0.7.0.**
   ([#143]). The request is borrowed from the dispatcher-owned body for the
   duration of the call: it Derefs to the request view for zero-copy field
   access, and offers `to_owned_message()` (zero-copy from the retained body
-  bytes), `bytes()`, and `view()`. The borrow may be held across `.await`
+  bytes), `to_owned_view()` (a `'static` view for pass-through responses),
+  `bytes()`, and `view()`. The borrow may be held across `.await`
   points; the response — and anything moved into `tokio::spawn` — cannot
   borrow from it (enforced by the compiler). Existing handler impls must
   update their signatures; bodies that already started with
@@ -34,9 +35,9 @@ toolchain and buffa ≥ 0.7.0.**
   to the buffa-generated `FooOwnedView` wrapper for per-field accessor
   methods (`item.name()`), and re-encodes from the retained wire bytes when
   yielded back (`StreamMessage<M>: Encodable<M>`).
-- **`UnaryResponse::raw_bytes()` is renamed to `bytes()`**, and
-  `UnaryResponse::view()` returns the reborrowed view, so
-  `resp.view().field` works directly on the client ([#143]).
+- **`UnaryResponse::view()` returns the reborrowed view** rather than a
+  reference to the `OwnedView`, so `resp.view().field` works directly on
+  the client ([#143]).
 - **`extern_path` targets must be buffa ≥ 0.7.0 generated code with views
   enabled** ([#143]). Request types resolved through `extern_path`
   (e.g. well-known types from `buffa-types`) use the same

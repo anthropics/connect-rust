@@ -401,7 +401,8 @@ same `OwnedFooView` name — e.g. a local `MyMessage` plus an imported
 the inlined `OwnedView<…View<'static>>` form for those types.) `connectrpc::MaybeBorrowed` covers the conditional case:
 
 ```rust
-use connectrpc::{ConnectError, MaybeBorrowed, RequestContext, Response, ServiceRequest, ServiceResult};
+use connectrpc::{MaybeBorrowed, RequestContext, Response, ServiceRequest, ServiceResult};
+// `Record` and `OwnedRecordView` come from your generated module.
 
 async fn redact(
     &self,
@@ -412,9 +413,7 @@ async fn redact(
         // Pass-through. The response must be 'static, so rebuild an
         // OwnedView from the retained body bytes - zero-copy (Bytes
         // refcount + decode walk), then re-encode via ViewEncode.
-        let view = OwnedRecordView::decode(req.bytes().clone())
-            .map_err(|e| ConnectError::internal(e.to_string()))?;
-        return Response::ok(MaybeBorrowed::Borrowed(view));
+        return Response::ok(MaybeBorrowed::Borrowed(req.to_owned_view()));
     }
     let mut owned = req.to_owned_message();
     owned.email.clear();

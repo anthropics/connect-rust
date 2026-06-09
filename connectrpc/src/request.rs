@@ -12,6 +12,7 @@
 //! receives after decoding.
 
 use buffa::view::MessageView;
+use buffa::view::OwnedView;
 use bytes::Bytes;
 
 /// Re-export of buffa's view-family trait.
@@ -88,6 +89,31 @@ impl<'a, Req: HasMessageView> ServiceRequest<'a, Req> {
     pub fn bytes(&self) -> &'a Bytes {
         self.body
     }
+
+    /// Rebuild a `'static` owned view of the request from the retained body.
+    ///
+    /// Zero-copy despite the `to_owned_` name: a `Bytes` refcount bump plus
+    /// a decode walk, with no per-field allocation. Use this to return the
+    /// request as a response body (e.g.
+    /// `MaybeBorrowed::Borrowed(req.to_owned_view())` in a pass-through
+    /// handler) — the response must be `'static`, so the borrowed view
+    /// itself cannot be returned.
+    ///
+    /// View response bodies encode for the proto codec only; JSON clients
+    /// receive `Unimplemented`. See
+    /// [`MaybeBorrowed`](crate::MaybeBorrowed)'s codec note.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the body is not a valid encoding of `Req`. This cannot
+    /// happen for requests built by the generated dispatch glue, which
+    /// decodes the view from exactly these bytes before constructing the
+    /// `ServiceRequest`.
+    #[must_use]
+    pub fn to_owned_view(&self) -> OwnedView<Req::View<'static>> {
+        OwnedView::decode(self.body.clone())
+            .expect("ServiceRequest body was already view-decoded by the dispatch glue")
+    }
 }
 
 // Manual `Clone`/`Copy`: a derive would bound `Req` itself rather than the
@@ -160,6 +186,12 @@ mod tests {
         let owned: StringValue = req.to_owned_message();
         assert_eq!(owned.value, "keep me");
         assert_eq!(req.bytes().as_ref(), body.as_ref());
+
+        // to_owned_view rebuilds a 'static view backed by the same buffer.
+        let owned_view = req.to_owned_view();
+        assert_eq!(owned_view.reborrow().value, "keep me");
+        let range = body.as_ptr_range();
+        assert!(range.contains(&owned_view.reborrow().value.as_ptr()));
 
         // Copy semantics: passing by value doesn't consume the original.
         let copy = req;

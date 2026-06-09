@@ -1117,7 +1117,7 @@ where
 /// reborrowing (every buffa-generated view does).
 impl<V> UnaryResponse<OwnedView<V>>
 where
-    V: MessageView<'static> + ViewReborrow,
+    V: ViewReborrow,
 {
     /// Borrow the response message view, tied to `&self`.
     ///

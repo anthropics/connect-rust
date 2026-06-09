@@ -237,7 +237,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
             "Ingest" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::bench::noutf8::v1::LogRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::bench::noutf8::v1::__buffa::view::LogRequestView<

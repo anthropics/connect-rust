@@ -539,7 +539,7 @@ for WellKnownTypesServiceServer<T> {
             "CreateEvent" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::anthropic::connectrpc::wkt::v1::CreateEventRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CreateEventRequestView<
@@ -560,7 +560,7 @@ for WellKnownTypesServiceServer<T> {
             "CalculateDuration" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::anthropic::connectrpc::wkt::v1::CalculateDurationRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::CalculateDurationRequestView<
@@ -581,7 +581,7 @@ for WellKnownTypesServiceServer<T> {
             "ProcessMetadata" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::anthropic::connectrpc::wkt::v1::ProcessMetadataRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::anthropic::connectrpc::wkt::v1::__buffa::view::ProcessMetadataRequestView<
@@ -602,7 +602,7 @@ for WellKnownTypesServiceServer<T> {
             "Heartbeat" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         ::buffa_types::google::protobuf::Empty,
                     >(request.encoded()?, format)?;
                     let req: ::buffa_types::google::protobuf::__buffa::view::EmptyView<

@@ -836,15 +836,25 @@ fn router_stream_items_tokens(
 
 /// Doc lines describing the inbound stream item type on a client-streaming /
 /// bidi trait method.
-fn stream_items_doc() -> TokenStream {
-    quote! {
+///
+/// The yield-back sentence is only true when the method's input and output
+/// types coincide (`StreamMessage<M>: Encodable<M>`), so it is emitted only
+/// for echo-shaped methods.
+fn stream_items_doc(method: &MethodDescriptorProto) -> TokenStream {
+    let mut doc = quote! {
         #[doc = ""]
         #[doc = " Each `requests` item is a [`StreamMessage`](::connectrpc::StreamMessage):"]
         #[doc = " it owns its buffer, is `Send + 'static`, and exposes zero-copy"]
         #[doc = " accessor methods (`item.name()`), `.view()`, and"]
-        #[doc = " `.to_owned_message()`. Items can be yielded back unchanged"]
-        #[doc = " (`StreamMessage<M>` implements `Encodable<M>`)."]
+        #[doc = " `.to_owned_message()`."]
+    };
+    if method.input_type == method.output_type {
+        doc.extend(quote! {
+            #[doc = " Items can be yielded back unchanged"]
+            #[doc = " (`StreamMessage<M>` implements `Encodable<M>`)."]
+        });
     }
+    doc
 }
 
 /// Inbound stream item type for a client-streaming / bidi RPC:
@@ -1654,7 +1664,7 @@ fn generate_service_server(
                     Box::pin(async move {
                         // The normalized body is owned by this future; the handler
                         // borrows from it until it returns the response stream.
-                        let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<#input_owned>(request, format)?;
+                        let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<#input_owned>(request, format)?;
                         let req: #input_view<'_> = ::connectrpc::dispatcher::codegen::decode_borrowed_request_view(&body)?;
                         #call_handler
                         Ok(resp.map_body(|s| ::connectrpc::dispatcher::codegen::encode_response_stream::<#output_type, _, _>(s, format)))
@@ -1679,7 +1689,7 @@ fn generate_service_server(
                         // a cheap `Bytes` clone for the common no-replacement case.
                         // The normalized body is owned by this future; the handler
                         // borrows from it for the duration of the call.
-                        let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<#input_owned>(request.encoded()?, format)?;
+                        let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<#input_owned>(request.encoded()?, format)?;
                         let req: #input_view<'_> = ::connectrpc::dispatcher::codegen::decode_borrowed_request_view(&body)?;
                         #call_handler
                     })
@@ -1875,10 +1885,11 @@ fn generate_trait_method(
     } else if client_streaming && !server_streaming {
         // Client streaming method. Inbound items are `StreamMessage<Req>` —
         // each received message owns its decoded buffer (zero-copy reads via
-        // `.view()`, conversion via `.to_owned_message()`, and items can be
-        // forwarded as-is since `StreamMessage<M>: Encodable<M>`).
+        // `.view()`, conversion via `.to_owned_message()`, and — for
+        // echo-shaped methods — items can be forwarded as-is since
+        // `StreamMessage<M>: Encodable<M>`).
         let stream_item_arg = stream_item_arg(resolver, method, package)?;
-        let items_doc = stream_items_doc();
+        let items_doc = stream_items_doc(method);
         Ok(quote! {
             #method_doc_tokens
             #borrow_doc
@@ -1894,7 +1905,7 @@ fn generate_trait_method(
         // `use<Self>` capture clause as server streaming above; inbound items
         // are `StreamMessage<Req>` as for client streaming.
         let stream_item_arg = stream_item_arg(resolver, method, package)?;
-        let items_doc = stream_items_doc();
+        let items_doc = stream_items_doc(method);
         Ok(quote! {
             #method_doc_tokens
             #items_doc
@@ -2359,7 +2370,9 @@ mod tests {
             "missing OwnedPingRespView alias: {code}"
         );
         // Unary trait methods take a borrowed ServiceRequest; the alias is
-        // still emitted (used by streaming shapes and user code).
+        // still emitted (the natural spelling for pass-through response
+        // bodies, e.g. `MaybeBorrowed<Ping, OwnedPingView>` holding a
+        // `req.to_owned_view()`).
         assert!(
             code.contains("request : :: connectrpc :: ServiceRequest < '_"),
             "unary trait method should take request: ServiceRequest<'_, PingReq>: {code}"

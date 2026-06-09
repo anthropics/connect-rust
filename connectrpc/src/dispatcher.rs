@@ -334,7 +334,6 @@ pub mod codegen {
     use std::pin::Pin;
 
     use buffa::Message;
-    use buffa::view::MessageView;
     use buffa::view::OwnedView;
     use bytes::Bytes;
     use futures::Stream;
@@ -348,8 +347,7 @@ pub mod codegen {
     // Re-exports that generated code needs direct access to.
     pub use crate::handler::BoxFuture;
     pub use crate::handler::decode_borrowed_request_view;
-    pub use crate::handler::decode_request_view;
-    pub use crate::handler::unary_request_proto_bytes;
+    pub use crate::handler::request_proto_bytes;
     pub use crate::response::EncodedResponse;
 
     pub use super::MethodDescriptor;
@@ -397,24 +395,6 @@ pub mod codegen {
         )
     }
 
-    /// Map a stream of raw request bytes through `decode_request_view`.
-    ///
-    /// Used by generated `call_client_streaming` and `call_bidi_streaming`
-    /// arms to convert the dispatcher's `Stream<Item = Result<Bytes, _>>`
-    /// into the typed view stream the handler expects.
-    pub fn decode_view_request_stream<ReqView>(
-        requests: BoxStream<Result<Bytes, ConnectError>>,
-        format: CodecFormat,
-    ) -> BoxStream<Result<OwnedView<ReqView>, ConnectError>>
-    where
-        ReqView: MessageView<'static> + Send + Sync + 'static,
-        ReqView::Owned: Message + DeserializeOwned,
-    {
-        Box::pin(
-            requests.map(move |r| r.and_then(|raw| decode_request_view::<ReqView>(raw, format))),
-        )
-    }
-
     /// Convert a stream of decoded `OwnedView` items into
     /// [`StreamMessage`](crate::StreamMessage)s.
     ///
@@ -434,8 +414,8 @@ pub mod codegen {
     /// [`StreamMessage`](crate::StreamMessage) items.
     ///
     /// Used by generated `call_client_streaming` and `call_bidi_streaming`
-    /// arms; the per-item decode is shared with
-    /// [`decode_view_request_stream`].
+    /// arms; the per-item decode is the same normalize-then-decode used on
+    /// the unary paths.
     pub fn decode_message_request_stream<M>(
         requests: BoxStream<Result<Bytes, ConnectError>>,
         format: CodecFormat,
@@ -444,9 +424,10 @@ pub mod codegen {
         M: crate::HasMessageView + DeserializeOwned + 'static,
         M::View<'static>: 'static,
     {
-        into_stream_messages::<M>(decode_view_request_stream::<M::View<'static>>(
-            requests, format,
-        ))
+        Box::pin(requests.map(move |r| {
+            r.and_then(|raw| crate::handler::decode_request_view::<M::View<'static>>(raw, format))
+                .map(crate::StreamMessage::from_owned_view)
+        }))
     }
 }
 

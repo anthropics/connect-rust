@@ -196,8 +196,7 @@ pub trait ElizaService: Send + Sync + 'static {
     /// Each `requests` item is a [`StreamMessage`](::connectrpc::StreamMessage):
     /// it owns its buffer, is `Send + 'static`, and exposes zero-copy
     /// accessor methods (`item.name()`), `.view()`, and
-    /// `.to_owned_message()`. Items can be yielded back unchanged
-    /// (`StreamMessage<M>` implements `Encodable<M>`).
+    /// `.to_owned_message()`.
     fn converse(
         &self,
         ctx: ::connectrpc::RequestContext,
@@ -427,7 +426,7 @@ impl<T: ElizaService> ::connectrpc::Dispatcher for ElizaServiceServer<T> {
             "Say" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::connectrpc::eliza::v1::SayRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::connectrpc::eliza::v1::__buffa::view::SayRequestView<
@@ -463,7 +462,7 @@ impl<T: ElizaService> ::connectrpc::Dispatcher for ElizaServiceServer<T> {
             "Introduce" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::connectrpc::eliza::v1::IntroduceRequest,
                     >(request, format)?;
                     let req: crate::proto::connectrpc::eliza::v1::__buffa::view::IntroduceRequestView<

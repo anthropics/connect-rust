@@ -259,8 +259,7 @@ pub trait BenchService: Send + Sync + 'static {
     /// Each `requests` item is a [`StreamMessage`](::connectrpc::StreamMessage):
     /// it owns its buffer, is `Send + 'static`, and exposes zero-copy
     /// accessor methods (`item.name()`), `.view()`, and
-    /// `.to_owned_message()`. Items can be yielded back unchanged
-    /// (`StreamMessage<M>` implements `Encodable<M>`).
+    /// `.to_owned_message()`.
     fn client_stream<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
@@ -279,8 +278,7 @@ pub trait BenchService: Send + Sync + 'static {
     /// Each `requests` item is a [`StreamMessage`](::connectrpc::StreamMessage):
     /// it owns its buffer, is `Send + 'static`, and exposes zero-copy
     /// accessor methods (`item.name()`), `.view()`, and
-    /// `.to_owned_message()`. Items can be yielded back unchanged
-    /// (`StreamMessage<M>` implements `Encodable<M>`).
+    /// `.to_owned_message()`.
     fn bidi_stream(
         &self,
         ctx: ::connectrpc::RequestContext,
@@ -613,7 +611,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
             "Unary" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::bench::v1::BenchRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::bench::v1::__buffa::view::BenchRequestView<
@@ -632,7 +630,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
             "LogUnary" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::bench::v1::LogRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::bench::v1::__buffa::view::LogRequestView<
@@ -651,7 +649,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
             "LogUnaryOwned" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::bench::v1::LogRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::bench::v1::__buffa::view::LogRequestView<
@@ -685,7 +683,7 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
             "ServerStream" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::bench::v1::BenchRequest,
                     >(request, format)?;
                     let req: crate::proto::bench::v1::__buffa::view::BenchRequestView<
@@ -1290,7 +1288,7 @@ impl<T: EchoService> ::connectrpc::Dispatcher for EchoServiceServer<T> {
             "Echo" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::bench::v1::EchoRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::bench::v1::__buffa::view::EchoRequestView<
@@ -1680,7 +1678,7 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
             "Ingest" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::bench::v1::LogRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::bench::v1::__buffa::view::LogRequestView<

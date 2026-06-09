@@ -237,7 +237,7 @@ impl<T: FortuneService> ::connectrpc::Dispatcher for FortuneServiceServer<T> {
             "GetFortunes" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::fortune::v1::GetFortunesRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::fortune::v1::__buffa::view::GetFortunesRequestView<

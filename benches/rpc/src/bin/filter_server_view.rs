@@ -4,8 +4,7 @@
 //! Otherwise convert to owned, scrub, and return owned.
 
 use connectrpc::{
-    ConnectError, ConnectRpcService, MaybeBorrowed, RequestContext, Response, ServiceRequest,
-    ServiceResult,
+    ConnectRpcService, MaybeBorrowed, RequestContext, Response, ServiceRequest, ServiceResult,
 };
 
 use rpc_bench::filter::*;
@@ -19,13 +18,9 @@ impl FilterService for Impl {
         request: ServiceRequest<'_, Record>,
     ) -> ServiceResult<MaybeBorrowed<Record, OwnedRecordView>> {
         if !has_sensitive(request.view()) {
-            // The response must be 'static, so the borrowed request view
-            // can't be returned directly. Rebuilding an OwnedView from the
-            // retained body bytes is zero-copy (Bytes refcount + decode walk)
-            // and keeps the ViewEncode response path under test.
-            let view = OwnedRecordView::decode(request.bytes().clone())
-                .map_err(|e| ConnectError::internal(format!("re-decode: {e}")))?;
-            return Response::ok(MaybeBorrowed::Borrowed(view));
+            // Pass-through: rebuild a 'static view from the retained body
+            // (zero-copy) and keep the ViewEncode response path under test.
+            return Response::ok(MaybeBorrowed::Borrowed(request.to_owned_view()));
         }
         let mut owned = request.to_owned_message();
         scrub(&mut owned);

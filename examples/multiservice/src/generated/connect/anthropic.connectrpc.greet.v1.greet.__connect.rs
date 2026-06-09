@@ -251,7 +251,7 @@ impl<T: GreetService> ::connectrpc::Dispatcher for GreetServiceServer<T> {
             "Greet" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::anthropic::connectrpc::greet::v1::GreetRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::anthropic::connectrpc::greet::v1::__buffa::view::GreetRequestView<

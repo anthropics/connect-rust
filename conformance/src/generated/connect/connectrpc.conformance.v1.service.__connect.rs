@@ -427,8 +427,7 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// Each `requests` item is a [`StreamMessage`](::connectrpc::StreamMessage):
     /// it owns its buffer, is `Send + 'static`, and exposes zero-copy
     /// accessor methods (`item.name()`), `.view()`, and
-    /// `.to_owned_message()`. Items can be yielded back unchanged
-    /// (`StreamMessage<M>` implements `Encodable<M>`).
+    /// `.to_owned_message()`.
     fn client_stream<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
@@ -484,8 +483,7 @@ pub trait ConformanceService: Send + Sync + 'static {
     /// Each `requests` item is a [`StreamMessage`](::connectrpc::StreamMessage):
     /// it owns its buffer, is `Send + 'static`, and exposes zero-copy
     /// accessor methods (`item.name()`), `.view()`, and
-    /// `.to_owned_message()`. Items can be yielded back unchanged
-    /// (`StreamMessage<M>` implements `Encodable<M>`).
+    /// `.to_owned_message()`.
     fn bidi_stream(
         &self,
         ctx: ::connectrpc::RequestContext,
@@ -838,7 +836,7 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
             "Unary" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::connectrpc::conformance::v1::UnaryRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::connectrpc::conformance::v1::__buffa::view::UnaryRequestView<
@@ -859,7 +857,7 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
             "Unimplemented" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::connectrpc::conformance::v1::UnimplementedRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::connectrpc::conformance::v1::__buffa::view::UnimplementedRequestView<
@@ -880,7 +878,7 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
             "IdempotentUnary" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::connectrpc::conformance::v1::IdempotentUnaryRequest,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::connectrpc::conformance::v1::__buffa::view::IdempotentUnaryRequestView<
@@ -917,7 +915,7 @@ impl<T: ConformanceService> ::connectrpc::Dispatcher for ConformanceServiceServe
             "ServerStream" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::connectrpc::conformance::v1::ServerStreamRequest,
                     >(request, format)?;
                     let req: crate::proto::connectrpc::conformance::v1::__buffa::view::ServerStreamRequestView<

@@ -233,7 +233,7 @@ impl<T: BloatEchoService> ::connectrpc::Dispatcher for BloatEchoServiceServer<T>
             "Echo" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::bench::v1::BloatEcho,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::bench::v1::__buffa::view::BloatEchoView<'_> = ::connectrpc::dispatcher::codegen::decode_borrowed_request_view(

@@ -236,7 +236,7 @@ impl<T: FilterService> ::connectrpc::Dispatcher for FilterServiceServer<T> {
             "Redact" => {
                 let svc = ::std::sync::Arc::clone(&self.inner);
                 Box::pin(async move {
-                    let body = ::connectrpc::dispatcher::codegen::unary_request_proto_bytes::<
+                    let body = ::connectrpc::dispatcher::codegen::request_proto_bytes::<
                         crate::proto::anthropic::connectrpc::filter::v1::Record,
                     >(request.encoded()?, format)?;
                     let req: crate::proto::anthropic::connectrpc::filter::v1::__buffa::view::RecordView<
