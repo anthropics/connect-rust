@@ -68,6 +68,14 @@ toolchain and buffa ≥ 0.7.0.**
   from [#133]), and a gRPC-Web response now completes as soon as a
   complete trailers frame is buffered instead of reading the body to EOF,
   so well-formed responses finish even if the server keeps writing.
+- **Connect streaming clients report an error when a response body ends
+  without the required END_STREAM envelope** ([#140]). `message()` now
+  returns `Err` with code `unavailable` (matching connect-go) instead of
+  a clean `Ok(None)`, so a stream cut off mid-response is no longer
+  indistinguishable from a complete one. Streams that previously appeared
+  to drain cleanly against a known-good server may now error — if you see
+  this, suspect an intermediary (proxy or load balancer) stripping the
+  trailing envelope.
 
 ### Changed
 
@@ -80,9 +88,33 @@ toolchain and buffa ≥ 0.7.0.**
   request was invalid. The client-side remap deliberately diverges from
   connect-go, which reports `invalid_argument` in both directions;
   `data_loss` is more descriptive of what actually happened.
+- **Client-streaming and bidi handlers see request body failures as
+  stream errors** ([#150]). A request body that fails mid-upload
+  (truncated or broken transport) now yields `Err(internal)` from the
+  handler's inbound stream instead of ending it cleanly, so partial input
+  is no longer mistaken for a complete client stream. This refines the
+  [#130] behavior, which logged transport errors at debug level in all
+  cases; errors after END_STREAM (or after the handler stopped reading)
+  remain diagnostic-only. Handlers that `?`-propagate stream items now
+  fail the RPC on truncated uploads — the right default for aggregation;
+  handlers that want to tolerate truncation must match on the error.
+- **Configured deadlines now bound request-body receipt for unary and
+  server-streaming RPCs** ([#136]). Previously the body was collected
+  before the timeout was applied, so `with_default_timeout` / `with_max`
+  bounded only handler execution and a slow-sending client could hold the
+  request open indefinitely. One absolute deadline now covers body
+  receipt, handler execution, and (with `enforce_on_streams`) the response
+  stream; the deadline visible through `RequestContext` matches what is
+  enforced. Services with timeouts sized only for handler CPU time may
+  need to raise them to accommodate large uploads from slow clients.
+  Client- and bidi-streaming RPCs are unchanged — their bodies are
+  consumed inside the handler, already within the handler deadline.
 
+[#136]: https://github.com/anthropics/connect-rust/issues/136
+[#140]: https://github.com/anthropics/connect-rust/issues/140
 [#143]: https://github.com/anthropics/connect-rust/pull/143
 [#147]: https://github.com/anthropics/connect-rust/pull/147
+[#150]: https://github.com/anthropics/connect-rust/pull/150
 
 ## [0.6.1] - 2026-05-27
 
