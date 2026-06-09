@@ -427,7 +427,12 @@ client suites with `task conformance:test-client-*`.
 | Client streaming | ✓ |
 | Bidirectional streaming | ✓ |
 
-Not yet implemented: gRPC server reflection.
+Not yet implemented: the gRPC server reflection *service*
+([#129](https://github.com/anthropics/connect-rust/issues/129)). The
+descriptor bytes it needs are already available at build time via
+`connectrpc_build::Config::emit_descriptor_set`, which writes the
+`FileDescriptorSet` (full import closure) to `OUT_DIR` for
+`include_bytes!`.
 
 ## Performance
 
