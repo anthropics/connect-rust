@@ -10,6 +10,16 @@ increment the patch version.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The gRPC and gRPC-Web unary response parsers enforce the
+  single-message rule before decompressing, and gRPC-Web parsing stops at
+  the trailers frame** ([#147]). A second data envelope is rejected before
+  its payload is touched (matching the Connect client-streaming parser
+  from [#133]), and a gRPC-Web response now completes as soon as a
+  complete trailers frame is buffered instead of reading the body to EOF,
+  so well-formed responses finish even if the server keeps writing.
+
 ### Changed
 
 - Malformed gzip and zstd compressed payloads now return `invalid_argument`
@@ -21,6 +31,8 @@ increment the patch version.
   request was invalid. The client-side remap deliberately diverges from
   connect-go, which reports `invalid_argument` in both directions;
   `data_loss` is more descriptive of what actually happened.
+
+[#147]: https://github.com/anthropics/connect-rust/pull/147
 
 ## [0.6.1] - 2026-05-27
 
