@@ -8,6 +8,20 @@ with the [Rust 0.x convention](https://doc.rust-lang.org/cargo/reference/semver.
 breaking changes increment the minor version (0.2 → 0.3), additive changes
 increment the patch version.
 
+## [Unreleased]
+
+### Fixed
+
+- **The gRPC and gRPC-Web unary response parsers enforce the
+  single-message rule before decompressing, and gRPC-Web parsing stops at
+  the trailers frame** ([#147]). A second data envelope is rejected before
+  its payload is touched (matching the Connect client-streaming parser
+  from [#133]), and a gRPC-Web response now completes as soon as a
+  complete trailers frame is buffered instead of reading the body to EOF,
+  so well-formed responses finish even if the server keeps writing.
+
+[#147]: https://github.com/anthropics/connect-rust/pull/147
+
 ## [0.6.1] - 2026-05-27
 
 A patch release focused on the robustness of the streaming request and
