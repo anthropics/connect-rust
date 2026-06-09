@@ -20,6 +20,18 @@ increment the patch version.
   complete trailers frame is buffered instead of reading the body to EOF,
   so well-formed responses finish even if the server keeps writing.
 
+### Changed
+
+- Malformed gzip and zstd compressed payloads now return `invalid_argument`
+  instead of `internal` ([#139]). For servers this attributes the failure
+  to the sender and moves it out of 5xx metrics (the Connect HTTP status
+  changes from 500 to 400) — update any alerting that keys on 5xx for
+  these events. On the client, where the corrupt payload is a *response*,
+  the error is remapped to `data_loss` so callers are not told their
+  request was invalid. The client-side remap deliberately diverges from
+  connect-go, which reports `invalid_argument` in both directions;
+  `data_loss` is more descriptive of what actually happened.
+
 [#147]: https://github.com/anthropics/connect-rust/pull/147
 
 ## [0.6.1] - 2026-05-27
@@ -60,6 +72,7 @@ now 1.6.
 [#131]: https://github.com/anthropics/connect-rust/pull/131
 [#132]: https://github.com/anthropics/connect-rust/pull/132
 [#133]: https://github.com/anthropics/connect-rust/pull/133
+[#139]: https://github.com/anthropics/connect-rust/issues/139
 
 ## [0.6.0] - 2026-05-20
 
