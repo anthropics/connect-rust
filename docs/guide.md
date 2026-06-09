@@ -1085,7 +1085,10 @@ Why each knob:
 
 - **`with_max`** is the most important one for any service that accepts
   untrusted callers — without it a client controls how long a worker
-  stays busy. Set it to your longest acceptable handler runtime.
+  stays busy. Set it to your longest acceptable request — for unary and
+  server-streaming RPCs the capped budget covers receiving the request
+  body as well as handler execution, so size it for uploads, not just
+  handler runtime.
 - **`with_default_timeout`** matters because the timeout header is
   optional. A request that omits it has no bound at all unless you set
   one. Set it to your SLA. For unary and server-streaming RPCs, the

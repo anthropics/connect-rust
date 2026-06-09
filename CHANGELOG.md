@@ -31,7 +31,19 @@ increment the patch version.
   request was invalid. The client-side remap deliberately diverges from
   connect-go, which reports `invalid_argument` in both directions;
   `data_loss` is more descriptive of what actually happened.
+- **Configured deadlines now bound request-body receipt for unary and
+  server-streaming RPCs** ([#136]). Previously the body was collected
+  before the timeout was applied, so `with_default_timeout` / `with_max`
+  bounded only handler execution and a slow-sending client could hold the
+  request open indefinitely. One absolute deadline now covers body
+  receipt, handler execution, and (with `enforce_on_streams`) the response
+  stream; the deadline visible through `RequestContext` matches what is
+  enforced. Services with timeouts sized only for handler CPU time may
+  need to raise them to accommodate large uploads from slow clients.
+  Client- and bidi-streaming RPCs are unchanged — their bodies are
+  consumed inside the handler, already within the handler deadline.
 
+[#136]: https://github.com/anthropics/connect-rust/issues/136
 [#147]: https://github.com/anthropics/connect-rust/pull/147
 
 ## [0.6.1] - 2026-05-27
