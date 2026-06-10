@@ -127,8 +127,14 @@ GitHub Actions CI (`.github/workflows/ci.yml`) runs on every push to
 - **Check** — `cargo check --workspace --all-features --all-targets`
   with `RUSTFLAGS=-Dwarnings`
 - **Test** — `cargo test --workspace`
-- **Clippy** — workspace, all targets, `-D warnings`
-- **Format** — nightly `cargo fmt --check`
+- **Clippy** — workspace, all targets, `-D warnings`, on a pinned toolchain
+  (currently 1.95) so new-stable lints don't break CI unannounced
+- **Format** — `cargo +nightly-2026-02-27 fmt --check`. Nightly is required
+  because `format_generated_files = false` in `rustfmt.toml` is a
+  nightly-only option; the date is pinned because rustfmt output drifts
+  across releases. Use the same dated nightly locally
+  (`rustup toolchain install nightly-2026-02-27 -c rustfmt`); bump it
+  together with the `fmt` job in `.github/workflows/ci.yml`
 - **Check generated code** — runs `task generate:all` and verifies the
   checked-in generated directories have no diff
 - **Documentation** — `cargo doc` with broken-intra-doc-links denied
