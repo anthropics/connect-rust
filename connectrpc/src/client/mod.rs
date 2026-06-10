@@ -2031,7 +2031,10 @@ where
             // The single writer of the terminal record. `message_inner`
             // cannot end the stream without producing one — "ended without
             // recording why" is unrepresentable.
-            Err(end) => self.end.insert(end).replay(),
+            Err(end) => {
+                debug_assert!(self.end.is_none(), "terminal record written twice");
+                self.end.insert(end).replay()
+            }
         }
     }
 
@@ -2233,13 +2236,15 @@ where
             .saturating_add(RESPONSE_BUFFER_TRAILER_SLACK);
 
         loop {
-            // The whole-call deadline bounds each frame poll. The deadline
-            // is an absolute instant and all work between frame polls is
-            // non-yielding, so this is observably equivalent to bounding
-            // the entire decode loop — and it is what lets every terminal
-            // cause exit `message_inner` as a `StreamEnd`. (The
-            // equivalence would break if this ever became a relative
-            // timeout; `deadline_bounds_multi_frame_message` pins it.)
+            // The whole-call deadline bounds each frame poll. The
+            // equivalence with bounding the entire decode loop rests on
+            // three facts: the deadline is an absolute instant, all work
+            // between frame polls is non-yielding, and `timeout_at` polls
+            // the inner future before the timer (a Ready frame at the
+            // deadline wins, in both shapes). It is what lets every
+            // terminal cause exit `message_inner` as a `StreamEnd`. (A
+            // relative per-poll timeout would break it;
+            // `deadline_bounds_multi_frame_message` pins that.)
             let deadline = self.deadline;
             let frame = with_deadline(deadline, async {
                 Ok(Pin::new(&mut self.body).frame().await)
