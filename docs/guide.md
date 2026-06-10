@@ -18,6 +18,8 @@ with the [README quick start](../README.md#quick-start) and the
 - [Interceptors](#interceptors)
 - [Hosting](#hosting)
 - [Health checking](#health-checking)
+- [Server reflection](#server-reflection)
+- [Production hardening](#production-hardening)
 - [Clients](#clients)
 - [Errors and status codes](#errors-and-status-codes)
 - [Compression](#compression)
@@ -25,7 +27,7 @@ with the [README quick start](../README.md#quick-start) and the
 
 ## Installation
 
-`connectrpc` ships as three crates:
+`connectrpc` ships as five crates:
 
 | Crate | Purpose |
 |---|---|
@@ -33,12 +35,13 @@ with the [README quick start](../README.md#quick-start) and the
 | `protoc-gen-connect-rust` (binary, in `connectrpc-codegen`) | `protoc` plugin that generates service stubs |
 | `connectrpc-build` | `build.rs` integration that runs the codegen at build time |
 | `connectrpc-health` | The standard `grpc.health.v1.Health` service for liveness / readiness probes ([Health checking](#health-checking)) |
+| `connectrpc-reflection` | The standard gRPC server reflection service (`grpc.reflection.v1` + `v1alpha`) for `grpcurl` / `buf curl` / Postman / `grpcui` ([Server reflection](#server-reflection)) |
 
 Add the runtime to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-connectrpc = "0.5"
+connectrpc = "0.7"
 ```
 
 The runtime depends on [`buffa`](https://github.com/anthropics/buffa)
@@ -72,16 +75,16 @@ Common combinations:
 
 ```toml
 # Just the server, behind axum
-connectrpc = { version = "0.5", features = ["axum"] }
+connectrpc = { version = "0.7", features = ["axum"] }
 
 # Server + client, both with TLS
-connectrpc = { version = "0.5", features = ["axum", "client", "tls"] }
+connectrpc = { version = "0.7", features = ["axum", "client", "tls"] }
 
 # Built-in server (no axum)
-connectrpc = { version = "0.5", features = ["server"] }
+connectrpc = { version = "0.7", features = ["server"] }
 
 # Minimal (wasm-friendly: no networking, no native compression)
-connectrpc = { version = "0.5", default-features = false }
+connectrpc = { version = "0.7", default-features = false }
 ```
 
 ## Quick start
@@ -105,7 +108,7 @@ Generate code with `connectrpc-build` in `build.rs`:
 
 ```toml
 [build-dependencies]
-connectrpc-build = "0.5"
+connectrpc-build = "0.7"
 ```
 
 ```rust
@@ -194,6 +197,15 @@ fn main() {
 Output is unified: message types and service stubs in one file per
 proto, included into your crate with `connectrpc::include_generated!()`.
 Best for simple projects.
+
+If you need the compiled `FileDescriptorSet` at runtime — most commonly
+to feed the [`connectrpc-reflection`](#server-reflection) crate — chain
+`.emit_descriptor_set("svc_descriptor.bin")` before `.compile()`. The
+name must be a bare file name (no path separators). The set (including
+the full transitive import closure) is written to `OUT_DIR` and can be
+embedded with
+`include_bytes!(concat!(env!("OUT_DIR"), "/svc_descriptor.bin"))`. See
+the `Config::emit_descriptor_set` rustdoc for details.
 
 ### `buf generate` (checked-in code, production-grade)
 
@@ -299,7 +311,7 @@ methods (new request-scoped metadata can then be added in minor releases):
 |---|---|
 | `ctx.header(name)` / `ctx.headers()` | Caller-supplied headers (after protocol-prefix stripping) |
 | `ctx.deadline()` | Absolute `Instant` if the caller set a timeout |
-| `ctx.time_remaining()` | Saturating `Duration` until the deadline — budget downstream calls with this |
+| `ctx.time_remaining()` | Saturating `Option<Duration>` until the deadline (`None` when no deadline is set) — budget downstream calls with this |
 | `ctx.extensions()` | `http::Extensions` carried from the underlying `http::Request` |
 | `ctx.path()` | Requested procedure path (`/package.Service/Method`) from the request URI |
 | `ctx.spec()` | Static metadata for the dispatched RPC method ([`Spec`](#static-method-metadata-spec)); `None` only for `route_*` registrations without `with_spec` |
@@ -584,12 +596,20 @@ while let Some(msg) = stream.message().await? {
 // Client streaming - takes a Vec
 let resp = client.sum(vec![req1, req2, req3]).await?;
 
-// Bidi - received items are `OwnedView`s too: `reply.reborrow().total`
+// Bidi - received items are `OwnedView`s too, read via `.reborrow()`
 let mut bidi = client.running_sum().await?;
 bidi.send(req).await?;
-let reply = bidi.message().await?;
+if let Some(reply) = bidi.message().await? {
+    println!("{}", reply.reborrow().total.unwrap_or_default());
+}
 bidi.close_send();
 ```
+
+`?` on `message()` is the complete error handling: `Ok(None)` means the
+server finished cleanly, and a terminal RPC error — including a
+gRPC/gRPC-Web stream that ends without a usable `grpc-status` — comes
+back as `Err`, sticky across calls. The `error()` and `trailers()`
+accessors remain available afterwards for post-hoc inspection.
 
 Both `streaming-tour/src/client.rs` and the eliza example show these
 patterns end-to-end.
@@ -1010,8 +1030,8 @@ route for `httpGet:` probes; add the gRPC service for `grpc:` probes.
 
 ```toml
 [dependencies]
-connectrpc = { version = "0.6", features = ["server"] }
-connectrpc-health = "0.6"
+connectrpc = { version = "0.7", features = ["server"] }
+connectrpc-health = "0.7"
 ```
 
 ```rust,no_run
@@ -1051,8 +1071,8 @@ Server-only deployments turn it off:
 
 ```toml
 [dependencies]
-connectrpc = { version = "0.6", features = ["server"] }
-connectrpc-health = { version = "0.6", default-features = false }
+connectrpc = { version = "0.7", features = ["server"] }
+connectrpc-health = { version = "0.7", default-features = false }
 ```
 
 That drops `connectrpc/client` (the HTTP/2 transport stack) from the
@@ -1069,6 +1089,63 @@ reference. Every probe that treats any error as a failure — kubelet's
 `grpc:` probe, `grpc_health_probe`, Linkerd, Istio — works unchanged.
 See `HealthService`'s `# Unknown services` section in the crate docs
 for the full context.
+
+## Server reflection
+
+The `connectrpc-reflection` crate implements the standard gRPC server
+reflection service (`grpc.reflection.v1` and its `v1alpha` predecessor),
+so schema-aware clients — `grpcurl`, `buf curl`, Postman, `grpcui` —
+can discover and call your services without local proto files, over
+gRPC, gRPC-Web, and the Connect protocol alike.
+
+```toml
+[dependencies]
+connectrpc = { version = "0.7", features = ["server"] }
+connectrpc-reflection = "0.7"
+```
+
+Emit a descriptor set from your build script (see
+[Code generation](#code-generation)), embed it, and mount the service:
+
+```rust,ignore
+// build.rs: .emit_descriptor_set("app.fds.bin") before .compile()
+use connectrpc::Router;
+use connectrpc_reflection::{Reflector, install};
+
+let bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/app.fds.bin"));
+let reflector = Reflector::from_descriptor_set_bytes(bytes)?;
+// `router` is your service router from `register()`.
+let router = install(router, reflector); // mounts v1 + v1alpha
+```
+
+Alternatively, when your buffa codegen has reflection enabled, serve
+straight from the generated package's descriptor pool with
+`Reflector::from_descriptor_pool(proto::descriptor_pool().clone())` —
+no build-script step. The bytes path answers with the compiler's
+original per-file descriptor bytes; the pool path re-encodes
+(semantically faithful, unknown fields preserved). See the `Reflector`
+crate docs for the trade-off.
+
+> **Reflection intentionally publishes your schema.** Everything in
+> the descriptor set is exposed — all files, their transitive imports,
+> and every compiled service, whether or not its handlers are mounted.
+> Gate or omit the service on deployments where that is not wanted.
+
+Two more behaviors worth knowing before deploying:
+
+- **`Reflector::with_services` curates the advertised list** (the
+  override is verbatim, like Go `grpcreflect`'s `Namer`) — use it when
+  the descriptor set compiles in more services than you want to
+  advertise; `Reflector::service_names` inspects the current list.
+- **The service is self-describing**: queries about `grpc.reflection.*`
+  fall back to the crate's own descriptors and `ListServices` includes
+  the reflection services, matching grpc-go. Schema-free callers like
+  `buf curl` need this to invoke `ServerReflectionInfo` at all.
+
+The [multiservice example](../examples/multiservice) mounts reflection
+with both descriptor sources (selectable via `REFLECTION_SOURCE=fds|pool`),
+and [`reflection-demo.sh`](../examples/multiservice/reflection-demo.sh)
+walks through discovery and schema-free calls with `buf curl`.
 
 ## Production hardening
 
@@ -1122,7 +1199,9 @@ Why each knob:
 - **`with_inter_message_timeout(d)`** detects stalled streams (a
   handler waiting on a slow upstream). Independent of
   `with_enforce_on_streams` — takes effect whenever set, with or
-  without the absolute deadline. Resets on each yielded item.
+  without the absolute deadline. Arms when the response stream is
+  first polled (stream-setup latency before that is not counted) and
+  resets on each yielded item.
 
 `DeadlinePolicy::new()` with no `with_*` calls is a no-op that
 preserves the prior default behavior. Existing services see no change
@@ -1133,13 +1212,16 @@ target `connectrpc::deadline` with the path and before/after
 durations. Enable `RUST_LOG=connectrpc::deadline=debug` to spot
 misbehaving clients.
 
-Inside a handler, `ctx.deadline` reflects the *moderated* value (after
-clamping), so the handler can budget downstream calls — propagate the
-remaining time minus a margin as the timeout for outbound RPCs:
+Inside a handler, `ctx.deadline()` reflects the *moderated* value
+(after clamping), so the handler can budget downstream calls —
+propagate the remaining time minus a margin as the timeout for
+outbound RPCs. `ctx.time_remaining()` does the subtraction for you
+(`None` when the request has no deadline):
 
 ```rust,ignore
-use std::time::Instant;
-let remaining = ctx.deadline.map(|d| d.saturating_duration_since(Instant::now()));
+if let Some(remaining) = ctx.time_remaining() {
+    options = options.with_timeout(remaining.saturating_sub(margin));
+}
 ```
 
 ## Clients
@@ -1267,9 +1349,8 @@ pub struct ConnectError {
     pub code: ErrorCode,
     pub message: Option<String>,
     pub details: Vec<ErrorDetail>,
-    pub headers: http::HeaderMap,
-    pub trailers: http::HeaderMap,
-    // ...
+    // response headers and trailers: private, exposed via the
+    // response_headers()/trailers() accessors and their _mut variants
 }
 ```
 
@@ -1365,8 +1446,9 @@ let service = ConnectRpcService::new(router).with_compression(registry);
 | [`middleware/`](../examples/middleware) | Server-side tower middleware composition: an `axum::middleware::from_fn` bearer-token auth, identity passthrough via `RequestContext::extensions()`, response trailers via `Response::with_trailer`. Client demos `ClientConfig::with_default_header` and `CallOptions::with_timeout`. |
 | [`mtls-identity/`](../examples/mtls-identity) | mTLS twin of `middleware/`: axum hosted behind `connectrpc::axum::serve_tls`, identity from the client cert's DNS SAN via `PeerCerts` instead of a bearer token, ACL keyed on the cert-derived identity. In-memory `rcgen` PKI; no PEM files. |
 | [`eliza/`](../examples/eliza) | Production-shaped streaming app: a port of the `connectrpc/examples-go` ELIZA demo. Server-streaming Introduce + bidi-streaming Converse, TLS, mTLS, CORS, IPv6, both server and client binaries, interoperates with the hosted Go reference at `demo.connectrpc.com`. |
-| [`multiservice/`](../examples/multiservice) | Multiple proto packages compiled together with `buf generate`, multiple services on one server, well-known type usage. |
+| [`multiservice/`](../examples/multiservice) | Multiple proto packages compiled together with `buf generate`, multiple services on one server, well-known type usage, and server reflection mounted from both descriptor sources (`REFLECTION_SOURCE=fds\|pool`; see `reflection-demo.sh`). |
 | [`wasm-client/`](../examples/wasm-client) | Browser fetch transport: same generated client used from `wasm32-unknown-unknown` with a custom `ClientTransport` backed by `web-sys::fetch`. |
 | [`bazel/`](../examples/bazel) | Bazel build integration via custom rules. |
 
-Each example has its own README with run instructions.
+Most examples have their own README with run instructions; the rest
+document themselves through their `test.sh` / demo scripts.

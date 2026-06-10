@@ -98,3 +98,9 @@ jobs:
 
       - name: Publish connectrpc-build
         run: /tmp/publish.sh connectrpc-build $DRY_RUN_FLAG
+
+      - name: Publish connectrpc-health
+        run: /tmp/publish.sh connectrpc-health $DRY_RUN_FLAG
+
+      - name: Publish connectrpc-reflection
+        run: /tmp/publish.sh connectrpc-reflection $DRY_RUN_FLAG

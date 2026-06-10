@@ -30,6 +30,9 @@
 //! Requires `protoc` on `PATH` (or set via `PROTOC`). To use `buf` instead,
 //! call [`Config::use_buf`]. To avoid both, precompile a `FileDescriptorSet`
 //! once and ship it alongside your source via [`Config::descriptor_set`].
+//!
+//! To embed the compiled `FileDescriptorSet` in your binary — for example
+//! to back gRPC server reflection — see [`Config::emit_descriptor_set`].
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

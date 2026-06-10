@@ -1910,8 +1910,6 @@ enum BodyPoll {
 
 /// Response from a server-streaming RPC.
 ///
-/// A server-streaming RPC response.
-///
 /// Provides incremental access to response messages as they arrive from the server.
 /// Messages are decoded one at a time from the HTTP response body using the
 /// [`message()`](ServerStream::message) method, which returns `Ok(None)` for

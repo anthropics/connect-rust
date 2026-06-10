@@ -219,10 +219,10 @@ impl Server {
     ///
     /// Delegates to [`ConnectRpcService::with_deadline_policy`]. The
     /// default [`DeadlinePolicy::new`](crate::DeadlinePolicy::new) is a
-    /// no-op: client timeout headers are honored verbatim and streaming
-    /// bodies are unbounded once the handler returns. Set a policy to
-    /// clamp, supply a default, or enforce on streams. See
-    /// [`DeadlinePolicy`](crate::DeadlinePolicy).
+    /// no-op: client timeout headers are honored verbatim for request
+    /// receipt and handler execution, but streaming response bodies are
+    /// not bounded by them. Set a policy to clamp, supply a default, or
+    /// enforce on streams. See [`DeadlinePolicy`](crate::DeadlinePolicy).
     #[must_use]
     pub fn with_deadline_policy(mut self, policy: crate::DeadlinePolicy) -> Self {
         self.service = self.service.with_deadline_policy(policy);

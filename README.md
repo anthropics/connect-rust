@@ -80,7 +80,7 @@ ship Linux (x86_64, aarch64), macOS (x86_64, aarch64), and Windows
 (`.sig` + `.pem`), and a GitHub-native build provenance attestation.
 
 ```sh
-VERSION=v0.6.1
+VERSION=v0.7.0
 PLATFORM=linux-x86_64        # or darwin-aarch64, etc.
 BASE=https://github.com/anthropics/connect-rust/releases/download/${VERSION}
 BIN=protoc-gen-connect-rust-${VERSION}-${PLATFORM}
@@ -170,7 +170,7 @@ assembled via a single `include!`. No plugin binaries required at build time.
 
 ```toml
 [build-dependencies]
-connectrpc-build = "0.6"
+connectrpc-build = "0.7"
 ```
 
 ```rust
@@ -196,7 +196,6 @@ pub mod proto {
 
 ```rust
 use connectrpc::{RequestContext, Response, ServiceRequest, ServiceResult};
-use std::sync::Arc;
 
 struct MyGreetService;
 

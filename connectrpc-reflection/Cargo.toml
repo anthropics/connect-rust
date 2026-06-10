@@ -1,6 +1,6 @@
 [package]
 name = "connectrpc-reflection"
-version = "0.6.1"
+version = "0.7.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,6 +9,10 @@ readme = "../README.md"
 description = "gRPC server reflection service for connectrpc (wire-compatible with grpc.reflection.v1 and v1alpha)"
 keywords = ["connectrpc", "grpc", "reflection", "rpc"]
 categories = ["network-programming", "web-programming::http-server"]
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
 default = ["client"]
@@ -20,7 +24,7 @@ default = ["client"]
 client = ["connectrpc/client"]
 
 [dependencies]
-connectrpc = { path = "../connectrpc", version = "0.6", features = ["server"] }
+connectrpc = { path = "../connectrpc", version = "0.7", features = ["server"] }
 
 # Protobuf + serde (pulled in by the generated module paths)
 buffa = { workspace = true }

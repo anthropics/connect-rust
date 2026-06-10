@@ -16,7 +16,7 @@
 //!   `HealthClient` for in-process probes, integration tests, and
 //!   sidecar tooling. Pulls in `connectrpc`'s `client` feature (the
 //!   HTTP/2 transport stack). Server-only deployments drop it with
-//!   `connectrpc-health = { version = "0.6", default-features = false }`;
+//!   `connectrpc-health = { version = "0.7", default-features = false }`;
 //!   `use connectrpc_health::HealthClient` then becomes an unresolved
 //!   import (the type is gone), but the dependency graph loses
 //!   `connectrpc/client`.
@@ -61,6 +61,7 @@
 //! / [`HealthService::from_arc`].
 //!
 //! [`grpc.health.v1.Health`]: https://github.com/grpc/grpc-proto/blob/master/grpc/health/v1/health.proto
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod checker;
 mod service;
@@ -83,6 +84,7 @@ pub use status::Status;
 /// deployments turn off default features to drop the `connectrpc/client`
 /// transport stack from their dependency graph.
 #[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub use connect::grpc::health::v1::HealthClient;
 
 /// Generated extension trait that adds `.register(router)` to any

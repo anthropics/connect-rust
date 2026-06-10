@@ -8,63 +8,22 @@ with the [Rust 0.x convention](https://doc.rust-lang.org/cargo/reference/semver.
 breaking changes increment the minor version (0.2 → 0.3), additive changes
 increment the patch version.
 
-## [Unreleased]
+## [0.7.0] - 2026-06-10
 
-### Breaking
+A breaking release that reworks both ends of the message surface:
+handlers take borrowed request views built on buffa 0.7.0, and client
+streams surface terminal RPC errors from `message()` instead of hiding
+them behind `Ok(None)`. It is also the first release of two new crates
+that join the lockstep versioning scheme at 0.7.0: `connectrpc-health`
+(the standard gRPC health-checking service) and `connectrpc-reflection`
+(gRPC server reflection).
 
-- **Client streams return terminal server errors from `message()`**.
-  Previously, an RPC error carried in the stream's termination metadata
-  (gRPC HTTP/2 trailers, gRPC-Web trailer frame, or Connect END_STREAM
-  envelope) made `ServerStream::message()` / `BidiStream::message()`
-  return `Ok(None)` — indistinguishable from a clean close — with the
-  error retrievable only via the easy-to-miss `error()` accessor. A
-  caller that treated `Ok(None)` as success would silently swallow every
-  failed streaming RPC. `message()` now returns `Err(...)` for an
-  errored end and reserves `Ok(None)` for a clean end (gRPC status OK /
-  error-free END_STREAM), matching `tonic`. Every `Err` is terminal and
-  sticky — re-polling returns the same error, never a clean-looking
-  `Ok(None)`; `error()` and `trailers()` remain populated for post-hoc
-  inspection. Callers that only match `Err` need no changes; callers
-  doing the `Ok(None)`-then-`error()` dance can delete the dance:
-
-  ```rust
-  // Before: errors hid behind Ok(None)        // After: `?` is complete
-  while let Some(m) = s.message().await? {     while let Some(m) = s.message().await? {
-      handle(m);                                   handle(m);
-  }                                            }
-  if let Some(err) = s.error() {
-      return Err(err.clone().into());
-  }
-  ```
-
-- **A gRPC/gRPC-Web stream that never delivers a usable `grpc-status`
-  is now an error** instead of a clean `Ok(None)`: `internal` when no
-  trailers arrived at all, `unknown` when trailers arrived without a
-  `grpc-status`, and `unknown` for a present-but-malformed
-  `grpc-status` value — each matching grpc-go (and the conformance
-  suite's primary expectations). A Trailers-Only response carrying
-  `grpc-status: 0` in the response headers (grpc-go's shape for an OK
-  end with zero messages) remains a clean end. The Connect protocol
-  already treated a missing END_STREAM envelope as `unavailable`
-  (a connect-rust choice, unchanged here; the Connect spec does not
-  prescribe a client-side code).
-
-### Internal
-
-- The client streaming receive path is restructured so the contract
-  above is enforced by construction rather than convention (the
-  terminal outcome is recorded exactly once, and ending the stream
-  without recording why is unrepresentable). No public-API or intended
-  behavior change; the streaming contract tests' assertions are
-  unchanged.
-
-This release also reworks the server-side request surface around buffa 0.7.0,
-which removed `OwnedView`'s `Deref` impl (the impl let safe code hold view
-fields past the backing buffer's lifetime). Handlers move from owned
-`OwnedView<FooView<'static>>` parameters to borrowed requests and owned
-stream items with per-field accessors. **Consumers with checked-in
-`protoc-gen-connect-rust` output must regenerate with this release's
-toolchain and buffa ≥ 0.7.0.**
+On the server side, buffa 0.7.0 removed `OwnedView`'s `Deref` impl (the
+impl let safe code hold view fields past the backing buffer's lifetime),
+and handlers move from owned `OwnedView<FooView<'static>>` parameters to
+borrowed requests and owned stream items with per-field accessors.
+**Consumers with checked-in `protoc-gen-connect-rust` output must
+regenerate with this release's toolchain and buffa ≥ 0.7.0.**
 
 ### Breaking
 
@@ -77,7 +36,16 @@ toolchain and buffa ≥ 0.7.0.**
   points; the response — and anything moved into `tokio::spawn` — cannot
   borrow from it (enforced by the compiler). Existing handler impls must
   update their signatures; bodies that already started with
-  `.to_owned_message()` work unchanged.
+  `.to_owned_message()` work unchanged:
+
+  ```rust
+  // before (0.6)
+  async fn greet(&self, ctx: RequestContext, request: OwnedView<GreetRequestView<'static>>)
+      -> ServiceResult<GreetResponse>
+  // after (0.7)
+  async fn greet(&self, ctx: RequestContext, request: ServiceRequest<'_, GreetRequest>)
+      -> ServiceResult<GreetResponse>
+  ```
 - **Client-streaming and bidi inbound items are `StreamMessage<Req>`**
   ([#143]). Each item owns its decoded buffer, is `Send + 'static`, Derefs
   to the buffa-generated `FooOwnedView` wrapper for per-field accessor
@@ -99,9 +67,56 @@ toolchain and buffa ≥ 0.7.0.**
   output types — return the owned message for those.
 - **The workspace requires `buffa`/`buffa-types`/`buffa-codegen` 0.7**
   ([#143]), which is also the regen baseline for checked-in generated code.
+- **Client streams return terminal server errors from `message()`**
+  ([#159]). Previously, an RPC error carried in the stream's termination
+  metadata (gRPC HTTP/2 trailers, gRPC-Web trailer frame, or Connect
+  END_STREAM envelope) made `ServerStream::message()` /
+  `BidiStream::message()` return `Ok(None)` — indistinguishable from a
+  clean close — with the error retrievable only via the easy-to-miss
+  `error()` accessor. A caller that treated `Ok(None)` as success would
+  silently swallow every failed streaming RPC. `message()` now returns
+  `Err(...)` for an errored end and reserves `Ok(None)` for a clean end
+  (gRPC status OK / error-free END_STREAM), matching `tonic`. Every
+  `Err` is terminal and sticky — re-polling returns the same error,
+  never a clean-looking `Ok(None)`; `error()` and `trailers()` remain
+  populated for post-hoc inspection. Callers that only match `Err` need
+  no changes; callers doing the `Ok(None)`-then-`error()` dance can
+  delete the dance:
+
+  ```rust
+  // Before: errors hid behind Ok(None)        // After: `?` is complete
+  while let Some(m) = s.message().await? {     while let Some(m) = s.message().await? {
+      handle(m);                                   handle(m);
+  }                                            }
+  if let Some(err) = s.error() {
+      return Err(err.clone().into());
+  }
+  ```
+
+- **A gRPC/gRPC-Web stream that never delivers a usable `grpc-status`
+  is now an error** instead of a clean `Ok(None)` ([#159]): `internal`
+  when no trailers arrived at all, `unknown` when trailers arrived
+  without a `grpc-status`, and `unknown` for a present-but-malformed
+  `grpc-status` value — each matching grpc-go (and the conformance
+  suite's primary expectations). A Trailers-Only response carrying
+  `grpc-status: 0` in the response headers (grpc-go's shape for an OK
+  end with zero messages) remains a clean end. The Connect-protocol
+  equivalent — a missing END_STREAM envelope reported as `unavailable` —
+  ships in this release as [#140] (see Fixed below); this entry covers
+  only the gRPC and gRPC-Web protocols.
 
 ### Added
 
+- **New `connectrpc-health` crate** ([#128]) — the standard
+  `grpc.health.v1.Health` service for connectrpc routers, wire-compatible
+  with `grpc_health_probe`, kubelet `grpc:` probes, and gRPC-aware service
+  meshes (Linkerd, Istio). `install_static(router, [names])` mounts a
+  `StaticChecker`-backed service in one call; implement the `Checker`
+  trait for custom logic (e.g. reporting `NotServing` while a dependency
+  is down). The generated `HealthClient` re-export is gated on the
+  default-on `client` feature so server-only deployments can drop the
+  client transport stack. See the
+  [health checking](docs/guide.md#health-checking) section of the guide.
 - **`ServiceRequest<'a, Req>` and `StreamMessage<M>`** ([#143]) — the
   request wrappers described above, exported from the crate root.
 - The multiservice example gains a `Heartbeat(google.protobuf.Empty) →
@@ -114,7 +129,7 @@ toolchain and buffa ≥ 0.7.0.**
   `grpc.reflection.v1.ServerReflection` (e.g. for `grpcurl`). The inverse
   of `Config::descriptor_set`, which reads a precompiled set; build
   scripts no longer need a second `protoc --descriptor_set_out` pass.
-- **New `connectrpc-reflection` crate** ([#129]) — gRPC server reflection,
+- **New `connectrpc-reflection` crate** ([#157]) — gRPC server reflection,
   wire-compatible with `grpc.reflection.v1.ServerReflection` and its
   `v1alpha` predecessor, so `grpcurl`, `buf curl`, Postman, and `grpcui`
   work against connectrpc servers over gRPC, gRPC-Web, and Connect alike.
@@ -150,6 +165,16 @@ toolchain and buffa ≥ 0.7.0.**
   to drain cleanly against a known-good server may now error — if you see
   this, suspect an intermediary (proxy or load balancer) stripping the
   trailing envelope.
+- **The inter-message timeout no longer starts at response-stream
+  construction** ([#127]). `DeadlinePolicy::with_inter_message_timeout`
+  armed its timer when the response stream was built, so the first
+  measurement covered stream-setup latency (encoding, header writing,
+  framework overhead) rather than the gap between messages, and a short
+  timeout could fail the stream with `deadline_exceeded` before the
+  consumer ever polled it. The timer now arms when the stream is first
+  polled and re-arms after each yielded item, so setup latency before
+  the first poll is excluded while a handler that stalls before its
+  first item still times out.
 
 ### Changed
 
@@ -161,7 +186,11 @@ toolchain and buffa ≥ 0.7.0.**
   the error is remapped to `data_loss` so callers are not told their
   request was invalid. The client-side remap deliberately diverges from
   connect-go, which reports `invalid_argument` in both directions;
-  `data_loss` is more descriptive of what actually happened.
+  `data_loss` is more descriptive of what actually happened. The default
+  `CompressionProvider::decompress_with_limit` implementation (used by
+  custom providers that only implement `decompressor`) follows the same
+  convention: read failures now map to `invalid_argument` instead of
+  `internal`.
 - **Client-streaming and bidi handlers see request body failures as
   stream errors** ([#150]). A request body that fails mid-upload
   (truncated or broken transport) now yields `Err(internal)` from the
@@ -184,13 +213,27 @@ toolchain and buffa ≥ 0.7.0.**
   Client- and bidi-streaming RPCs are unchanged — their bodies are
   consumed inside the handler, already within the handler deadline.
 
-[#129]: https://github.com/anthropics/connect-rust/issues/129
+### Internal
+
+- The client streaming receive path is restructured so the terminal
+  contract above is enforced by construction rather than convention
+  ([#160]): the terminal outcome is recorded exactly once, and ending
+  the stream without recording why is unrepresentable. No public-API or
+  intended behavior change beyond [#159]; the streaming contract tests'
+  assertions are unchanged.
+
+[#127]: https://github.com/anthropics/connect-rust/pull/127
+[#128]: https://github.com/anthropics/connect-rust/pull/128
 [#136]: https://github.com/anthropics/connect-rust/issues/136
+[#139]: https://github.com/anthropics/connect-rust/issues/139
 [#140]: https://github.com/anthropics/connect-rust/issues/140
 [#141]: https://github.com/anthropics/connect-rust/pull/141
 [#143]: https://github.com/anthropics/connect-rust/pull/143
 [#147]: https://github.com/anthropics/connect-rust/pull/147
 [#150]: https://github.com/anthropics/connect-rust/pull/150
+[#157]: https://github.com/anthropics/connect-rust/pull/157
+[#159]: https://github.com/anthropics/connect-rust/pull/159
+[#160]: https://github.com/anthropics/connect-rust/pull/160
 
 ## [0.6.1] - 2026-05-27
 
@@ -230,7 +273,6 @@ now 1.6.
 [#131]: https://github.com/anthropics/connect-rust/pull/131
 [#132]: https://github.com/anthropics/connect-rust/pull/132
 [#133]: https://github.com/anthropics/connect-rust/pull/133
-[#139]: https://github.com/anthropics/connect-rust/issues/139
 
 ## [0.6.0] - 2026-05-20
 

@@ -129,6 +129,14 @@ pub trait CompressionProvider: Send + Sync + 'static {
     /// reader from [`decompressor`](Self::decompressor) to structurally
     /// bound memory — custom providers are safe without any extra work.
     /// Built-in providers override this for performance.
+    ///
+    /// # Error codes
+    ///
+    /// Malformed or truncated input surfaces as
+    /// [`ConnectError::invalid_argument`] — the client sent a payload that
+    /// cannot be decoded. The default implementation maps read failures to
+    /// this code, matching the built-in gzip and zstd providers; custom
+    /// overrides should follow the same convention.
     fn decompress_with_limit(&self, data: &[u8], max_size: usize) -> Result<Bytes, ConnectError> {
         use std::io::Read;
         let reader = self.decompressor(data)?;
@@ -137,7 +145,7 @@ pub trait CompressionProvider: Send + Sync + 'static {
         reader
             .take((max_size as u64).saturating_add(1))
             .read_to_end(&mut buf)
-            .map_err(|e| ConnectError::internal(format!("decompression failed: {e}")))?;
+            .map_err(|e| ConnectError::invalid_argument(format!("decompression failed: {e}")))?;
         if buf.len() > max_size {
             return Err(ConnectError::resource_exhausted(format!(
                 "decompressed size exceeds limit {max_size}"
@@ -1853,6 +1861,46 @@ mod tests {
             let reversed: Vec<u8> = data.iter().rev().copied().collect();
             Ok(Box::new(std::io::Cursor::new(reversed)))
         }
+    }
+
+    /// Provider whose reader fails mid-read, exercising the default
+    /// `decompress_with_limit` error path for malformed input.
+    struct FailingReadProvider;
+
+    impl CompressionProvider for FailingReadProvider {
+        fn name(&self) -> &'static str {
+            "failing"
+        }
+
+        fn compress(&self, data: &[u8]) -> Result<Bytes, ConnectError> {
+            Ok(Bytes::copy_from_slice(data))
+        }
+
+        fn decompressor<'a>(
+            &self,
+            _data: &'a [u8],
+        ) -> Result<Box<dyn std::io::Read + 'a>, ConnectError> {
+            struct FailingReader;
+            impl std::io::Read for FailingReader {
+                fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "corrupt stream",
+                    ))
+                }
+            }
+            Ok(Box::new(FailingReader))
+        }
+    }
+
+    /// The default `decompress_with_limit` reports malformed input as
+    /// `invalid_argument`, matching the built-in gzip/zstd providers.
+    #[test]
+    fn test_default_trait_decompress_malformed_is_invalid_argument() {
+        let err = FailingReadProvider
+            .decompress_with_limit(b"whatever", usize::MAX)
+            .unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
     }
 
     #[test]

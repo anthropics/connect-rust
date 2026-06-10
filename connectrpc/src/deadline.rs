@@ -104,7 +104,8 @@ pub struct DeadlinePolicy {
     /// stalled handlers waiting on slow upstreams. `None` = no per-item
     /// bound. Independent of [`enforce_on_streams`](Self::enforce_on_streams):
     /// setting this enables the per-item timer regardless of whether the
-    /// absolute deadline is enforced.
+    /// absolute deadline is enforced. First armed when the stream is
+    /// first polled; re-armed after each yielded item.
     inter_message_timeout: Option<Duration>,
 }
 
@@ -194,6 +195,12 @@ impl DeadlinePolicy {
     /// Independent of [`with_enforce_on_streams`](Self::with_enforce_on_streams):
     /// the per-item timer takes effect whenever this is set, regardless of
     /// whether the absolute deadline is also enforced on the stream.
+    ///
+    /// The timer first arms when the consumer first polls the stream and
+    /// re-arms after each yielded item, so stream-setup latency before
+    /// the first poll (encoding, header writing, framework overhead) is
+    /// not counted against the first gap — but a handler that stalls
+    /// before producing its first item still times out.
     #[must_use]
     pub fn with_inter_message_timeout(mut self, timeout: Duration) -> Self {
         self.inter_message_timeout = Some(timeout);

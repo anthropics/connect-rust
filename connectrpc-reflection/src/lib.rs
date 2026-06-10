@@ -13,8 +13,10 @@
 //! ```ignore
 //! // build.rs
 //! connectrpc_build::Config::new()
+//!     .files(&["proto/app.proto"])
+//!     .includes(&["proto/"])
 //!     .emit_descriptor_set("app.fds.bin")
-//!     .compile(&["proto/app.proto"], &["proto"])
+//!     .compile()
 //!     .unwrap();
 //! ```
 //!
@@ -78,6 +80,7 @@
 //!   `default-features = false`.
 //!
 //! [`grpc.reflection.v1.ServerReflection`]: https://github.com/grpc/grpc-proto/blob/master/grpc/reflection/v1/reflection.proto
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod reflector;
 mod service;
@@ -134,6 +137,7 @@ pub use connect::grpc::reflection::v1alpha::{
 /// Generated client for querying a `grpc.reflection.v1.ServerReflection`
 /// server.
 #[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub use connect::grpc::reflection::v1::ServerReflectionClient;
 
 /// Re-exports of the generated `grpc.reflection.*` wire types — request
