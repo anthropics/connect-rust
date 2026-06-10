@@ -49,6 +49,15 @@ increment the patch version.
   (a connect-rust choice, unchanged here; the Connect spec does not
   prescribe a client-side code).
 
+### Internal
+
+- The client streaming receive path is restructured so the contract
+  above is enforced by construction rather than convention (the
+  terminal outcome is recorded exactly once, and ending the stream
+  without recording why is unrepresentable). No public-API or intended
+  behavior change; the streaming contract tests' assertions are
+  unchanged.
+
 This release also reworks the server-side request surface around buffa 0.7.0,
 which removed `OwnedView`'s `Deref` impl (the impl let safe code hold view
 fields past the backing buffer's lifetime). Handlers move from owned
