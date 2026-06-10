@@ -1864,6 +1864,50 @@ where
     })
 }
 
+/// Terminal record for a client stream: why it ended and what trailing
+/// metadata arrived. Written exactly once (by `message()`); read by the
+/// sticky replay, [`ServerStream::error()`], and
+/// [`ServerStream::trailers()`] — one fact, three readers, so they cannot
+/// disagree.
+#[derive(Debug)]
+struct StreamEnd {
+    /// `Ok(())` is a clean end (the RPC succeeded).
+    outcome: Result<(), ConnectError>,
+    trailers: Option<http::HeaderMap>,
+}
+
+impl StreamEnd {
+    fn replay<T>(&self) -> Result<Option<T>, ConnectError> {
+        match &self.outcome {
+            Ok(()) => Ok(None),
+            Err(e) => Err(e.clone()),
+        }
+    }
+}
+
+/// Lets `?` lift decode/transport/deadline errors out of the decode loop.
+/// Every such site fires before any termination metadata exists, so
+/// `trailers: None` is correct at all of them; ends that carry trailers
+/// construct their `StreamEnd` explicitly.
+impl From<ConnectError> for StreamEnd {
+    fn from(e: ConnectError) -> Self {
+        StreamEnd {
+            outcome: Err(e),
+            trailers: None,
+        }
+    }
+}
+
+/// What one body poll produced.
+enum BodyPoll {
+    /// A DATA frame was appended to the decode buffer.
+    Data,
+    /// HTTP/2 (or HTTP/1.1 chunked) trailers — the body's final frame.
+    Trailers(http::HeaderMap),
+    /// Body exhausted.
+    Eof,
+}
+
 /// Response from a server-streaming RPC.
 ///
 /// A server-streaming RPC response.
@@ -1896,9 +1940,8 @@ pub struct ServerStream<B, RespView> {
     protocol: Protocol,
     max_message_size: Option<usize>,
     deadline: Option<std::time::Instant>,
-    trailers: Option<http::HeaderMap>,
-    error: Option<ConnectError>,
-    done: bool,
+    /// The terminal record; `Some` once the stream has ended, by any cause.
+    end: Option<StreamEnd>,
     /// Whether any body DATA frame arrived. Distinguishes a true
     /// Trailers-Only response (empty body; status rides the headers)
     /// from a stream that produced data and was then cut off.
@@ -1915,9 +1958,15 @@ impl<B, RespView> std::fmt::Debug for ServerStream<B, RespView> {
             .field("protocol", &self.protocol)
             .field("codec_format", &self.codec_format)
             .field("encoding", &self.encoding)
-            .field("done", &self.done)
-            .field("error", &self.error)
-            .field("has_trailers", &self.trailers.is_some())
+            .field("ended", &self.end.is_some())
+            .field(
+                "error",
+                &self.end.as_ref().and_then(|e| e.outcome.as_ref().err()),
+            )
+            .field(
+                "has_trailers",
+                &self.end.as_ref().is_some_and(|e| e.trailers.is_some()),
+            )
             .field("buffered_bytes", &self.buf.len())
             .finish_non_exhaustive()
     }
@@ -1972,59 +2021,27 @@ where
     /// carrying `grpc-status: 0` in the headers (empty body) is a clean
     /// end.
     pub async fn message(&mut self) -> Result<Option<OwnedView<RespView>>, ConnectError> {
-        // The outcome is immutable once reported: never re-enter the
-        // deadline wrapper or the body after the stream has ended. Every
-        // site that ends the stream sets `done` and (on failure) `error`
-        // before returning, so `self.error` fully encodes the outcome —
-        // a failed RPC replays its `Err` (sticky), a clean end replays
-        // `Ok(None)`.
-        if self.done {
-            return match &self.error {
-                Some(err) => Err(err.clone()),
-                None => Ok(None),
-            };
+        // The outcome is immutable once reported: replay the terminal
+        // record without re-entering the body.
+        if let Some(end) = &self.end {
+            return end.replay();
         }
-        // Whole-call deadline enforcement: wrap the decode loop so every
-        // body-poll is bounded.
-        let deadline = self.deadline;
-        match with_deadline(deadline, self.message_inner()).await {
-            Ok(Some(msg)) => Ok(Some(msg)),
-            Ok(None) => {
-                debug_assert!(
-                    self.done,
-                    "message_inner returned Ok(None) without marking done"
-                );
-                // An end-of-stream whose termination metadata carries a
-                // server error is a failed RPC, not a clean close — surface
-                // it as `Err`. Callers that only match `Ok(None)` must never
-                // mistake a failed RPC for success (the silent-retry-loop
-                // failure mode this guards against).
-                if self.error.is_none()
-                    && let Some(err) = self.missing_grpc_status_error()
-                {
-                    self.error = Some(err);
-                }
-                match &self.error {
-                    Some(err) => Err(err.clone()),
-                    None => Ok(None),
-                }
-            }
-            Err(err) => {
-                // Decode/transport/deadline failures are equally terminal:
-                // the stream state is unrecoverable. Stash so re-polls stay
-                // `Err` instead of degrading to a clean-looking `Ok(None)`.
-                // (`error` cannot already be set here — a set error implies
-                // `done`, which the top guard short-circuits.)
-                self.done = true;
-                self.error = Some(err.clone());
-                Err(err)
-            }
+        match self.message_inner().await {
+            Ok(msg) => Ok(Some(msg)),
+            // The single writer of the terminal record. `message_inner`
+            // cannot end the stream without producing one — "ended without
+            // recording why" is unrepresentable.
+            Err(end) => self.end.insert(end).replay(),
         }
     }
 
-    /// The actual message decode loop. Split from `message()` so the deadline
-    /// wrapper can bound the whole thing without threading it through the loop.
-    async fn message_inner(&mut self) -> Result<Option<OwnedView<RespView>>, ConnectError> {
+    /// The decode loop. An `Err` here means **"the stream ended"**, not
+    /// "failure" — the [`StreamEnd`] record says whether the end was
+    /// clean (`outcome: Ok(())`) or a failure. Plain
+    /// decode/transport/deadline errors lift into a `StreamEnd` via
+    /// `From`. There is deliberately no way to exit this loop without
+    /// producing the terminal record.
+    async fn message_inner(&mut self) -> Result<OwnedView<RespView>, StreamEnd> {
         loop {
             // For gRPC-Web, check for a complete trailer frame (flag 0x80)
             // before attempting envelope decode (which would treat 0x80 as
@@ -2037,19 +2054,14 @@ where
                     u32::from_be_bytes([self.buf[1], self.buf[2], self.buf[3], self.buf[4]])
                         as usize;
                 if self.buf.len() >= 5 + trailer_len {
-                    // Complete trailer frame — parse it
-                    self.done = true;
+                    // Complete trailer frame — parse and classify. An
+                    // unparseable frame classifies as `None` (no usable
+                    // termination metadata).
                     let decompression =
                         self.encoding.as_deref().map(|enc| (&self.compression, enc));
-                    if let Some(trailers) =
-                        parse_grpc_web_trailer_frame_with_compression(&self.buf, decompression)
-                    {
-                        if let Some(err) = parse_grpc_error_from_trailers(&trailers) {
-                            self.error = Some(err);
-                        }
-                        self.trailers = Some(trailers);
-                    }
-                    return Ok(None);
+                    let parsed =
+                        parse_grpc_web_trailer_frame_with_compression(&self.buf, decompression);
+                    return Err(self.classify_grpc_end(parsed));
                 }
                 // Incomplete trailer frame — need more data, fall through
                 // to poll_body below
@@ -2077,9 +2089,7 @@ where
                 Some(envelope) => {
                     if envelope.is_end_stream() {
                         // Connect protocol end-of-stream envelope
-                        self.done = true;
-                        self.process_end_stream(envelope)?;
-                        return Ok(None);
+                        return Err(self.process_end_stream(envelope));
                     }
 
                     // Data envelope — decompress and decode
@@ -2092,100 +2102,94 @@ where
                         return Err(ConnectError::new(
                             ErrorCode::ResourceExhausted,
                             format!("message size {} exceeds limit {}", data.len(), max_size),
-                        ));
+                        )
+                        .into());
                     }
 
                     let msg = decode_response_view::<RespView>(data, self.codec_format)?;
-                    return Ok(Some(msg));
+                    return Ok(msg);
                 }
-                None => {
-                    // Need more data — poll the body
-                    if !self.poll_body().await? {
-                        // Body exhausted — check buffer for remaining trailer data
-                        self.done = true;
+                None => match self.poll_body().await? {
+                    BodyPoll::Data => {} // loop back to try decoding again
+                    BodyPoll::Trailers(trailers) => {
+                        return Err(self.classify_grpc_end(Some(trailers)));
+                    }
+                    BodyPoll::Eof => {
                         if matches!(self.protocol, Protocol::Connect) {
                             return Err(ConnectError::unavailable(
                                 "Connect streaming response ended without END_STREAM envelope",
-                            ));
+                            )
+                            .into());
                         }
-                        if matches!(self.protocol, Protocol::GrpcWeb)
+                        // gRPC-Web: a complete trailer frame may sit in the
+                        // buffer remnant; an absent or incomplete one
+                        // classifies as `None`.
+                        let parsed = if matches!(self.protocol, Protocol::GrpcWeb)
                             && !self.buf.is_empty()
                             && self.buf[0] & 0x80 != 0
                         {
                             let decompression =
                                 self.encoding.as_deref().map(|enc| (&self.compression, enc));
-                            if let Some(trailers) = parse_grpc_web_trailer_frame_with_compression(
-                                &self.buf,
-                                decompression,
-                            ) {
-                                if let Some(err) = parse_grpc_error_from_trailers(&trailers) {
-                                    self.error = Some(err);
-                                }
-                                self.trailers = Some(trailers);
-                            }
-                        }
-                        // A missing grpc-status is diagnosed by the
-                        // `message()` wrapper (`missing_grpc_status_error`),
-                        // which sees every gRPC/gRPC-Web end — including the
-                        // in-loop trailer-frame path above.
-                        return Ok(None);
+                            parse_grpc_web_trailer_frame_with_compression(&self.buf, decompression)
+                        } else {
+                            None
+                        };
+                        return Err(self.classify_grpc_end(parsed));
                     }
-                    // Loop back to try decoding again
-                }
+                },
             }
         }
     }
 
-    /// For gRPC/gRPC-Web, a stream end is only clean if a `grpc-status`
-    /// actually arrived somewhere: the HTTP/2 trailers, the gRPC-Web
-    /// trailer frame, or — for Trailers-Only responses (grpc-go emits
-    /// these for OK ends with zero messages) — the response headers. An
-    /// end with no status anywhere is indistinguishable from a mid-stream
-    /// cut and must not read as success; grpc-go errors here for the same
-    /// reason. Past the whole-call deadline, the deadline is what cut the
-    /// stream (matches grpc-go / connect-go RST_STREAM CANCEL handling).
+    /// The single classification site for gRPC/gRPC-Web stream ends:
+    /// given the termination metadata that arrived (HTTP/2 trailers, a
+    /// parsed gRPC-Web trailer frame, or `None` when nothing usable did),
+    /// decide clean vs failed and produce the terminal record. Connect
+    /// ends never come here — they classify in `process_end_stream` or
+    /// the missing-END_STREAM arm.
     ///
-    /// Connect signals termination via the END_STREAM envelope, whose
-    /// absence is already an in-loop `unavailable` error — never flagged
-    /// here.
-    fn missing_grpc_status_error(&self) -> Option<ConnectError> {
-        if !matches!(self.protocol, Protocol::Grpc | Protocol::GrpcWeb) {
-            return None;
-        }
-        let has_status = |h: &http::HeaderMap| h.contains_key("grpc-status");
-        // A headers-borne status only counts for a true Trailers-Only
-        // response (empty body). Once body data has flowed, the stream's
-        // real trailers are the required termination signal — otherwise a
-        // mid-stream cut after eager headers would read as success. Same
-        // guard as the unary path's has_body_data fallback.
-        let trailers_only = !self.saw_body_data;
-        if self.trailers.as_ref().is_some_and(has_status)
-            || (trailers_only && has_status(&self.headers))
-        {
-            return None;
-        }
-        Some(
-            if self
-                .deadline
-                .is_some_and(|d| std::time::Instant::now() >= d)
-            {
-                ConnectError::deadline_exceeded("request timeout")
-            } else if self.trailers.is_some() {
-                // Trailers arrived but carry no usable status: the server
-                // spoke, just not enough — Unknown, matching grpc-go,
-                // connect-go, and the conformance suite's primary
-                // expectation for this sub-case.
-                ConnectError::new(
-                    ErrorCode::Unknown,
-                    "protocol error: grpc-status missing from trailers",
-                )
-            } else {
-                // No termination metadata at all: indistinguishable from a
-                // mid-stream cut — Internal, matching grpc-go ("server
-                // closed the stream without sending trailers").
-                ConnectError::internal("stream ended without grpc-status")
-            },
-        )
+    /// An end is only clean if a `grpc-status` actually arrived: in the
+    /// trailers, or — for Trailers-Only responses (grpc-go emits these
+    /// for OK ends with zero messages) — in the response headers, honored
+    /// only while no body data has flowed (the unary path's
+    /// has_body_data guard: a mid-stream cut after eager headers must not
+    /// read as success). No status anywhere is indistinguishable from a
+    /// mid-stream cut: past the whole-call deadline the deadline is what
+    /// cut the stream (matches grpc-go / connect-go RST_STREAM CANCEL
+    /// handling); with trailers present it's `unknown`, without any it's
+    /// `internal` — each matching grpc-go.
+    fn classify_grpc_end(&self, trailers: Option<http::HeaderMap>) -> StreamEnd {
+        debug_assert!(
+            matches!(self.protocol, Protocol::Grpc | Protocol::GrpcWeb),
+            "Connect ends classify in process_end_stream / the missing-END_STREAM arm"
+        );
+        let outcome = match trailers.as_ref().and_then(parse_grpc_error_from_trailers) {
+            // A server error — or a present-but-malformed status, which
+            // the parse maps to `unknown` — ends the RPC in failure.
+            Some(err) => Err(err),
+            None => {
+                let has_status = |h: &http::HeaderMap| h.contains_key("grpc-status");
+                let trailers_only = !self.saw_body_data;
+                if trailers.as_ref().is_some_and(has_status)
+                    || (trailers_only && has_status(&self.headers))
+                {
+                    Ok(())
+                } else if self
+                    .deadline
+                    .is_some_and(|d| std::time::Instant::now() >= d)
+                {
+                    Err(ConnectError::deadline_exceeded("request timeout"))
+                } else if trailers.is_some() {
+                    Err(ConnectError::new(
+                        ErrorCode::Unknown,
+                        "protocol error: grpc-status missing from trailers",
+                    ))
+                } else {
+                    Err(ConnectError::internal("stream ended without grpc-status"))
+                }
+            }
+        };
+        StreamEnd { outcome, trailers }
     }
 
     /// Returns the trailing metadata, if available.
@@ -2195,7 +2199,7 @@ where
     /// both the `Ok(None)` and `Err` ends.
     #[must_use]
     pub fn trailers(&self) -> Option<&http::HeaderMap> {
-        self.trailers.as_ref()
+        self.end.as_ref().and_then(|e| e.trailers.as_ref())
     }
 
     /// Returns the terminal error that ended the stream, if any — a server
@@ -2207,17 +2211,18 @@ where
     /// alongside [`trailers()`](Self::trailers).
     #[must_use]
     pub fn error(&self) -> Option<&ConnectError> {
-        self.error.as_ref()
+        self.end.as_ref().and_then(|e| e.outcome.as_ref().err())
     }
 
-    /// Poll the body for more data frames. Returns `true` if data was added
-    /// to the buffer, `false` if the body is exhausted.
+    /// Poll the body for the next frame. A pure transport reader: it
+    /// buffers data, returns trailers as a value, and never touches the
+    /// terminal record.
     ///
     /// Buffer growth is bounded: if the accumulated bytes exceed the expected
     /// maximum in-flight envelope size, return `ResourceExhausted` rather than
     /// continuing to buffer. This prevents a malicious server from trickling
     /// bytes indefinitely without ever completing an envelope.
-    async fn poll_body(&mut self) -> Result<bool, ConnectError> {
+    async fn poll_body(&mut self) -> Result<BodyPoll, ConnectError> {
         // Enough for one complete envelope at the max message size, plus
         // one header's worth of slack (next envelope's header may arrive in
         // the same TCP frame), plus 64 KiB for gRPC-Web trailer frames.
@@ -2228,10 +2233,21 @@ where
             .saturating_add(RESPONSE_BUFFER_TRAILER_SLACK);
 
         loop {
-            let frame = Pin::new(&mut self.body).frame().await;
+            // The whole-call deadline bounds each frame poll. The deadline
+            // is an absolute instant and all work between frame polls is
+            // non-yielding, so this is observably equivalent to bounding
+            // the entire decode loop — and it is what lets every terminal
+            // cause exit `message_inner` as a `StreamEnd`. (The
+            // equivalence would break if this ever became a relative
+            // timeout; `deadline_bounds_multi_frame_message` pins it.)
+            let deadline = self.deadline;
+            let frame = with_deadline(deadline, async {
+                Ok(Pin::new(&mut self.body).frame().await)
+            })
+            .await?;
 
             match frame {
-                None => return Ok(false), // Body exhausted
+                None => return Ok(BodyPoll::Eof),
                 Some(Ok(frame)) => {
                     if frame.is_data() {
                         if let Ok(data) = frame.into_data() {
@@ -2244,18 +2260,16 @@ where
                                 )));
                             }
                             self.buf.extend_from_slice(&data);
-                            return Ok(true);
+                            return Ok(BodyPoll::Data);
                         }
                     } else if frame.is_trailers()
                         && let Ok(trailers) = frame.into_trailers()
                         && matches!(self.protocol, Protocol::Grpc | Protocol::GrpcWeb)
                     {
-                        // HTTP/2 or HTTP/1.1 chunked trailers — used by gRPC/gRPC-Web
-                        if let Some(err) = parse_grpc_error_from_trailers(&trailers) {
-                            self.error = Some(err);
-                        }
-                        self.trailers = Some(trailers);
-                        return Ok(false); // caller marks done on body exhaustion
+                        // HTTP/2 or HTTP/1.1 chunked trailers — used by
+                        // gRPC/gRPC-Web. (Connect has no trailer semantics;
+                        // such frames are skipped.)
+                        return Ok(BodyPoll::Trailers(trailers));
                     }
                 }
                 Some(Err(e)) => {
@@ -2286,15 +2300,17 @@ where
         }
     }
 
-    /// Process the END_STREAM envelope: extract trailers and error.
-    fn process_end_stream(&mut self, envelope: Envelope) -> Result<(), ConnectError> {
-        let end_stream_data = self.decompress_envelope(envelope)?;
+    /// Classify the Connect END_STREAM envelope into the terminal record.
+    fn process_end_stream(&self, envelope: Envelope) -> StreamEnd {
+        let end_stream_data = match self.decompress_envelope(envelope) {
+            Ok(data) => data,
+            Err(e) => return e.into(),
+        };
 
         let end_stream: ClientEndStreamResponse =
             serde_json::from_slice(&end_stream_data).unwrap_or_default();
 
-        // Extract trailers from metadata
-        if let Some(metadata) = end_stream.metadata {
+        let trailers = end_stream.metadata.map(|metadata| {
             let mut trailers = http::HeaderMap::new();
             for (name, values) in metadata {
                 for value in values {
@@ -2306,23 +2322,25 @@ where
                     }
                 }
             }
-            self.trailers = Some(trailers);
-        }
+            trailers
+        });
 
-        // Extract error
-        if let Some(err) = end_stream.error {
-            let mut connect_error = ConnectError::new(
-                err.code
-                    .as_deref()
-                    .and_then(|c| c.parse().ok())
-                    .unwrap_or(ErrorCode::Unknown),
-                err.message.unwrap_or_default(),
-            );
-            connect_error.details = err.details;
-            self.error = Some(connect_error);
-        }
+        let outcome = match end_stream.error {
+            Some(err) => {
+                let mut connect_error = ConnectError::new(
+                    err.code
+                        .as_deref()
+                        .and_then(|c| c.parse().ok())
+                        .unwrap_or(ErrorCode::Unknown),
+                    err.message.unwrap_or_default(),
+                );
+                connect_error.details = err.details;
+                Err(connect_error)
+            }
+            None => Ok(()),
+        };
 
-        Ok(())
+        StreamEnd { outcome, trailers }
     }
 }
 
@@ -2533,9 +2551,7 @@ where
         protocol,
         max_message_size,
         deadline,
-        trailers: None,
-        error: None,
-        done: false,
+        end: None,
         saw_body_data: false,
         _phantom: PhantomData,
     })
@@ -3851,9 +3867,7 @@ mod tests {
             protocol: Protocol::Connect,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
@@ -3903,9 +3917,7 @@ mod tests {
             protocol: Protocol::Connect,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
@@ -3958,9 +3970,7 @@ mod tests {
             protocol: Protocol::Connect,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
@@ -4032,9 +4042,7 @@ mod tests {
             protocol: Protocol::Grpc,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
@@ -4088,9 +4096,7 @@ mod tests {
             protocol: Protocol::Grpc,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
@@ -4117,9 +4123,7 @@ mod tests {
             protocol: Protocol::Grpc,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
@@ -4164,9 +4168,7 @@ mod tests {
             protocol: Protocol::Grpc,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
@@ -4205,9 +4207,7 @@ mod tests {
             protocol: Protocol::Grpc,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
@@ -4243,9 +4243,7 @@ mod tests {
             protocol: Protocol::Grpc,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
@@ -4265,6 +4263,72 @@ mod tests {
             .await
             .expect_err("missing-status error must be sticky");
         assert_eq!(again.code, ErrorCode::Unknown);
+    }
+
+    /// The whole-call deadline is ABSOLUTE across frame polls: a server
+    /// trickling frames forever, each arriving well inside any plausible
+    /// per-poll window, is stopped at the deadline. This pins the
+    /// equivalence that licenses bounding each frame poll instead of the
+    /// whole decode loop — a per-poll *relative* timeout would let every
+    /// 40ms frame through and this test would fail (the trickled bytes
+    /// eventually complete an envelope and yield `Ok(Some)`).
+    #[tokio::test(start_paused = true)]
+    async fn deadline_bounds_multi_frame_message() {
+        use std::time::Duration;
+
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use http_body::Frame;
+        use http_body_util::StreamBody;
+
+        // One opaque byte every 40ms, forever (bounded at 32 so a
+        // regression fails fast instead of hanging) — never enough to
+        // matter before a 100ms absolute deadline.
+        let frames: std::pin::Pin<
+            Box<dyn futures::Stream<Item = Result<Frame<Bytes>, std::convert::Infallible>> + Send>,
+        > = Box::pin(futures::stream::unfold(0u32, |n| async move {
+            if n >= 32 {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            Some((
+                Ok::<_, std::convert::Infallible>(Frame::data(Bytes::from_static(&[0u8]))),
+                n + 1,
+            ))
+        }));
+        let body = StreamBody::new(frames);
+
+        let mut stream: ServerStream<_, StringValueView<'static>> = ServerStream {
+            headers: http::HeaderMap::new(),
+            body,
+            buf: BytesMut::new(),
+            encoding: None,
+            compression: CompressionRegistry::new(),
+            codec_format: CodecFormat::Proto,
+            protocol: Protocol::Grpc,
+            max_message_size: Some(1024),
+            deadline: Some(std::time::Instant::now() + Duration::from_millis(100)),
+            end: None,
+            saw_body_data: false,
+            _phantom: PhantomData,
+        };
+
+        let start = tokio::time::Instant::now();
+        let err = stream
+            .message()
+            .await
+            .expect_err("absolute deadline must fire mid-trickle");
+        assert_eq!(err.code, ErrorCode::DeadlineExceeded);
+        assert!(
+            start.elapsed() <= Duration::from_millis(150),
+            "deadline must be absolute across polls, not per-poll relative (elapsed {:?})",
+            start.elapsed()
+        );
+
+        let again = stream
+            .message()
+            .await
+            .expect_err("deadline error is sticky");
+        assert_eq!(again.code, ErrorCode::DeadlineExceeded);
     }
 
     /// A present-but-garbage `grpc-status` is a protocol error (`unknown`,
@@ -4292,9 +4356,7 @@ mod tests {
             protocol: Protocol::Grpc,
             max_message_size: Some(1024),
             deadline: None,
-            trailers: None,
-            error: None,
-            done: false,
+            end: None,
             saw_body_data: false,
             _phantom: PhantomData,
         };
