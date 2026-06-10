@@ -344,10 +344,10 @@ where
         // Lazily arm the inter-message timer on the first poll so that
         // stream-setup latency before the consumer starts reading is excluded
         // from the first gap measurement.
-        if this.per_item.is_none() {
-            if let Some(d) = this.inter_message {
-                this.per_item.set(Some(tokio::time::sleep(*d)));
-            }
+        if this.per_item.is_none()
+            && let Some(d) = this.inter_message
+        {
+            this.per_item.set(Some(tokio::time::sleep(*d)));
         }
 
         // Check the absolute deadline first — once it lapses the whole
@@ -613,15 +613,17 @@ mod tests {
         tokio::time::advance(ms(100)).await;
 
         let item = wrapped.next().await.unwrap();
-        assert!(item.is_ok(), "expected first item but got deadline error: {:?}", item);
+        assert!(
+            item.is_ok(),
+            "expected first item but got deadline error: {item:?}"
+        );
         assert_eq!(item.unwrap(), Bytes::from_static(b"a"));
     }
 
     #[tokio::test(start_paused = true)]
     async fn stream_that_never_yields_still_times_out() {
         let p = DeadlinePolicy::new().with_inter_message_timeout(ms(50));
-        let inner: BoxStream<Result<Bytes, ConnectError>> =
-            Box::pin(futures::stream::pending());
+        let inner: BoxStream<Result<Bytes, ConnectError>> = Box::pin(futures::stream::pending());
         let mut wrapped = p.enforce_on_response_stream(inner, None);
 
         let first = futures::poll!(wrapped.next());
