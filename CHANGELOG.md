@@ -37,12 +37,15 @@ increment the patch version.
   }
   ```
 
-- **A gRPC/gRPC-Web stream ending without `grpc-status` is now an
-  error** (`internal`, "server closed stream without sending
-  grpc-status") instead of a clean `Ok(None)` — EOF without termination
-  metadata is indistinguishable from a mid-stream cut, so it must not
-  read as success (grpc-go does the same). The Connect protocol already
-  treated a missing END_STREAM envelope as `unavailable`.
+- **A gRPC/gRPC-Web stream that never delivers a `grpc-status` is now
+  an error** (`internal`, "stream ended without grpc-status") instead
+  of a clean `Ok(None)` — whether the trailers were absent entirely or
+  arrived without the status, the end is indistinguishable from a
+  mid-stream cut and must not read as success (grpc-go does the same).
+  A Trailers-Only response carrying `grpc-status: 0` in the response
+  headers (grpc-go's shape for an OK end with zero messages) remains a
+  clean end. The Connect protocol already treated a missing END_STREAM
+  envelope as `unavailable`.
 
 This release also reworks the server-side request surface around buffa 0.7.0,
 which removed `OwnedView`'s `Deref` impl (the impl let safe code hold view
