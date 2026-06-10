@@ -249,11 +249,11 @@ async fn run_conversation(
             ..Default::default()
         })
         .await?;
+    // `message()` returns `Ok(None)` only on a clean end; a server error in
+    // the stream's termination metadata comes back as `Err`, so `?` is the
+    // complete error handling here.
     while let Some(msg) = intro.message().await? {
         println!("Eliza> {}", msg.reborrow().sentence);
-    }
-    if let Some(err) = intro.error() {
-        return Err(err.clone().into());
     }
 
     // --- Converse (bidirectional streaming) ---
@@ -299,9 +299,6 @@ async fn run_conversation(
                         got_reply = true;
                     }
                     Ok(None) => {
-                        if let Some(err) = convo.error() {
-                            return Err(err.clone().into());
-                        }
                         if got_reply {
                             // Server sent a farewell then closed cleanly.
                             // Our send just raced the close; swallow it.
@@ -327,10 +324,7 @@ async fn run_conversation(
                 }
             }
             None => {
-                // Stream ended before we got any response to this send.
-                if let Some(err) = convo.error() {
-                    return Err(err.clone().into());
-                }
+                // Stream ended cleanly before any response to this send.
                 println!("\n(Eliza has ended the session.)");
                 break;
             }
@@ -378,13 +372,8 @@ async fn peek_stream_closed(convo: &mut ConvoStream) -> Result<bool, BoxError> {
         // Timeout: stream still open.
         Err(_elapsed) => Ok(false),
 
-        // Stream ended.
-        Ok(Ok(None)) => {
-            if let Some(err) = convo.error() {
-                return Err(err.clone().into());
-            }
-            Ok(true)
-        }
+        // Stream ended cleanly.
+        Ok(Ok(None)) => Ok(true),
 
         // Server sent another message unprompted. Unusual for Eliza (she's
         // strictly 1:1) but valid for bidi streams in general. Print it and

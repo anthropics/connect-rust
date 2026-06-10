@@ -443,10 +443,12 @@ mod tests {
         let client: HealthClient<HttpClient> = HealthClient::new(HttpClient::plaintext(), config);
 
         let mut stream = client.watch(HealthCheckRequest::default()).await.unwrap();
-        // Server-streaming RPCs surface errors via the trailers — `message()`
-        // returns `Ok(None)` and the error lands on `stream.error()`.
-        assert!(stream.message().await.unwrap().is_none());
-        let err = stream.error().expect("expected Unimplemented error");
+        // Server-streaming RPCs surface trailer-borne errors directly from
+        // `message()` — `Ok(None)` is reserved for a clean end.
+        let err = stream
+            .message()
+            .await
+            .expect_err("expected Unimplemented error");
         assert_eq!(err.code, connectrpc::ErrorCode::Unimplemented);
     }
 }

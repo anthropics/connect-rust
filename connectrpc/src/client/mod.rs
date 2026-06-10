@@ -1870,9 +1870,9 @@ where
 ///
 /// Provides incremental access to response messages as they arrive from the server.
 /// Messages are decoded one at a time from the HTTP response body using the
-/// [`message()`](ServerStream::message) method. Trailing metadata and errors
-/// (from the Connect END_STREAM envelope) become available after the message
-/// stream is exhausted.
+/// [`message()`](ServerStream::message) method, which returns `Ok(None)` for
+/// a clean end and `Err` for a failed RPC — `?` is the complete error
+/// handling. Trailing metadata becomes available after the stream ends.
 ///
 /// # Example
 ///
@@ -1935,30 +1935,70 @@ where
     /// Fetch the next message from the stream.
     ///
     /// Returns `Ok(Some(msg))` for each message, `Ok(None)` when the stream
-    /// ends, or `Err(...)` on protocol/decode/deadline errors.
+    /// ends **cleanly** (gRPC status OK / error-free END_STREAM), or
+    /// `Err(...)` for everything else: protocol/decode/deadline errors *and*
+    /// a server error carried in the stream's termination metadata (gRPC
+    /// trailers, gRPC-Web trailer frame, or Connect END_STREAM envelope).
+    /// `Ok(None)` means the RPC succeeded — matching `tonic`.
+    ///
+    /// Every `Err` is terminal and sticky: the stream will never yield
+    /// another message, subsequent calls return the same `Err` (the same
+    /// policy as a failed stream construction), and recovery means making a
+    /// new call — not re-polling this one. The terminal error also remains
+    /// inspectable via [`error()`](Self::error), and
+    /// [`trailers()`](Self::trailers) is populated when termination metadata
+    /// was received — for both the `Ok(None)` and `Err` ends.
     ///
     /// If a deadline was set on this call (via [`CallOptions::with_timeout`]
     /// or [`ClientConfig::with_default_timeout`]), each `message()` poll is
     /// bounded by it — gRPC deadline semantics are whole-call, so a hung
     /// server won't block indefinitely (matching grpc-java and connect-go).
     ///
-    /// After this returns `Ok(None)`, [`trailers()`](Self::trailers) and
-    /// [`error()`](Self::error) become available.
-    ///
     /// # Errors
     ///
-    /// For the Connect protocol, a response body that ends without the
-    /// required END_STREAM envelope returns `Err` with code `unavailable`
-    /// rather than `Ok(None)` — a stream cut off mid-response is not a
-    /// clean end. In that case (as with any returned `Err`)
-    /// [`trailers()`](Self::trailers) and [`error()`](Self::error) are not
-    /// populated; the returned error is the terminal outcome.
+    /// A response body that ends without its protocol's termination
+    /// metadata is not a clean end and returns `Err` rather than
+    /// `Ok(None)`: code `unavailable` for a Connect stream missing its
+    /// END_STREAM envelope, `internal` for a gRPC/gRPC-Web stream missing
+    /// `grpc-status` (matching grpc-go's treatment of EOF-without-status
+    /// as an error).
     pub async fn message(&mut self) -> Result<Option<OwnedView<RespView>>, ConnectError> {
+        // Terminal errors are sticky: once the RPC has failed, every
+        // subsequent poll re-reports the failure rather than reading a
+        // closed stream as `Ok(None)` (which callers may rightly treat as
+        // success).
+        if self.done
+            && let Some(err) = &self.error
+        {
+            return Err(err.clone());
+        }
         // Whole-call deadline enforcement: wrap the decode loop so every
-        // body-poll is bounded. If the deadline has already passed, this
-        // returns immediately without polling.
+        // body-poll is bounded.
         let deadline = self.deadline;
-        with_deadline(deadline, self.message_inner()).await
+        match with_deadline(deadline, self.message_inner()).await {
+            Ok(Some(msg)) => Ok(Some(msg)),
+            Ok(None) => {
+                // An end-of-stream whose termination metadata carries a
+                // server error is a failed RPC, not a clean close — surface
+                // it as `Err`. Callers that only match `Ok(None)` must never
+                // mistake a failed RPC for success (the silent-retry-loop
+                // failure mode this guards against).
+                match &self.error {
+                    Some(err) => Err(err.clone()),
+                    None => Ok(None),
+                }
+            }
+            Err(err) => {
+                // Decode/transport/deadline failures are equally terminal:
+                // the stream state is unrecoverable. Stash so re-polls stay
+                // `Err` instead of degrading to a clean-looking `Ok(None)`.
+                self.done = true;
+                if self.error.is_none() {
+                    self.error = Some(err.clone());
+                }
+                Err(err)
+            }
+        }
     }
 
     /// The actual message decode loop. Split from `message()` so the deadline
@@ -2067,17 +2107,28 @@ where
                                 self.trailers = Some(trailers);
                             }
                         }
-                        // For gRPC, if body exhausted without trailers and
-                        // deadline has passed, map to DEADLINE_EXCEEDED
-                        // (matches grpc-go / connect-go RST_STREAM CANCEL handling)
+                        // gRPC/gRPC-Web: EOF without any termination
+                        // metadata is a protocol violation, never a clean
+                        // end. Past the deadline, the deadline is what cut
+                        // the stream (matches grpc-go / connect-go
+                        // RST_STREAM CANCEL handling); otherwise report the
+                        // missing status (grpc-go maps EOF-without-status
+                        // to an error for the same reason: it is
+                        // indistinguishable from a mid-stream cut).
                         if self.error.is_none()
                             && self.trailers.is_none()
                             && matches!(self.protocol, Protocol::Grpc | Protocol::GrpcWeb)
-                            && self
-                                .deadline
-                                .is_some_and(|d| std::time::Instant::now() >= d)
                         {
-                            self.error = Some(ConnectError::deadline_exceeded("request timeout"));
+                            let past_deadline = self
+                                .deadline
+                                .is_some_and(|d| std::time::Instant::now() >= d);
+                            self.error = Some(if past_deadline {
+                                ConnectError::deadline_exceeded("request timeout")
+                            } else {
+                                ConnectError::internal(
+                                    "server closed stream without sending grpc-status",
+                                )
+                            });
                         }
                         return Ok(None);
                     }
@@ -2089,15 +2140,20 @@ where
 
     /// Returns the trailing metadata, if available.
     ///
-    /// Only populated after [`message()`](Self::message) returns `Ok(None)`.
+    /// Only populated after [`message()`](Self::message) reports the end of
+    /// the stream — `Ok(None)` for a clean end, or the terminal `Err` when
+    /// the termination metadata carried a server error.
     #[must_use]
     pub fn trailers(&self) -> Option<&http::HeaderMap> {
         self.trailers.as_ref()
     }
 
-    /// Returns the trailing error from the END_STREAM envelope, if any.
+    /// Returns the terminal server error (gRPC trailers / Connect
+    /// END_STREAM), if any.
     ///
-    /// Only populated after [`message()`](Self::message) returns `Ok(None)`.
+    /// [`message()`](Self::message) already returns this same error, so most
+    /// callers never need this accessor; it exists for post-hoc inspection
+    /// alongside [`trailers()`](Self::trailers).
     #[must_use]
     pub fn error(&self) -> Option<&ConnectError> {
         self.error.as_ref()
@@ -2229,8 +2285,8 @@ where
 /// - The request cannot be encoded or sent
 /// - The server responds with a non-200 status (protocol-level error)
 ///
-/// Errors that occur during the stream (e.g., in the END_STREAM envelope)
-/// are available via [`ServerStream::error()`] after the stream ends.
+/// Errors that occur during the stream (e.g., in gRPC trailers or the
+/// END_STREAM envelope) are returned by [`ServerStream::message()`].
 pub async fn call_server_stream<T, Req, RespView>(
     transport: &T,
     config: &ClientConfig,
@@ -2506,11 +2562,10 @@ enum RecvState<B, RespView> {
 /// stream.send(request1).await?;
 /// stream.send(request2).await?;
 /// stream.close_send();
+/// // `Ok(None)` means a clean end; a failed RPC surfaces as `Err`,
+/// // so `?` is the complete error handling.
 /// while let Some(msg) = stream.message().await? {
 ///     println!("got: {msg:?}");
-/// }
-/// if let Some(err) = stream.error() {
-///     return Err(err.clone());
 /// }
 /// ```
 pub struct BidiStream<B, Req, RespView> {
@@ -2627,9 +2682,10 @@ where
     /// servers that wait for a request before sending headers don't deadlock).
     /// Subsequent calls decode envelopes from the response body stream.
     ///
-    /// Returns `Ok(None)` when the server is done sending. At that point,
-    /// [`trailers()`](Self::trailers) and [`error()`](Self::error) become
-    /// available.
+    /// Returns `Ok(None)` only when the server finished **cleanly**; a
+    /// server error carried in the termination metadata is returned as
+    /// `Err`, sticky across calls — see [`ServerStream::message()`] for the
+    /// full contract.
     pub async fn message(&mut self) -> Result<Option<OwnedView<RespView>>, ConnectError> {
         // If we already failed during construction or first await, return that.
         if let Some(ref err) = self.construct_err {
@@ -2705,7 +2761,7 @@ where
     }
 
     /// Trailing metadata. Only populated after [`message()`](Self::message)
-    /// returns `Ok(None)`.
+    /// reports the end of the stream (`Ok(None)` or the terminal `Err`).
     #[must_use]
     pub fn trailers(&self) -> Option<&http::HeaderMap> {
         match &self.recv {
@@ -2714,10 +2770,10 @@ where
         }
     }
 
-    /// Trailing error from the END_STREAM envelope (Connect) or trailers (gRPC).
-    /// Only populated after [`message()`](Self::message) returns `Ok(None)`.
-    /// For transport-level failures, [`message()`](Self::message) returns the
-    /// error directly instead.
+    /// Terminal server error from the END_STREAM envelope (Connect) or
+    /// trailers (gRPC), if any. [`message()`](Self::message) already returns
+    /// this same error, so most callers never need this accessor; it exists
+    /// for post-hoc inspection alongside [`trailers()`](Self::trailers).
     #[must_use]
     pub fn error(&self) -> Option<&ConnectError> {
         match &self.recv {
@@ -3756,6 +3812,14 @@ mod tests {
             err.to_string().contains("END_STREAM"),
             "unexpected error: {err}"
         );
+
+        // Sticky: a re-poll must not degrade truncation to a clean-looking
+        // `Ok(None)`.
+        let again = stream
+            .message()
+            .await
+            .expect_err("truncation error must be sticky");
+        assert_eq!(again.code, ErrorCode::Unavailable);
     }
 
     /// A Connect streaming response whose body is empty (zero envelopes,
@@ -3792,6 +3856,221 @@ mod tests {
             err.to_string().contains("END_STREAM"),
             "unexpected error: {err}"
         );
+
+        let again = stream
+            .message()
+            .await
+            .expect_err("truncation error must be sticky");
+        assert_eq!(again.code, ErrorCode::Unavailable);
+    }
+
+    /// `Ok(None)` means the RPC succeeded — a Connect END_STREAM envelope
+    /// carrying an error must come back as `Err` from `message()`, sticky
+    /// across calls, with `error()` still available for inspection.
+    #[tokio::test]
+    async fn connect_end_stream_error_returned_from_message() {
+        use buffa::Message;
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+
+        let mut body = BytesMut::new();
+        body.extend_from_slice(
+            &Envelope::data(StringValue::from("hello").encode_to_bytes()).encode(),
+        );
+        body.extend_from_slice(
+            &Envelope::end_stream(Bytes::from_static(
+                b"{\"error\":{\"code\":\"out_of_range\",\"message\":\"requested position no longer retained\"},\
+                  \"metadata\":{\"x-detail\":[\"42\"]}}",
+            ))
+            .encode(),
+        );
+        let mut stream: ServerStream<_, StringValueView<'static>> = ServerStream {
+            headers: http::HeaderMap::new(),
+            body: Full::new(body.freeze()),
+            buf: BytesMut::new(),
+            encoding: None,
+            compression: CompressionRegistry::new(),
+            codec_format: CodecFormat::Proto,
+            protocol: Protocol::Connect,
+            max_message_size: Some(1024),
+            deadline: None,
+            trailers: None,
+            error: None,
+            done: false,
+            _phantom: PhantomData,
+        };
+
+        let msg = stream
+            .message()
+            .await
+            .expect("data envelope should decode")
+            .expect("stream should yield the data message first");
+        assert_eq!(msg.reborrow().value, "hello");
+
+        let err = stream
+            .message()
+            .await
+            .expect_err("errored END_STREAM must surface as Err, not Ok(None)");
+        assert_eq!(err.code, ErrorCode::OutOfRange);
+        assert_eq!(
+            err.message.as_deref(),
+            Some("requested position no longer retained")
+        );
+
+        // Sticky: re-polling a failed stream re-reports the failure.
+        let again = stream
+            .message()
+            .await
+            .expect_err("terminal error is sticky");
+        assert_eq!(again.code, ErrorCode::OutOfRange);
+
+        // Post-hoc accessors still work.
+        assert_eq!(stream.error().map(|e| e.code), Some(ErrorCode::OutOfRange));
+        assert_eq!(
+            stream
+                .trailers()
+                .and_then(|t| t.get("x-detail"))
+                .and_then(|v| v.to_str().ok()),
+            Some("42")
+        );
+    }
+
+    /// Same contract for gRPC: an error in HTTP/2 trailers is a failed RPC
+    /// and must come back as `Err` from `message()` — not the silent
+    /// `Ok(None)` that callers mistake for a clean close.
+    #[tokio::test]
+    async fn grpc_trailer_error_returned_from_message() {
+        use buffa::Message;
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+        use http_body::Frame;
+        use http_body_util::StreamBody;
+
+        let data = Envelope::data(StringValue::from("hello").encode_to_bytes()).encode();
+        let mut trailers = http::HeaderMap::new();
+        trailers.insert("grpc-status", "11".parse().unwrap()); // OUT_OF_RANGE
+        trailers.insert(
+            "grpc-message",
+            "requested position no longer retained".parse().unwrap(),
+        );
+        let frames: Vec<Result<Frame<Bytes>, std::convert::Infallible>> =
+            vec![Ok(Frame::data(data)), Ok(Frame::trailers(trailers))];
+        let body = StreamBody::new(futures::stream::iter(frames));
+
+        let mut stream: ServerStream<_, StringValueView<'static>> = ServerStream {
+            headers: http::HeaderMap::new(),
+            body,
+            buf: BytesMut::new(),
+            encoding: None,
+            compression: CompressionRegistry::new(),
+            codec_format: CodecFormat::Proto,
+            protocol: Protocol::Grpc,
+            max_message_size: Some(1024),
+            deadline: None,
+            trailers: None,
+            error: None,
+            done: false,
+            _phantom: PhantomData,
+        };
+
+        let msg = stream
+            .message()
+            .await
+            .expect("data envelope should decode")
+            .expect("stream should yield the data message first");
+        assert_eq!(msg.reborrow().value, "hello");
+
+        let err = stream
+            .message()
+            .await
+            .expect_err("gRPC trailer error must surface as Err, not Ok(None)");
+        assert_eq!(err.code, ErrorCode::OutOfRange);
+        assert_eq!(
+            err.message.as_deref(),
+            Some("requested position no longer retained")
+        );
+
+        let again = stream
+            .message()
+            .await
+            .expect_err("terminal error is sticky");
+        assert_eq!(again.code, ErrorCode::OutOfRange);
+        assert!(stream.trailers().is_some());
+    }
+
+    /// A gRPC stream ending with `grpc-status: 0` is the one true clean end —
+    /// `Ok(None)`, no error.
+    #[tokio::test]
+    async fn grpc_ok_trailers_end_as_ok_none() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use http_body::Frame;
+        use http_body_util::StreamBody;
+
+        let mut trailers = http::HeaderMap::new();
+        trailers.insert("grpc-status", "0".parse().unwrap());
+        let frames: Vec<Result<Frame<Bytes>, std::convert::Infallible>> =
+            vec![Ok(Frame::trailers(trailers))];
+        let body = StreamBody::new(futures::stream::iter(frames));
+
+        let mut stream: ServerStream<_, StringValueView<'static>> = ServerStream {
+            headers: http::HeaderMap::new(),
+            body,
+            buf: BytesMut::new(),
+            encoding: None,
+            compression: CompressionRegistry::new(),
+            codec_format: CodecFormat::Proto,
+            protocol: Protocol::Grpc,
+            max_message_size: Some(1024),
+            deadline: None,
+            trailers: None,
+            error: None,
+            done: false,
+            _phantom: PhantomData,
+        };
+
+        assert!(stream.message().await.unwrap().is_none());
+        assert!(stream.error().is_none());
+        assert!(stream.trailers().is_some());
+    }
+
+    /// gRPC EOF with no trailers at all is a protocol violation — it must
+    /// not read as a clean end (it is indistinguishable from a mid-stream
+    /// cut; grpc-go errors here too).
+    #[tokio::test]
+    async fn grpc_eof_without_trailers_errors() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+
+        let mut stream: ServerStream<_, StringValueView<'static>> = ServerStream {
+            headers: http::HeaderMap::new(),
+            body: Full::new(Bytes::new()),
+            buf: BytesMut::new(),
+            encoding: None,
+            compression: CompressionRegistry::new(),
+            codec_format: CodecFormat::Proto,
+            protocol: Protocol::Grpc,
+            max_message_size: Some(1024),
+            deadline: None,
+            trailers: None,
+            error: None,
+            done: false,
+            _phantom: PhantomData,
+        };
+
+        let err = stream
+            .message()
+            .await
+            .expect_err("EOF without grpc-status must surface as Err");
+        assert_eq!(err.code, ErrorCode::Internal);
+        assert!(
+            err.to_string().contains("grpc-status"),
+            "unexpected error: {err}"
+        );
+
+        let again = stream
+            .message()
+            .await
+            .expect_err("missing-status error must be sticky");
+        assert_eq!(again.code, ErrorCode::Internal);
     }
 
     #[cfg(feature = "client")]

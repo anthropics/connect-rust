@@ -1442,9 +1442,8 @@ mod tests {
         let client = make_client(addr);
 
         // Server streaming: the deny is rendered as an EndStreamResponse
-        // envelope (HTTP 200, Connect protocol). The client surfaces it via
-        // `stream.error()` after `message()` returns `Ok(None)` — same as
-        // connect-go's `stream.Err()`.
+        // envelope (HTTP 200, Connect protocol). The client returns it from
+        // `message()` — `Ok(None)` is reserved for a clean end.
         let mut stream = client
             .server_stream(EchoRequest {
                 sequence: 1,
@@ -1452,13 +1451,10 @@ mod tests {
             })
             .await
             .expect("Connect-streaming errors arrive via the envelope, not the headers");
-        assert!(
-            stream.message().await.unwrap().is_none(),
-            "deny means no items"
-        );
         let err = stream
-            .error()
-            .expect("interceptor deny must surface on the stream");
+            .message()
+            .await
+            .expect_err("interceptor deny must surface from message()");
         assert_eq!(err.code, connectrpc::ErrorCode::PermissionDenied);
 
         // Client streaming: the response is unary-shaped over a streaming

@@ -10,7 +10,41 @@ increment the patch version.
 
 ## [Unreleased]
 
-This release reworks the server-side request surface around buffa 0.7.0,
+### Breaking
+
+- **Client streams return terminal server errors from `message()`**.
+  Previously, an RPC error carried in the stream's termination metadata
+  (gRPC HTTP/2 trailers, gRPC-Web trailer frame, or Connect END_STREAM
+  envelope) made `ServerStream::message()` / `BidiStream::message()`
+  return `Ok(None)` — indistinguishable from a clean close — with the
+  error retrievable only via the easy-to-miss `error()` accessor. A
+  caller that treated `Ok(None)` as success would silently swallow every
+  failed streaming RPC. `message()` now returns `Err(...)` for an
+  errored end and reserves `Ok(None)` for a clean end (gRPC status OK /
+  error-free END_STREAM), matching `tonic`. Every `Err` is terminal and
+  sticky — re-polling returns the same error, never a clean-looking
+  `Ok(None)`; `error()` and `trailers()` remain populated for post-hoc
+  inspection. Callers that only match `Err` need no changes; callers
+  doing the `Ok(None)`-then-`error()` dance can delete the dance:
+
+  ```rust
+  // Before: errors hid behind Ok(None)        // After: `?` is complete
+  while let Some(m) = s.message().await? {     while let Some(m) = s.message().await? {
+      handle(m);                                   handle(m);
+  }                                            }
+  if let Some(err) = s.error() {
+      return Err(err.clone().into());
+  }
+  ```
+
+- **A gRPC/gRPC-Web stream ending without `grpc-status` is now an
+  error** (`internal`, "server closed stream without sending
+  grpc-status") instead of a clean `Ok(None)` — EOF without termination
+  metadata is indistinguishable from a mid-stream cut, so it must not
+  read as success (grpc-go does the same). The Connect protocol already
+  treated a missing END_STREAM envelope as `unavailable`.
+
+This release also reworks the server-side request surface around buffa 0.7.0,
 which removed `OwnedView`'s `Deref` impl (the impl let safe code hold view
 fields past the backing buffer's lifetime). Handlers move from owned
 `OwnedView<FooView<'static>>` parameters to borrowed requests and owned
