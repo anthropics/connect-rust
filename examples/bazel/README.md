@@ -5,14 +5,14 @@ work cleanly under Bazel. A `bazel test //...` invocation:
 
 1. Runs `protoc` with all three plugins (`protoc-gen-buffa`,
    `protoc-gen-buffa-packaging`, `protoc-gen-connect-rust`) via a
-   `genrule`, producing four `.rs` files. A second `genrule` runs the
+   `genrule`, producing seven `.rs` files. A second `genrule` runs the
    same plugins through `buf generate` (driven by the `rules_buf`
    toolchain) and a `sh_test` proves the two output trees are
    byte-identical.
 2. Pulls `buffa`, `connectrpc`, and their transitive deps from crates.io
    via `rules_rust` + `crates_universe`.
 3. Compiles a `rust_library` whose srcs include `src/lib.rs` plus the
-   four generated files.
+   seven generated files.
 4. Runs three `rust_test`s that exercise the generated message types
    (construction, encode/decode round-trip via `buffa::Message`) and
    the connectrpc service-stub constants.
@@ -89,15 +89,20 @@ plugins and emit byte-identical output (verified by
 
 Output naming is deterministic from the proto file path: a file at
 `proto/anthropic/connectrpc/examples/greet/v1/greet.proto` becomes
-`anthropic.connectrpc.examples.greet.v1.greet.rs`. The packaging plugin
-emits a `mod.rs` that nests `pub mod` blocks matching the proto's
-`package` declaration and `include!`s the per-file output as a sibling.
+`anthropic.connectrpc.examples.greet.v1.greet.rs` (message types) plus
+the `....greet.__view.rs` companion (zero-copy views) from
+`protoc-gen-buffa`, and `....greet.__connect.rs` (service stubs) from
+`protoc-gen-connect-rust`. The packaging plugin emits a per-package
+`<pkg>.mod.rs` stitcher that `include!`s the per-file outputs as
+siblings, and a root `mod.rs` that nests `pub mod` blocks matching the
+proto's `package` declaration.
 
 Two output trees per genrule — one with buffa message types, one with
 connectrpc service stubs — because the plugins emit colliding filenames
-(both `mod.rs` and `<package>.rs`). The packaging plugin runs twice,
-once over each tree (the second invocation passes `filter=services` so
-files without services are skipped from the connect output).
+(both trees get `mod.rs` and `<pkg>.mod.rs`). The packaging plugin runs
+twice, once over each tree (the second invocation passes
+`filter=services` so files without services are skipped from the
+connect output).
 
 The generated `mod.rs` files use sibling-relative `include!("foo.rs")`,
 so consuming the output requires no `env!("OUT_DIR")` indirection.
