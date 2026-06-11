@@ -26,21 +26,27 @@ buf_lint_test(
 #
 # Output naming is deterministic given the proto file path: a file at
 # `proto/anthropic/connectrpc/examples/greet/v1/greet.proto` becomes
-# `anthropic.connectrpc.examples.greet.v1.greet.rs`. The packaging plugin
-# emits a `mod.rs` that nests `pub mod` blocks matching the proto's
-# `package` declaration and `include!`s the per-file output as a sibling.
+# `anthropic.connectrpc.examples.greet.v1.greet.rs` (buffa message types)
+# plus the `....greet.__view.rs` companion (zero-copy views), and
+# `....greet.__connect.rs` (connectrpc service stubs). The packaging
+# plugin emits a per-package `<pkg>.mod.rs` stitcher that `include!`s the
+# per-file outputs as siblings, and a root `mod.rs` that nests `pub mod`
+# blocks matching the proto's `package` declaration.
 #
 # Two output trees are produced — one with buffa message types, one with
 # connectrpc service stubs — because the plugins emit colliding filenames
-# (both `mod.rs` and `<package>.rs`).
+# (both trees get `mod.rs` and `<pkg>.mod.rs`).
 genrule(
     name = "gen_code",
     srcs = ["proto/anthropic/connectrpc/examples/greet/v1/greet.proto"],
     outs = [
         "generated/buffa/mod.rs",
+        "generated/buffa/anthropic.connectrpc.examples.greet.v1.mod.rs",
         "generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        "generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.__view.rs",
         "generated/connect/mod.rs",
-        "generated/connect/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        "generated/connect/anthropic.connectrpc.examples.greet.v1.mod.rs",
+        "generated/connect/anthropic.connectrpc.examples.greet.v1.greet.__connect.rs",
     ],
     cmd = """
         mkdir -p $(@D)/generated/buffa $(@D)/generated/connect
@@ -81,9 +87,12 @@ genrule(
     ],
     outs = [
         "generated_buf/buffa/mod.rs",
+        "generated_buf/buffa/anthropic.connectrpc.examples.greet.v1.mod.rs",
         "generated_buf/buffa/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        "generated_buf/buffa/anthropic.connectrpc.examples.greet.v1.greet.__view.rs",
         "generated_buf/connect/mod.rs",
-        "generated_buf/connect/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        "generated_buf/connect/anthropic.connectrpc.examples.greet.v1.mod.rs",
+        "generated_buf/connect/anthropic.connectrpc.examples.greet.v1.greet.__connect.rs",
     ],
     cmd = """
         mkdir -p $(@D)/generated_buf/buffa $(@D)/generated_buf/connect
@@ -126,22 +135,34 @@ sh_test(
     args = [
         "$(location :generated/buffa/mod.rs)",
         "$(location :generated_buf/buffa/mod.rs)",
+        "$(location :generated/buffa/anthropic.connectrpc.examples.greet.v1.mod.rs)",
+        "$(location :generated_buf/buffa/anthropic.connectrpc.examples.greet.v1.mod.rs)",
         "$(location :generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.rs)",
         "$(location :generated_buf/buffa/anthropic.connectrpc.examples.greet.v1.greet.rs)",
+        "$(location :generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.__view.rs)",
+        "$(location :generated_buf/buffa/anthropic.connectrpc.examples.greet.v1.greet.__view.rs)",
         "$(location :generated/connect/mod.rs)",
         "$(location :generated_buf/connect/mod.rs)",
-        "$(location :generated/connect/anthropic.connectrpc.examples.greet.v1.greet.rs)",
-        "$(location :generated_buf/connect/anthropic.connectrpc.examples.greet.v1.greet.rs)",
+        "$(location :generated/connect/anthropic.connectrpc.examples.greet.v1.mod.rs)",
+        "$(location :generated_buf/connect/anthropic.connectrpc.examples.greet.v1.mod.rs)",
+        "$(location :generated/connect/anthropic.connectrpc.examples.greet.v1.greet.__connect.rs)",
+        "$(location :generated_buf/connect/anthropic.connectrpc.examples.greet.v1.greet.__connect.rs)",
     ],
     data = [
         ":generated/buffa/mod.rs",
+        ":generated/buffa/anthropic.connectrpc.examples.greet.v1.mod.rs",
         ":generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        ":generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.__view.rs",
         ":generated/connect/mod.rs",
-        ":generated/connect/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        ":generated/connect/anthropic.connectrpc.examples.greet.v1.mod.rs",
+        ":generated/connect/anthropic.connectrpc.examples.greet.v1.greet.__connect.rs",
         ":generated_buf/buffa/mod.rs",
+        ":generated_buf/buffa/anthropic.connectrpc.examples.greet.v1.mod.rs",
         ":generated_buf/buffa/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        ":generated_buf/buffa/anthropic.connectrpc.examples.greet.v1.greet.__view.rs",
         ":generated_buf/connect/mod.rs",
-        ":generated_buf/connect/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        ":generated_buf/connect/anthropic.connectrpc.examples.greet.v1.mod.rs",
+        ":generated_buf/connect/anthropic.connectrpc.examples.greet.v1.greet.__connect.rs",
     ],
 )
 
@@ -152,9 +173,12 @@ rust_library(
     srcs = [
         "src/lib.rs",
         "generated/buffa/mod.rs",
+        "generated/buffa/anthropic.connectrpc.examples.greet.v1.mod.rs",
         "generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        "generated/buffa/anthropic.connectrpc.examples.greet.v1.greet.__view.rs",
         "generated/connect/mod.rs",
-        "generated/connect/anthropic.connectrpc.examples.greet.v1.greet.rs",
+        "generated/connect/anthropic.connectrpc.examples.greet.v1.mod.rs",
+        "generated/connect/anthropic.connectrpc.examples.greet.v1.greet.__connect.rs",
     ],
     crate_root = "src/lib.rs",
     edition = "2021",
