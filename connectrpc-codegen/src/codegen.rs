@@ -1088,6 +1088,7 @@ fn generate_service(
         format_ident!("{}", service_upper)
     };
     let ext_trait_name = format_ident!("{}Ext", service_upper);
+    let register_marker_name = format_ident!("{}RegisterMarker", service_upper);
     let client_name = format_ident!("{}Client", service_upper);
     let server_name = format_ident!("{}Server", service_upper);
     let service_name_const = format_ident!(
@@ -1430,6 +1431,9 @@ access, or convert with `.to_owned_message()`."#
         /// Extension trait for registering a service implementation with a Router.
         ///
         /// This trait is automatically implemented for all types that implement the service trait.
+        /// Prefer [`Router::add_service`](::connectrpc::Router::add_service) for
+        /// top-down registration; `register` remains available for compatibility
+        /// and cases where the service-first call shape is more convenient.
         ///
         /// # Example
         ///
@@ -1451,6 +1455,18 @@ access, or convert with `.to_owned_message()`."#
             fn register(self: ::std::sync::Arc<Self>, router: ::connectrpc::Router) -> ::connectrpc::Router {
                 router
                     #(#route_registrations)*
+            }
+        }
+
+        /// Type-inference marker used by [`Router::add_service`](::connectrpc::Router::add_service).
+        #[doc(hidden)]
+        pub struct #register_marker_name;
+
+        impl<S: #trait_name> ::connectrpc::ServiceRegister<#register_marker_name>
+            for ::std::sync::Arc<S>
+        {
+            fn register_service(self, router: ::connectrpc::Router) -> ::connectrpc::Router {
+                <S as #ext_trait_name>::register(self, router)
             }
         }
 
@@ -3498,6 +3514,7 @@ mod tests {
         for marker in [
             "pub trait PingService",
             "pub trait PingServiceExt",
+            "pub struct PingServiceRegisterMarker",
             "pub struct PingServiceServer",
             "pub const PING_SERVICE_SERVICE_NAME",
         ] {
@@ -3511,6 +3528,33 @@ mod tests {
                  server-side items are always compiled in:\n{out}"
             );
         }
+    }
+
+    #[test]
+    fn service_register_impl_and_marker_are_generated() {
+        let out = format_minimal_service(false);
+        assert!(
+            out.contains("pub struct PingServiceRegisterMarker;"),
+            "generated service must expose an inference marker:\n{out}"
+        );
+        assert!(
+            out.contains(
+                "impl<S: PingService> ::connectrpc::ServiceRegister<PingServiceRegisterMarker>"
+            ),
+            "generated service must implement ServiceRegister for Arc<S>:\n{out}"
+        );
+        assert!(
+            out.contains("for ::std::sync::Arc<S>"),
+            "ServiceRegister implementation must accept Arc<S>:\n{out}"
+        );
+        assert!(
+            out.contains("fn register_service(self, router: ::connectrpc::Router)"),
+            "ServiceRegister implementation must expose the bridge method:\n{out}"
+        );
+        assert!(
+            out.contains("<S as PingServiceExt>::register(self, router)"),
+            "ServiceRegister must forward to the existing extension trait:\n{out}"
+        );
     }
 
     /// The strongest invariant: every reference to

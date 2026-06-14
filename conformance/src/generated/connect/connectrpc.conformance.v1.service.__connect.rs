@@ -554,6 +554,9 @@ pub trait ConformanceService: Send + Sync + 'static {
 /// Extension trait for registering a service implementation with a Router.
 ///
 /// This trait is automatically implemented for all types that implement the service trait.
+/// Prefer [`Router::add_service`](::connectrpc::Router::add_service) for
+/// top-down registration; `register` remains available for compatibility
+/// and cases where the service-first call shape is more convenient.
 ///
 /// # Example
 ///
@@ -736,6 +739,17 @@ impl<S: ConformanceService> ConformanceServiceExt for S {
                 },
             )
             .with_spec(CONFORMANCE_SERVICE_IDEMPOTENT_UNARY_SPEC)
+    }
+}
+/// Type-inference marker used by [`Router::add_service`](::connectrpc::Router::add_service).
+#[doc(hidden)]
+pub struct ConformanceServiceRegisterMarker;
+impl<
+    S: ConformanceService,
+> ::connectrpc::ServiceRegister<ConformanceServiceRegisterMarker>
+for ::std::sync::Arc<S> {
+    fn register_service(self, router: ::connectrpc::Router) -> ::connectrpc::Router {
+        <S as ConformanceServiceExt>::register(self, router)
     }
 }
 /// Monomorphic dispatcher for `ConformanceService`.

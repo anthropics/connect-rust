@@ -97,6 +97,21 @@ impl From<Method> for RegisteredMethod {
     }
 }
 
+/// Registers a generated service implementation with a [`Router`].
+///
+/// Implementations are emitted by `connectrpc-codegen`. The `Marker` type
+/// distinguishes implementations for different generated service traits,
+/// allowing a concrete Rust type to implement more than one service without
+/// conflicting blanket implementations.
+///
+/// Most callers do not name this trait or its marker type directly. Pass an
+/// `Arc`-wrapped service to [`Router::add_service`] and type inference selects
+/// the generated implementation.
+pub trait ServiceRegister<Marker> {
+    /// Register this service's RPC methods with `router`.
+    fn register_service(self, router: Router) -> Router;
+}
+
 /// Router for ConnectRPC services.
 ///
 /// The router maps service/method paths to their handlers and manages
@@ -128,6 +143,47 @@ impl Router {
     /// Create a new empty router.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Register a generated service implementation.
+    ///
+    /// This is the top-down equivalent of calling the generated
+    /// `FooServiceExt::register` extension method:
+    ///
+    /// ```rust,ignore
+    /// let router = Router::new()
+    ///     .add_service(Arc::new(greeter))
+    ///     .add_service(Arc::new(echo));
+    /// ```
+    ///
+    /// The generated marker type is normally inferred. If one concrete type
+    /// implements multiple generated service traits, specify the desired
+    /// marker with a turbofish, for example
+    /// `router.add_service::<_, FooServiceRegisterMarker>(service)`.
+    #[must_use]
+    pub fn add_service<S: ?Sized, Marker>(self, service: Arc<S>) -> Self
+    where
+        Arc<S>: ServiceRegister<Marker>,
+    {
+        <Arc<S> as ServiceRegister<Marker>>::register_service(service, self)
+    }
+
+    /// Merge another router into this router.
+    ///
+    /// If both routers contain the same method path, the route from `other`
+    /// replaces the existing route.
+    #[must_use]
+    pub fn merge(mut self, other: Self) -> Self {
+        self.extend(other);
+        self
+    }
+
+    /// Move all routes from another router into this router.
+    ///
+    /// If both routers contain the same method path, the route from `other`
+    /// replaces the existing route.
+    pub fn extend(&mut self, other: Self) {
+        self.methods.extend(other.methods);
     }
 
     /// Register a unary RPC handler.
@@ -540,7 +596,7 @@ impl crate::dispatcher::Dispatcher for Router {
 pub fn merge_routers(routers: impl IntoIterator<Item = Router>) -> Router {
     let mut merged = Router::new();
     for router in routers {
-        merged.methods.extend(router.methods);
+        merged.extend(router);
     }
     merged
 }
@@ -563,6 +619,44 @@ mod tests {
 
     fn unary_handler() -> impl Handler<Empty, Empty> {
         handler_fn(|_ctx, _req: Empty| async { crate::Response::ok(Empty::default()) })
+    }
+
+    struct TestService;
+    struct TestServiceRegisterMarker;
+
+    impl ServiceRegister<TestServiceRegisterMarker> for Arc<TestService> {
+        fn register_service(self, router: Router) -> Router {
+            router.route("test.Service", "Method", unary_handler())
+        }
+    }
+
+    #[test]
+    fn add_service_forwards_to_generated_registration() {
+        let router = Router::new().add_service(Arc::new(TestService));
+        assert!(router.has_method("test.Service/Method"));
+    }
+
+    #[test]
+    fn merge_and_extend_combine_routes() {
+        let first = Router::new().route("test.First", "Call", unary_handler());
+        let second = Router::new().route("test.Second", "Call", unary_handler());
+        let mut router = first.merge(second);
+
+        router.extend(Router::new().route("test.Third", "Call", unary_handler()));
+
+        assert!(router.has_method("test.First/Call"));
+        assert!(router.has_method("test.Second/Call"));
+        assert!(router.has_method("test.Third/Call"));
+    }
+
+    #[test]
+    fn merge_replaces_duplicate_routes_with_other() {
+        let original = Router::new().route("test.Service", "Method", unary_handler());
+        let replacement = Router::new().route_idempotent("test.Service", "Method", unary_handler());
+
+        let router = original.merge(replacement);
+        let descriptor = router.lookup("test.Service/Method").expect("route exists");
+        assert!(descriptor.idempotent);
     }
 
     /// `with_spec` attaches the `Spec` and `lookup` returns it. This is

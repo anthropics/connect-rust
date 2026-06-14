@@ -14,7 +14,7 @@
 //!
 //! // Build your router with RPC handlers
 //! let greet_impl = Arc::new(MyGreetService);
-//! let router = greet_impl.register(Router::new());
+//! let router = Router::new().add_service(greet_impl);
 //!
 //! // Get a tower::Service - use with ANY compatible framework
 //! let service = ConnectRpcService::new(router);
@@ -32,7 +32,7 @@
 //! use std::sync::Arc;
 //!
 //! let greet_impl = Arc::new(MyGreetService);
-//! let connect = greet_impl.register(ConnectRouter::new());
+//! let connect = ConnectRouter::new().add_service(greet_impl);
 //!
 //! let app = Router::new()
 //!     .route("/health", get(health))
@@ -241,6 +241,7 @@ pub use service::StreamingResponseBody;
 // Router for registering RPC handlers
 pub use router::MethodKind;
 pub use router::Router;
+pub use router::ServiceRegister;
 
 // Dispatcher trait for monomorphic dispatch (codegen-backed alternative to Router)
 pub use dispatcher::Chain;
