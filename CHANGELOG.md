@@ -138,6 +138,10 @@ regenerate with this release's toolchain and buffa ≥ 0.7.0.**
 
 ### Added
 
+- **`BoundServer::with_max_connection_age` and
+  `with_max_connection_age_grace`** ([#151]) let the built-in server retire
+  long-lived HTTP/1.1 and HTTP/2 connections gracefully with per-connection
+  jitter while preserving indefinite whole-server graceful shutdown drains.
 - **New `connectrpc-health` crate** ([#128]) — the standard
   `grpc.health.v1.Health` service for connectrpc routers, wire-compatible
   with `grpc_health_probe`, kubelet `grpc:` probes, and gRPC-aware service

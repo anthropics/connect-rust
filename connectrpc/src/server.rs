@@ -34,9 +34,20 @@
 //! ```
 
 use std::any::Any;
+use std::collections::hash_map::RandomState;
+use std::future::Future;
+use std::hash::BuildHasher;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::Weak;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::task::Context;
+use std::task::Poll;
+use std::task::Waker;
+use std::time::Duration;
 
 use bytes::Bytes;
 use http::Response;
@@ -46,9 +57,9 @@ use http_body_util::Full;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
 use hyper_util::server::conn::auto::Builder as AutoBuilder;
-use hyper_util::server::graceful::GracefulShutdown;
-use hyper_util::server::graceful::Watcher;
+use hyper_util::server::graceful::GracefulConnection;
 use tokio::net::TcpListener;
+use tokio::task::JoinSet;
 use tower::Service;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -124,6 +135,11 @@ impl PeerInfo {
 #[cfg(feature = "server-tls")]
 #[cfg_attr(docsrs, doc(cfg(feature = "server-tls")))]
 pub const DEFAULT_TLS_HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+const DEFAULT_MAX_CONNECTION_AGE_GRACE: Duration = Duration::from_secs(5);
+const MAX_CONNECTION_AGE_JITTER_BASIS_POINTS: u128 = 10_000;
+const MAX_CONNECTION_AGE_JITTER_SPREAD_BASIS_POINTS: u128 = 1_000;
+const NANOS_PER_SEC: u128 = 1_000_000_000;
 
 /// ConnectRPC server built on hyper.
 pub struct Server {
@@ -327,6 +343,7 @@ impl Server {
             #[cfg(feature = "server-tls")]
             self.tls_handshake_timeout,
             None,
+            None,
         )
         .await
     }
@@ -356,6 +373,8 @@ impl Server {
             tls_config: None,
             #[cfg(feature = "server-tls")]
             tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
+            max_connection_age: None,
+            max_connection_age_grace: DEFAULT_MAX_CONNECTION_AGE_GRACE,
         }
     }
 
@@ -372,6 +391,8 @@ impl Server {
             tls_config: None,
             #[cfg(feature = "server-tls")]
             tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
+            max_connection_age: None,
+            max_connection_age_grace: DEFAULT_MAX_CONNECTION_AGE_GRACE,
         })
     }
 }
@@ -384,6 +405,8 @@ pub struct BoundServer {
     tls_config: Option<Arc<rustls::ServerConfig>>,
     #[cfg(feature = "server-tls")]
     tls_handshake_timeout: std::time::Duration,
+    max_connection_age: Option<Duration>,
+    max_connection_age_grace: Duration,
 }
 
 impl BoundServer {
@@ -423,6 +446,31 @@ impl BoundServer {
     #[must_use]
     pub fn with_http1_keep_alive(mut self, enabled: bool) -> Self {
         self.http1_keep_alive = enabled;
+        self
+    }
+
+    /// Set a maximum age for each accepted HTTP connection.
+    ///
+    /// Disabled by default. When enabled, the age is measured from the start
+    /// of HTTP serving (after any TLS handshake) and each connection gets a
+    /// symmetric ±10% jitter to avoid reconnect bursts. Once the age expires,
+    /// the server starts graceful shutdown for that connection and waits for
+    /// [`with_max_connection_age_grace`](Self::with_max_connection_age_grace)
+    /// before force-closing it.
+    #[must_use]
+    pub fn with_max_connection_age(mut self, max_age: Duration) -> Self {
+        self.max_connection_age = Some(max_age);
+        self
+    }
+
+    /// Set the grace period used after a max-age connection begins shutdown.
+    ///
+    /// Defaults to five seconds. This only affects connections retired by
+    /// [`with_max_connection_age`](Self::with_max_connection_age); whole-server
+    /// graceful shutdown still waits indefinitely for in-flight requests.
+    #[must_use]
+    pub fn with_max_connection_age_grace(mut self, grace: Duration) -> Self {
+        self.max_connection_age_grace = grace;
         self
     }
 
@@ -492,6 +540,8 @@ impl BoundServer {
         self,
         service: ConnectRpcService<D>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let connection_age = self.connection_age_config();
+
         #[cfg(feature = "server-tls")]
         let tls_acceptor = self.tls_config.map(tokio_rustls::TlsAcceptor::from);
         #[cfg(not(feature = "server-tls"))]
@@ -505,6 +555,7 @@ impl BoundServer {
             #[cfg(feature = "server-tls")]
             self.tls_handshake_timeout,
             None,
+            connection_age,
         )
         .await
     }
@@ -522,6 +573,8 @@ impl BoundServer {
         D: Dispatcher,
         F: Future<Output = ()> + Send + 'static,
     {
+        let connection_age = self.connection_age_config();
+
         #[cfg(feature = "server-tls")]
         let tls_acceptor = self.tls_config.map(tokio_rustls::TlsAcceptor::from);
         #[cfg(not(feature = "server-tls"))]
@@ -535,8 +588,16 @@ impl BoundServer {
             #[cfg(feature = "server-tls")]
             self.tls_handshake_timeout,
             Some(Box::pin(signal)),
+            connection_age,
         )
         .await
+    }
+
+    fn connection_age_config(&self) -> Option<ConnectionAgeConfig> {
+        self.max_connection_age.map(|max_age| ConnectionAgeConfig {
+            max_age,
+            grace: self.max_connection_age_grace,
+        })
     }
 }
 
@@ -546,6 +607,21 @@ type WrappedService<D> = tower_http::catch_panic::CatchPanic<
     ConnectRpcService<D>,
     fn(Box<dyn Any + Send>) -> Response<Full<Bytes>>,
 >;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ConnectionAgeConfig {
+    max_age: Duration,
+    grace: Duration,
+}
+
+impl ConnectionAgeConfig {
+    fn with_jitter(self, sample: u64) -> Self {
+        Self {
+            max_age: jitter_connection_age(self.max_age, sample),
+            grace: self.grace,
+        }
+    }
+}
 
 /// Serve HTTP requests on an already-accepted stream.
 ///
@@ -560,7 +636,8 @@ async fn serve_accepted_stream<D, S>(
     peer: PeerInfo,
     service: Arc<WrappedService<D>>,
     http1_keep_alive: bool,
-    watcher: Watcher,
+    global_shutdown: GlobalShutdown,
+    connection_age: Option<ConnectionAgeConfig>,
 ) where
     D: Dispatcher,
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
@@ -578,18 +655,270 @@ async fn serve_accepted_stream<D, S>(
     builder.http1().keep_alive(http1_keep_alive);
 
     let conn = builder.serve_connection(TokioIo::new(io), svc).into_owned();
-    match watcher.watch(conn).await {
+    serve_connection_with_lifecycle(conn, peer.addr, global_shutdown, connection_age).await;
+}
+
+fn serve_connection_with_lifecycle<C>(
+    conn: C,
+    remote_addr: SocketAddr,
+    global_shutdown: GlobalShutdown,
+    connection_age: Option<ConnectionAgeConfig>,
+) -> ConnectionLifecycle<C>
+where
+    C: GracefulConnection,
+    C::Error: std::fmt::Display,
+{
+    ConnectionLifecycle {
+        conn: Box::pin(conn),
+        remote_addr,
+        global_shutdown: global_shutdown.wait(),
+        age: connection_age.map(|config| (Box::pin(tokio::time::sleep(config.max_age)), config)),
+        state: ConnectionLifecycleState::Serving,
+    }
+}
+
+struct ConnectionLifecycle<C: GracefulConnection> {
+    conn: Pin<Box<C>>,
+    remote_addr: SocketAddr,
+    global_shutdown: GlobalShutdownWait,
+    age: Option<(Pin<Box<tokio::time::Sleep>>, ConnectionAgeConfig)>,
+    state: ConnectionLifecycleState,
+}
+
+enum ConnectionLifecycleState {
+    Serving,
+    GlobalDraining,
+    AgeDraining {
+        grace: Pin<Box<tokio::time::Sleep>>,
+        duration: Duration,
+    },
+}
+
+impl<C> Future for ConnectionLifecycle<C>
+where
+    C: GracefulConnection,
+    C::Error: std::fmt::Display,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let this = self.get_mut();
+
+        loop {
+            match &mut this.state {
+                ConnectionLifecycleState::Serving => {
+                    if let Poll::Ready(result) = this.conn.as_mut().poll(cx) {
+                        log_connection_result(this.remote_addr, result);
+                        return Poll::Ready(());
+                    }
+
+                    if let Poll::Ready(()) = Pin::new(&mut this.global_shutdown).poll(cx) {
+                        this.conn.as_mut().graceful_shutdown();
+                        this.state = ConnectionLifecycleState::GlobalDraining;
+                        continue;
+                    }
+
+                    if let Some((age, config)) = &mut this.age
+                        && age.as_mut().poll(cx).is_ready()
+                    {
+                        tracing::trace!(
+                            remote_addr = %this.remote_addr,
+                            max_age = ?config.max_age,
+                            grace = ?config.grace,
+                            "Connection reached maximum age; starting graceful shutdown",
+                        );
+                        this.conn.as_mut().graceful_shutdown();
+                        this.state = ConnectionLifecycleState::AgeDraining {
+                            grace: Box::pin(tokio::time::sleep(config.grace)),
+                            duration: config.grace,
+                        };
+                        continue;
+                    }
+
+                    return Poll::Pending;
+                }
+                ConnectionLifecycleState::GlobalDraining => {
+                    if let Poll::Ready(result) = this.conn.as_mut().poll(cx) {
+                        log_connection_result(this.remote_addr, result);
+                        return Poll::Ready(());
+                    }
+                    return Poll::Pending;
+                }
+                ConnectionLifecycleState::AgeDraining { grace, duration } => {
+                    if let Poll::Ready(result) = this.conn.as_mut().poll(cx) {
+                        log_connection_result(this.remote_addr, result);
+                        return Poll::Ready(());
+                    }
+
+                    if let Poll::Ready(()) = Pin::new(&mut this.global_shutdown).poll(cx) {
+                        this.state = ConnectionLifecycleState::GlobalDraining;
+                        continue;
+                    }
+
+                    if grace.as_mut().poll(cx).is_ready() {
+                        tracing::trace!(
+                            remote_addr = %this.remote_addr,
+                            grace = ?duration,
+                            "Connection maximum-age grace expired; closing connection",
+                        );
+                        return Poll::Ready(());
+                    }
+
+                    return Poll::Pending;
+                }
+            }
+        }
+    }
+}
+
+impl<C: GracefulConnection> Unpin for ConnectionLifecycle<C> {}
+
+fn log_connection_result<E: std::fmt::Display>(remote_addr: SocketAddr, result: Result<(), E>) {
+    match result {
         Ok(()) => {
-            tracing::trace!(remote_addr = %peer.addr, "Connection completed normally");
+            tracing::trace!(remote_addr = %remote_addr, "Connection completed normally");
         }
         Err(err) => {
             tracing::trace!(
-                remote_addr = %peer.addr,
+                remote_addr = %remote_addr,
                 error = %err,
                 "Connection ended with error",
             );
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct GlobalShutdown {
+    inner: Arc<GlobalShutdownInner>,
+}
+
+#[derive(Debug)]
+struct GlobalShutdownInner {
+    fired: AtomicBool,
+    waiters: Mutex<Vec<Weak<Mutex<Option<Waker>>>>>,
+}
+
+struct GlobalShutdownWait {
+    inner: Arc<GlobalShutdownInner>,
+    waiter: Arc<Mutex<Option<Waker>>>,
+    registered: bool,
+}
+
+impl GlobalShutdown {
+    fn new() -> Self {
+        Self {
+            inner: Arc::new(GlobalShutdownInner {
+                fired: AtomicBool::new(false),
+                waiters: Mutex::new(Vec::new()),
+            }),
+        }
+    }
+
+    fn signal(&self) {
+        if !self.inner.fired.swap(true, Ordering::AcqRel) {
+            let waiters = {
+                let mut waiters = self.inner.waiters.lock().unwrap();
+                std::mem::take(&mut *waiters)
+            };
+            for waiter in waiters {
+                let Some(waiter) = waiter.upgrade() else {
+                    continue;
+                };
+                if let Some(waker) = waiter.lock().unwrap().take() {
+                    waker.wake();
+                }
+            }
+        }
+    }
+
+    fn wait(&self) -> GlobalShutdownWait {
+        GlobalShutdownWait {
+            inner: Arc::clone(&self.inner),
+            waiter: Arc::new(Mutex::new(None)),
+            registered: false,
+        }
+    }
+}
+
+impl Future for GlobalShutdownWait {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let this = self.get_mut();
+        if this.inner.fired.load(Ordering::Acquire) {
+            return Poll::Ready(());
+        }
+
+        {
+            let mut waiter = this.waiter.lock().unwrap();
+            let update_waker = match waiter.as_ref() {
+                Some(waker) => !waker.will_wake(cx.waker()),
+                None => true,
+            };
+            if update_waker {
+                *waiter = Some(cx.waker().clone());
+            }
+        }
+
+        if !this.registered {
+            let mut waiters = this.inner.waiters.lock().unwrap();
+            if this.inner.fired.load(Ordering::Acquire) {
+                return Poll::Ready(());
+            }
+            waiters.push(Arc::downgrade(&this.waiter));
+            this.registered = true;
+        }
+
+        if this.inner.fired.load(Ordering::Acquire) {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+impl Drop for GlobalShutdownWait {
+    fn drop(&mut self) {
+        if !self.registered || self.inner.fired.load(Ordering::Acquire) {
+            return;
+        }
+
+        let mut waiters = self.inner.waiters.lock().unwrap();
+        waiters.retain(|waiter| {
+            waiter
+                .upgrade()
+                .is_some_and(|waiter| !Arc::ptr_eq(&waiter, &self.waiter))
+        });
+    }
+}
+
+fn jitter_connection_age(age: Duration, sample: u64) -> Duration {
+    if age.is_zero() {
+        return age;
+    }
+
+    let spread = MAX_CONNECTION_AGE_JITTER_SPREAD_BASIS_POINTS * 2;
+    let offset = (u128::from(sample) * spread) / u128::from(u64::MAX);
+    let basis_points = MAX_CONNECTION_AGE_JITTER_BASIS_POINTS
+        - MAX_CONNECTION_AGE_JITTER_SPREAD_BASIS_POINTS
+        + offset;
+    let scaled = age.as_nanos().saturating_mul(basis_points);
+    let nanos = if basis_points < MAX_CONNECTION_AGE_JITTER_BASIS_POINTS {
+        scaled.saturating_add(MAX_CONNECTION_AGE_JITTER_BASIS_POINTS - 1)
+            / MAX_CONNECTION_AGE_JITTER_BASIS_POINTS
+    } else {
+        scaled / MAX_CONNECTION_AGE_JITTER_BASIS_POINTS
+    };
+
+    duration_from_nanos(nanos.min(Duration::MAX.as_nanos()))
+}
+
+fn duration_from_nanos(nanos: u128) -> Duration {
+    Duration::new(
+        (nanos / NANOS_PER_SEC) as u64,
+        (nanos % NANOS_PER_SEC) as u32,
+    )
 }
 
 /// Internal function to serve connections using the given listener and service.
@@ -613,6 +942,7 @@ async fn serve_with_listener<D: Dispatcher>(
     http1_keep_alive: bool,
     #[cfg(feature = "server-tls")] tls_handshake_timeout: std::time::Duration,
     shutdown: ShutdownSignal,
+    connection_age: Option<ConnectionAgeConfig>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Wrap the service with panic handling to convert panics to 500 responses
     let service: WrappedService<D> = ServiceBuilder::new()
@@ -625,17 +955,13 @@ async fn serve_with_listener<D: Dispatcher>(
     #[cfg(not(feature = "server-tls"))]
     let _ = tls_acceptor; // always None; silence unused warning
 
-    // Per-connection graceful-shutdown coordinator. Each accepted connection
-    // gets a `Watcher` (created in the accept loop, moved into the task) and
-    // is wrapped via `watcher.watch(conn)`. On shutdown, `graceful.shutdown()`
-    // signals every wrapped connection to send GOAWAY (HTTP/2) or disable
-    // keep-alive (HTTP/1), then waits for every `Watcher` to drop — which
-    // covers tasks still in TLS handshake as well as those serving traffic.
-    let graceful = GracefulShutdown::new();
-
     // Pin the shutdown future so we can poll it in select!. If no shutdown
     // signal was provided, use a never-resolving pending() future.
     let mut shutdown = shutdown.unwrap_or_else(|| Box::pin(std::future::pending()));
+    let global_shutdown = GlobalShutdown::new();
+    let mut connections = JoinSet::new();
+    let jitter_state = RandomState::new();
+    let mut connection_sequence = 0u64;
 
     loop {
         let (stream, remote_addr) = tokio::select! {
@@ -645,6 +971,10 @@ async fn serve_with_listener<D: Dispatcher>(
                 tracing::info!("Shutdown signal received; draining connections");
                 break;
             }
+            Some(result) = connections.join_next(), if !connections.is_empty() => {
+                log_connection_task_result(result);
+                continue;
+            }
             accept_result = listener.accept() => match accept_result {
                 Ok(conn) => conn,
                 Err(err) => {
@@ -652,6 +982,7 @@ async fn serve_with_listener<D: Dispatcher>(
                         tracing::warn!("Transient accept error (continuing): {}", err);
                         continue;
                     }
+                    connections.detach_all();
                     return Err(err.into());
                 }
             },
@@ -665,12 +996,16 @@ async fn serve_with_listener<D: Dispatcher>(
         }
 
         let service = Arc::clone(&service);
-        let watcher = graceful.watcher();
+        let global_shutdown = global_shutdown.clone();
+        connection_sequence = connection_sequence.wrapping_add(1);
+        let connection_age = connection_age.map(|config| {
+            config.with_jitter(jitter_state.hash_one((remote_addr, connection_sequence)))
+        });
 
         #[cfg(feature = "server-tls")]
         let tls_acceptor = tls_acceptor.clone();
 
-        tokio::spawn(async move {
+        connections.spawn(async move {
             #[cfg(feature = "server-tls")]
             if let Some(acceptor) = tls_acceptor {
                 // Apply a timeout to the TLS handshake to prevent connection
@@ -692,8 +1027,15 @@ async fn serve_with_listener<D: Dispatcher>(
                             addr: remote_addr,
                             certs,
                         };
-                        serve_accepted_stream(tls_stream, peer, service, http1_keep_alive, watcher)
-                            .await;
+                        serve_accepted_stream(
+                            tls_stream,
+                            peer,
+                            service,
+                            http1_keep_alive,
+                            global_shutdown,
+                            connection_age,
+                        )
+                        .await;
                     }
                     Ok(Err(err)) => {
                         tracing::debug!(
@@ -718,16 +1060,33 @@ async fn serve_with_listener<D: Dispatcher>(
                 #[cfg(feature = "server-tls")]
                 certs: None,
             };
-            serve_accepted_stream(stream, peer, service, http1_keep_alive, watcher).await;
+            serve_accepted_stream(
+                stream,
+                peer,
+                service,
+                http1_keep_alive,
+                global_shutdown,
+                connection_age,
+            )
+            .await;
         });
     }
 
     // Drop the listener (refuse new conns), then signal & drain existing ones.
     drop(listener);
-    graceful.shutdown().await;
+    global_shutdown.signal();
+    while let Some(result) = connections.join_next().await {
+        log_connection_task_result(result);
+    }
     tracing::info!("All connections drained; shutdown complete");
 
     Ok(())
+}
+
+fn log_connection_task_result(result: Result<(), tokio::task::JoinError>) {
+    if let Err(err) = result {
+        tracing::warn!(error = %err, "Connection task ended unexpectedly");
+    }
 }
 
 /// Handle panics in request handlers by converting them to ConnectRPC error responses.
@@ -821,6 +1180,16 @@ mod tests {
         "Content-Type: application/proto\r\n",
         "Content-Length: 0\r\n",
         "Connection: close\r\n",
+        "\r\n",
+    )
+    .as_bytes();
+
+    const KEEPALIVE_ECHO_REQ: &[u8] = concat!(
+        "POST /svc/Echo HTTP/1.1\r\n",
+        "Host: localhost\r\n",
+        "Content-Type: application/proto\r\n",
+        "Content-Length: 0\r\n",
+        "Connection: keep-alive\r\n",
         "\r\n",
     )
     .as_bytes();
@@ -1097,6 +1466,578 @@ mod tests {
         // Keep send_request alive until here so the client doesn't initiate
         // close before the server gets a chance to GOAWAY.
         drop(send_request);
+    }
+
+    #[test]
+    fn max_connection_age_jitter_stays_within_bounds() {
+        let samples = [0, 1, u64::MAX / 2, u64::MAX - 1, u64::MAX];
+        let ages = [
+            Duration::ZERO,
+            Duration::from_nanos(1),
+            Duration::from_secs(10),
+            Duration::MAX,
+        ];
+
+        assert_eq!(
+            jitter_connection_age(Duration::from_secs(10), 0),
+            Duration::from_secs(9)
+        );
+        assert_eq!(
+            jitter_connection_age(Duration::from_secs(10), u64::MAX),
+            Duration::from_secs(11)
+        );
+
+        for age in ages {
+            for sample in samples {
+                let jittered = jitter_connection_age(age, sample);
+                if age.is_zero() {
+                    assert_eq!(jittered, Duration::ZERO);
+                    continue;
+                }
+
+                assert!(
+                    jittered
+                        .as_nanos()
+                        .saturating_mul(MAX_CONNECTION_AGE_JITTER_BASIS_POINTS)
+                        >= age.as_nanos().saturating_mul(
+                            MAX_CONNECTION_AGE_JITTER_BASIS_POINTS
+                                - MAX_CONNECTION_AGE_JITTER_SPREAD_BASIS_POINTS
+                        ),
+                    "{jittered:?} was below the 90% jitter bound for {age:?}"
+                );
+                assert!(
+                    jittered
+                        .as_nanos()
+                        .saturating_mul(MAX_CONNECTION_AGE_JITTER_BASIS_POINTS)
+                        <= age.as_nanos().saturating_mul(
+                            MAX_CONNECTION_AGE_JITTER_BASIS_POINTS
+                                + MAX_CONNECTION_AGE_JITTER_SPREAD_BASIS_POINTS
+                        ),
+                    "{jittered:?} was above the 110% jitter bound for {age:?}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn max_connection_age_builder_defaults_and_overrides() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = Server::from_listener(listener);
+        assert_eq!(bound.max_connection_age, None);
+        assert_eq!(
+            bound.max_connection_age_grace,
+            DEFAULT_MAX_CONNECTION_AGE_GRACE
+        );
+
+        let bound = bound
+            .with_max_connection_age(Duration::from_secs(30))
+            .with_max_connection_age_grace(Duration::ZERO);
+        assert_eq!(bound.max_connection_age, Some(Duration::from_secs(30)));
+        assert_eq!(bound.max_connection_age_grace, Duration::ZERO);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound =
+            Server::from_listener(listener).with_max_connection_age_grace(Duration::from_secs(2));
+        assert_eq!(bound.max_connection_age, None);
+        assert_eq!(bound.max_connection_age_grace, Duration::from_secs(2));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn max_connection_age_sends_h2_goaway_without_global_shutdown() {
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_max_connection_age(Duration::from_secs(10));
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(Router::new(), async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut send_request, h2_conn) = h2::client::handshake(tcp).await.unwrap();
+        let h2_task = tokio::spawn(h2_conn);
+
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("http://{addr}/svc/Unknown"))
+            .body(())
+            .unwrap();
+        let (resp, _) = send_request.send_request(req, true).unwrap();
+        resp.await.unwrap();
+
+        tokio::time::advance(Duration::from_secs(11)).await;
+        yield_to_tasks().await;
+
+        assert!(
+            h2_task.is_finished(),
+            "server did not close idle h2 connection after max age"
+        );
+        let conn_result = h2_task.await.expect("h2 connection task panicked");
+        if let Err(err) = conn_result {
+            assert!(
+                err.is_go_away(),
+                "h2 connection ended with non-GOAWAY error: {err:?}"
+            );
+        }
+
+        drop(send_request);
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn max_connection_age_retiring_one_connection_keeps_listener_running() {
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_max_connection_age(Duration::from_secs(10));
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(Router::new(), async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut send_request, h2_conn) = h2::client::handshake(tcp).await.unwrap();
+        let h2_task = tokio::spawn(h2_conn);
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("http://{addr}/svc/Unknown"))
+            .body(())
+            .unwrap();
+        let (resp, _) = send_request.send_request(req, true).unwrap();
+        resp.await.unwrap();
+
+        tokio::time::advance(Duration::from_secs(11)).await;
+        yield_to_tasks().await;
+        assert!(
+            h2_task.is_finished(),
+            "aged connection should retire without stopping listener"
+        );
+        h2_task.await.expect("h2 connection task panicked").ok();
+        drop(send_request);
+
+        let second = tokio::net::TcpStream::connect(addr).await;
+        assert!(
+            second.is_ok(),
+            "listener should still accept new connections after one ages out"
+        );
+        drop(second);
+
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn max_connection_age_inflight_stream_completes_during_grace() {
+        let (router, entered_rx, release_tx) = slow_router();
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_max_connection_age(Duration::from_secs(10))
+            .with_max_connection_age_grace(Duration::from_secs(5));
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(router, async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut send_request, h2_conn) = h2::client::handshake(tcp).await.unwrap();
+        let h2_task = tokio::spawn(h2_conn);
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("http://{addr}/svc/Slow"))
+            .header(header::CONTENT_TYPE, "application/proto")
+            .body(())
+            .unwrap();
+        let (resp, _) = send_request.send_request(req, true).unwrap();
+        let resp_task = tokio::spawn(resp);
+        entered_rx.await.unwrap();
+
+        tokio::time::advance(Duration::from_secs(11)).await;
+        yield_to_tasks().await;
+        assert!(
+            !resp_task.is_finished(),
+            "response should remain in-flight during max-age grace"
+        );
+
+        release_tx.send(()).unwrap();
+        yield_to_tasks().await;
+        assert!(
+            resp_task.is_finished(),
+            "in-flight response did not complete during grace"
+        );
+        let resp = resp_task
+            .await
+            .expect("response task panicked")
+            .expect("h2 request failed");
+        assert!(resp.status().is_success(), "got status {}", resp.status());
+        drain_h2_body(resp).await;
+
+        drop(send_request);
+        yield_to_tasks().await;
+        assert!(
+            h2_task.is_finished(),
+            "h2 connection should close after graceful max-age drain"
+        );
+        h2_task.await.expect("h2 connection task panicked").ok();
+
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn max_connection_age_unfinished_stream_closes_after_grace() {
+        let (router, entered_rx, _release_tx) = slow_router();
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_max_connection_age(Duration::from_secs(10))
+            .with_max_connection_age_grace(Duration::from_secs(5));
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(router, async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut send_request, h2_conn) = h2::client::handshake(tcp).await.unwrap();
+        let h2_task = tokio::spawn(h2_conn);
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("http://{addr}/svc/Slow"))
+            .header(header::CONTENT_TYPE, "application/proto")
+            .body(())
+            .unwrap();
+        let (resp, _) = send_request.send_request(req, true).unwrap();
+        let resp_task = tokio::spawn(resp);
+        entered_rx.await.unwrap();
+
+        tokio::time::advance(Duration::from_secs(11)).await;
+        yield_to_tasks().await;
+        assert!(
+            !resp_task.is_finished(),
+            "unfinished stream should remain open until age grace expires"
+        );
+
+        tokio::time::advance(Duration::from_secs(6)).await;
+        yield_to_tasks().await;
+        assert!(
+            resp_task.is_finished(),
+            "unfinished in-flight stream should close after age grace"
+        );
+        let resp_result = resp_task.await.expect("response task panicked");
+        assert!(
+            resp_result.is_err(),
+            "unfinished stream unexpectedly completed after max-age grace"
+        );
+
+        drop(send_request);
+        yield_to_tasks().await;
+        assert!(
+            h2_task.is_finished(),
+            "h2 connection should close after max-age grace expires"
+        );
+        h2_task.await.expect("h2 connection task panicked").ok();
+
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn max_connection_age_http1_keep_alive_connections_retire() {
+        let router = Router::new().route(
+            "svc",
+            "Echo",
+            crate::handler_fn(
+                |_ctx: crate::RequestContext, _req: buffa_types::Empty| async move {
+                    crate::Response::ok(buffa_types::Empty::default())
+                },
+            ),
+        );
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_max_connection_age(Duration::from_secs(10));
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(router, async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        stream.write_all(KEEPALIVE_ECHO_REQ).await.unwrap();
+        let resp = read_http1_response(&mut stream).await;
+        assert!(
+            resp.starts_with(b"HTTP/1.1 2"),
+            "expected 2xx, got: {}",
+            String::from_utf8_lossy(&resp[..resp.len().min(80)])
+        );
+
+        tokio::time::advance(Duration::from_secs(11)).await;
+        yield_to_tasks().await;
+
+        let mut buf = [0; 1];
+        let read = stream.read(&mut buf).await.unwrap();
+        assert_eq!(read, 0, "HTTP/1.1 keep-alive connection stayed open");
+
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn max_connection_age_grace_does_not_cap_global_shutdown() {
+        let (router, entered_rx, release_tx) = slow_router();
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_max_connection_age(Duration::from_secs(10))
+            .with_max_connection_age_grace(Duration::from_secs(1));
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(router, async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut send_request, h2_conn) = h2::client::handshake(tcp).await.unwrap();
+        let h2_task = tokio::spawn(h2_conn);
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("http://{addr}/svc/Slow"))
+            .header(header::CONTENT_TYPE, "application/proto")
+            .body(())
+            .unwrap();
+        let (resp, _) = send_request.send_request(req, true).unwrap();
+        let resp_task = tokio::spawn(resp);
+        entered_rx.await.unwrap();
+
+        shutdown_tx.send(()).unwrap();
+        tokio::time::advance(Duration::from_secs(30)).await;
+        yield_to_tasks().await;
+        assert!(
+            !serve.is_finished(),
+            "global shutdown should not be capped by max-age grace"
+        );
+        assert!(
+            !resp_task.is_finished(),
+            "global shutdown should keep in-flight request alive"
+        );
+
+        release_tx.send(()).unwrap();
+        yield_to_tasks().await;
+        assert!(
+            resp_task.is_finished(),
+            "in-flight response did not complete after release"
+        );
+        let resp = resp_task
+            .await
+            .expect("response task panicked")
+            .expect("h2 request failed");
+        assert!(resp.status().is_success(), "got status {}", resp.status());
+        drain_h2_body(resp).await;
+
+        drop(send_request);
+        yield_to_tasks().await;
+        h2_task.await.expect("h2 connection task panicked").ok();
+
+        let result = tokio::time::timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn max_connection_age_global_shutdown_during_age_grace_drains_indefinitely() {
+        let (router, entered_rx, release_tx) = slow_router();
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_max_connection_age(Duration::from_secs(10))
+            .with_max_connection_age_grace(Duration::from_secs(1));
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(router, async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut send_request, h2_conn) = h2::client::handshake(tcp).await.unwrap();
+        let h2_task = tokio::spawn(h2_conn);
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("http://{addr}/svc/Slow"))
+            .header(header::CONTENT_TYPE, "application/proto")
+            .body(())
+            .unwrap();
+        let (resp, _) = send_request.send_request(req, true).unwrap();
+        let resp_task = tokio::spawn(resp);
+        entered_rx.await.unwrap();
+
+        tokio::time::advance(Duration::from_secs(11)).await;
+        yield_to_tasks().await;
+        assert!(
+            !resp_task.is_finished(),
+            "request should still be in-flight during age grace"
+        );
+
+        shutdown_tx.send(()).unwrap();
+        tokio::time::advance(Duration::from_secs(30)).await;
+        yield_to_tasks().await;
+        assert!(
+            !serve.is_finished(),
+            "global shutdown during age grace should drain indefinitely"
+        );
+        assert!(
+            !resp_task.is_finished(),
+            "global shutdown during age grace should not force-close the request"
+        );
+
+        release_tx.send(()).unwrap();
+        yield_to_tasks().await;
+        assert!(
+            resp_task.is_finished(),
+            "in-flight response did not complete after release"
+        );
+        let resp = resp_task
+            .await
+            .expect("response task panicked")
+            .expect("h2 request failed");
+        assert!(resp.status().is_success(), "got status {}", resp.status());
+        drain_h2_body(resp).await;
+
+        drop(send_request);
+        yield_to_tasks().await;
+        h2_task.await.expect("h2 connection task panicked").ok();
+
+        let result = tokio::time::timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+    }
+
+    fn slow_router() -> (
+        Router,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let chans = Arc::new(Mutex::new(Some((entered_tx, release_rx))));
+        let router = Router::new().route(
+            "svc",
+            "Slow",
+            crate::handler_fn(
+                move |_ctx: crate::RequestContext, _req: buffa_types::Empty| {
+                    let chans = Arc::clone(&chans);
+                    async move {
+                        let taken = chans.lock().unwrap().take();
+                        if let Some((entered_tx, release_rx)) = taken {
+                            entered_tx.send(()).ok();
+                            release_rx.await.ok();
+                        }
+                        crate::Response::ok(buffa_types::Empty::default())
+                    }
+                },
+            ),
+        );
+        (router, entered_rx, release_tx)
+    }
+
+    async fn yield_to_tasks() {
+        for _ in 0..5 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    async fn drain_h2_body(mut resp: http::Response<h2::RecvStream>) {
+        while let Some(chunk) = resp.body_mut().data().await {
+            chunk.expect("h2 response body failed");
+        }
+    }
+
+    async fn read_http1_response(stream: &mut tokio::net::TcpStream) -> Vec<u8> {
+        let mut resp = Vec::new();
+        let mut buf = [0; 1024];
+        loop {
+            let read = stream.read(&mut buf).await.unwrap();
+            assert!(read > 0, "connection closed before full response arrived");
+            resp.extend_from_slice(&buf[..read]);
+
+            let Some(header_end) = find_header_end(&resp) else {
+                continue;
+            };
+            let body_start = header_end + 4;
+            let content_length = content_length(&resp[..header_end]).unwrap_or(0);
+            if resp.len() >= body_start + content_length {
+                return resp;
+            }
+        }
+    }
+
+    fn find_header_end(bytes: &[u8]) -> Option<usize> {
+        bytes.windows(4).position(|window| window == b"\r\n\r\n")
+    }
+
+    fn content_length(headers: &[u8]) -> Option<usize> {
+        std::str::from_utf8(headers).ok()?.lines().find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse().ok())
+                .flatten()
+        })
     }
 
     // ========================================================================
