@@ -344,11 +344,11 @@ where
 /// PreEncoded::<MyResponse>::from_bytes_unchecked(bytes)
 /// ```
 ///
-/// The codegen-emitted route registrations (`route_view_server_stream::<_,
-/// _, Out>`) always pin `Res` because the trait method's stream item is the
-/// *opaque* `impl Encodable<Out>`, which can't be unified against the
-/// `Encodable<Res>` impls. Hand-written `Router` registrations don't hit
-/// this unless they leave the message type open.
+/// Generated server-streaming registrations always pin `Res` because the
+/// trait method's stream item is the *opaque* `impl Encodable<Out>`, which
+/// can't be unified against the `Encodable<Res>` impls. Hand-written
+/// `Router` registrations don't hit this unless they leave the message type
+/// open.
 pub fn streaming_handler_fn<F, Fut, Req, Res, B>(f: F) -> FnStreamingHandler<F>
 where
     F: Fn(RequestContext, Req) -> Fut + Send + Sync + 'static,
@@ -772,18 +772,8 @@ where
 ///
 /// The closure receives the negotiated [`CodecFormat`] and returns the
 /// response **already encoded**, so a body that borrows from `&svc` is
-/// encoded before the borrow ends. For a hand-written router this looks
-/// like:
-///
-/// ```rust,ignore
-/// router.route_view(SERVICE, "Foo", view_handler_fn({
-///     let svc = Arc::clone(&svc);
-///     move |ctx, req, format| {
-///         let svc = Arc::clone(&svc);
-///         async move { svc.foo(ctx, req).await?.encode::<FooResponse>(format) }
-///     }
-/// }))
-/// ```
+/// encoded before the borrow ends. Generated service registration uses this
+/// adapter for unary handlers that operate on borrowed request views.
 pub fn view_handler_fn<F, Fut, ReqView>(f: F) -> FnViewHandler<F>
 where
     F: Fn(RequestContext, OwnedView<ReqView>, CodecFormat) -> Fut + Send + Sync + 'static,

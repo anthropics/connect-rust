@@ -102,13 +102,20 @@ impl From<Method> for RegisteredMethod {
 /// The router maps service/method paths to their handlers and manages
 /// request dispatching.
 ///
+/// Most users should register generated services with the generated
+/// `<Service>Ext::register` extension trait instead of manually calling the
+/// low-level route registration helpers:
+///
+/// ```rust,ignore
+/// let router = Arc::new(MyService).register(Router::new());
+/// ```
+///
 /// `Router` is the *dynamic* dispatch path: method paths are owned `String`
 /// keys. It can still carry a [`Spec`] when one is attached with
-/// [`with_spec`](Self::with_spec) — the generated
-/// `FooServiceExt::register` does this for every method, so a `Router`
-/// built through codegen surfaces [`RequestContext::spec`] just like the
-/// monomorphic `FooServiceServer<T>` dispatcher does. Hand-written
-/// `route_*` registrations without a `Spec` surface `None`.
+/// [`with_spec`](Self::with_spec). Generated registration does this for every
+/// method, so a `Router` built through codegen surfaces
+/// [`RequestContext::spec`] just like the monomorphic
+/// `FooServiceServer<T>` dispatcher does.
 ///
 /// [`RequestContext::spec`]: crate::RequestContext::spec
 #[derive(Default)]
@@ -125,20 +132,7 @@ impl Router {
 
     /// Register a unary RPC handler.
     ///
-    /// # Arguments
-    ///
-    /// * `service_name` - The fully qualified service name (e.g., "example.v1.GreetService")
-    /// * `method_name` - The method name (e.g., "Greet")
-    /// * `handler` - The handler function or closure
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let router = Router::new()
-    ///     .route("example.v1.GreetService", "Greet", |ctx, req: GreetRequest| async move {
-    ///         Ok(GreetResponse { message: format!("Hello, {}!", req.name) })
-    ///     });
-    /// ```
+    #[doc(hidden)]
     pub fn route<H, Req, Res>(self, service_name: &str, method_name: &str, handler: H) -> Self
     where
         H: Handler<Req, Res>,
@@ -154,20 +148,7 @@ impl Router {
     /// This is typically used for methods marked with `idempotency_level = NO_SIDE_EFFECTS`
     /// in the protobuf definition.
     ///
-    /// # Arguments
-    ///
-    /// * `service_name` - The fully qualified service name (e.g., "example.v1.GreetService")
-    /// * `method_name` - The method name (e.g., "Greet")
-    /// * `handler` - The handler function or closure
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let router = Router::new()
-    ///     .route_idempotent("example.v1.QueryService", "GetUser", |ctx, req: GetUserRequest| async move {
-    ///         Ok(GetUserResponse { ... })
-    ///     });
-    /// ```
+    #[doc(hidden)]
     pub fn route_idempotent<H, Req, Res>(
         self,
         service_name: &str,
@@ -212,18 +193,7 @@ impl Router {
     ///
     /// A server streaming handler takes a single request and returns a stream of responses.
     ///
-    /// # Arguments
-    ///
-    /// * `service_name` - The fully qualified service name (e.g., "example.v1.GreetService")
-    /// * `method_name` - The method name (e.g., "GreetMany")
-    /// * `handler` - The streaming handler function or closure
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let router = Router::new()
-    ///     .route_server_stream("example.v1.GreetService", "GreetMany", streaming_handler_fn(my_handler));
-    /// ```
+    #[doc(hidden)]
     pub fn route_server_stream<H, Req, Res>(
         mut self,
         service_name: &str,
@@ -251,6 +221,7 @@ impl Router {
     /// Register a client streaming RPC handler.
     ///
     /// A client streaming handler receives a stream of requests and returns a single response.
+    #[doc(hidden)]
     pub fn route_client_stream<H, Req, Res>(
         mut self,
         service_name: &str,
@@ -277,6 +248,7 @@ impl Router {
     /// Register a bidi streaming RPC handler.
     ///
     /// A bidi streaming handler receives a stream of requests and returns a stream of responses.
+    #[doc(hidden)]
     pub fn route_bidi_stream<H, Req, Res>(
         mut self,
         service_name: &str,
@@ -305,6 +277,7 @@ impl Router {
     // ====================================================================
 
     /// Register a unary RPC handler that uses zero-copy request views.
+    #[doc(hidden)]
     pub fn route_view<H, ReqView>(self, service_name: &str, method_name: &str, handler: H) -> Self
     where
         H: ViewHandler<ReqView>,
@@ -315,6 +288,7 @@ impl Router {
     }
 
     /// Register an idempotent unary RPC handler that uses zero-copy request views.
+    #[doc(hidden)]
     pub fn route_view_idempotent<H, ReqView>(
         self,
         service_name: &str,
@@ -356,6 +330,7 @@ impl Router {
     }
 
     /// Register a server streaming RPC handler that uses zero-copy request views.
+    #[doc(hidden)]
     pub fn route_view_server_stream<H, ReqView, Res>(
         mut self,
         service_name: &str,
@@ -382,6 +357,7 @@ impl Router {
     }
 
     /// Register a client streaming RPC handler that uses zero-copy request views.
+    #[doc(hidden)]
     pub fn route_view_client_stream<H, ReqView>(
         mut self,
         service_name: &str,
@@ -406,6 +382,7 @@ impl Router {
     }
 
     /// Register a bidi streaming RPC handler that uses zero-copy request views.
+    #[doc(hidden)]
     pub fn route_view_bidi_stream<H, ReqView, Res>(
         mut self,
         service_name: &str,
@@ -432,30 +409,23 @@ impl Router {
 
     /// Attach a [`Spec`] to the route registered at `spec.procedure`.
     ///
-    /// The route must already exist — [`Spec::procedure`] is the lookup
-    /// key (with the leading slash stripped, matching the `route_*`
-    /// methods' `format!("{service}/{method}")` keying). Generated
-    /// `FooServiceExt::register` chains this after each `route_view*`
-    /// call so the dynamic `Router` carries the same per-method
-    /// metadata as the monomorphic `FooServiceServer<T>`. Hand-written
-    /// registrations may call it too when they have a `&'static`
-    /// procedure path:
-    ///
-    /// ```rust,ignore
-    /// const SAY_SPEC: Spec = Spec::server("/eliza.v1.Eliza/Say", StreamType::Unary);
-    /// let router = Router::new()
-    ///     .route_view_idempotent("eliza.v1.Eliza", "Say", handler)
-    ///     .with_spec(SAY_SPEC);
-    /// ```
+    /// The route must already exist. [`Spec::procedure`] is used as the lookup
+    /// key after its leading slash is stripped. Generated
+    /// `FooServiceExt::register` calls this after registering each method so
+    /// the dynamic `Router` carries the same per-method metadata as the
+    /// monomorphic `FooServiceServer<T>`. Most users do not need to call this
+    /// directly.
     ///
     /// # Panics
     ///
-    /// Debug builds panic if no route is registered at `spec.procedure`,
-    /// or if the route is unary and `spec.idempotency_level` disagrees
-    /// with the `route` / `route_idempotent` choice. Both indicate a
-    /// programming error in `register()` (a typo, or calling `with_spec`
-    /// before the matching `route_*`); release builds skip the check and
-    /// silently drop the `Spec`.
+    /// Debug builds panic if no route is registered at `spec.procedure`, or if
+    /// a unary route's Connect GET eligibility disagrees with
+    /// `spec.idempotency_level`. Both indicate a programming error in
+    /// generated registration or a call to `with_spec` before the matching
+    /// handler was registered.
+    ///
+    /// Release builds leave the router unchanged when no matching route
+    /// exists. The idempotency consistency check is debug-only.
     #[must_use]
     pub fn with_spec(mut self, spec: Spec) -> Self {
         let key = spec.procedure.strip_prefix('/').unwrap_or(spec.procedure);

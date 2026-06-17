@@ -7,12 +7,10 @@
 //!
 //! ```rust,ignore
 //! use connectrpc::{Router, ConnectRpcService};
-//! use hyper::service::service_fn;
+//! use std::sync::Arc;
 //!
-//! let router = Router::new()
-//!     .route("example.v1.GreetService", "Greet", greet_handler);
-//!
-//! let service = router.into_service();
+//! let router = Arc::new(MyGreetService).register(Router::new());
+//! let service = ConnectRpcService::new(router);
 //! // Use with hyper or any tower-compatible framework
 //! ```
 //!
@@ -21,9 +19,9 @@
 //! ```rust,ignore
 //! use axum::{Router, routing::get};
 //! use connectrpc::Router as ConnectRouter;
+//! use std::sync::Arc;
 //!
-//! let connect_router = ConnectRouter::new()
-//!     .route("example.v1.GreetService", "Greet", greet_handler);
+//! let connect_router = Arc::new(MyGreetService).register(ConnectRouter::new());
 //!
 //! let app = Router::new()
 //!     .route("/health", get(health_handler))
@@ -1115,9 +1113,7 @@ fn create_grpc_web_envelope_stream(
 /// # Example
 ///
 /// ```rust,ignore
-/// let router = Router::new()
-///     .route("example.v1.GreetService", "Greet", greet_handler);
-///
+/// let router = Arc::new(MyGreetService).register(Router::new());
 /// let service = ConnectRpcService::new(router);
 /// ```
 ///
@@ -1165,8 +1161,7 @@ impl<D: Dispatcher> ConnectRpcService<D> {
     /// Create a new ConnectRPC service from a dispatcher.
     ///
     /// The dispatcher can be either:
-    /// - a [`Router`] built with `.route()` / `.route_view()` calls (or via
-    ///   generated `FooServiceExt::register`), or
+    /// - a [`Router`] built via generated `FooServiceExt::register`, or
     /// - a code-generated `FooServiceServer<T>` struct for monomorphic
     ///   dispatch with no HashMap lookup or trait-object indirection.
     pub fn new(dispatcher: D) -> Self {
@@ -3108,13 +3103,14 @@ pub mod axum_integration {
         /// ```rust,ignore
         /// use axum::{Router, routing::get};
         /// use connectrpc::Router as ConnectRouter;
+        /// use std::sync::Arc;
         ///
         /// async fn health() -> &'static str {
         ///     "OK"
         /// }
         ///
-        /// let connect_router = ConnectRouter::new()
-        ///     .route("example.v1.GreetService", "Greet", greet_handler);
+        /// let connect_router =
+        ///     Arc::new(MyGreetService).register(ConnectRouter::new());
         ///
         /// let app = Router::new()
         ///     .route("/health", get(health))
@@ -3134,9 +3130,10 @@ pub mod axum_integration {
         /// ```rust,ignore
         /// use axum::{Router, routing::get};
         /// use connectrpc::Router as ConnectRouter;
+        /// use std::sync::Arc;
         ///
-        /// let connect_router = ConnectRouter::new()
-        ///     .route("example.v1.GreetService", "Greet", greet_handler);
+        /// let connect_router =
+        ///     Arc::new(MyGreetService).register(ConnectRouter::new());
         ///
         /// // Use as fallback for unmatched routes
         /// let app = Router::new()

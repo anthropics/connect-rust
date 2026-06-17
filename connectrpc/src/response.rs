@@ -193,9 +193,9 @@ impl RequestContext {
     /// by the dynamic [`Router`](crate::Router) when registered through
     /// the generated `register()` (which chains
     /// [`Router::with_spec`](crate::Router::with_spec) per route).
-    /// `None` only for routes registered through the manual `route_*`
-    /// builders without a `with_spec` call. See [`path`](Self::path) for
-    /// the always-present procedure path.
+    /// `None` only for low-level manual registrations that do not attach a
+    /// [`Spec`](crate::Spec). See [`path`](Self::path) for the always-present
+    /// procedure path.
     pub fn spec(&self) -> Option<crate::spec::Spec> {
         self.spec
     }
