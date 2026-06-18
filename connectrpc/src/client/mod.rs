@@ -1288,7 +1288,7 @@ where
 /// Make an idempotent unary RPC call via HTTP GET (Connect protocol only).
 ///
 /// The request is encoded into URL query parameters per the Connect spec:
-/// `?connect=v1&encoding=<codec>&message=<payload>[&base64=1][&compression=<enc>]`.
+/// `?connect=v1[&base64=1][&compression=<enc>]&encoding=<codec>&message=<payload>`.
 ///
 /// For proto (or any binary codec), the message is URL-safe base64-encoded
 /// without padding and `base64=1` is set. For JSON, the message is
@@ -1384,17 +1384,8 @@ where
         CodecFormat::Json => "json",
     };
 
-    // Assemble query string. Parameter order doesn't matter per spec, but
-    // a deterministic order aids caching. connect-go puts connect/encoding
-    // first, message/base64/compression after.
-    let mut query = format!("connect=v1&encoding={encoding_name}&message={encoded_message}");
-    if use_base64 {
-        query.push_str("&base64=1");
-    }
-    if let Some(enc) = compressed_with {
-        query.push_str("&compression=");
-        query.push_str(enc);
-    }
+    let query =
+        build_connect_get_query(use_base64, compressed_with, encoding_name, &encoded_message);
 
     let full_uri = format!("{base_str}/{service}/{method}?{query}");
     let uri: Uri = full_uri
@@ -1439,6 +1430,44 @@ where
         parse_connect_unary_response(response, config, &options).await
     })
     .await
+}
+
+/// Assemble the Connect Unary-Get query string.
+///
+/// Servers must accept any parameter order; the spec's Query-Get ABNF rule
+/// fixes the order so the variable-length `message` comes last and the
+/// prefix is stable for shared HTTP caches: `connect`, `base64`,
+/// `compression`, `encoding`, `message` ("Clients should order parameters as
+/// shown in the Query-Get rule above to maximize hit rates on shared
+/// caches" — <https://connectrpc.com/docs/protocol#unary-get-request>).
+/// connect-go and the conformance reference-server order check both follow
+/// this rule.
+fn build_connect_get_query(
+    use_base64: bool,
+    compression: Option<&str>,
+    encoding: &str,
+    encoded_message: &str,
+) -> String {
+    let mut query = String::with_capacity(
+        "connect=v1&encoding=&message=".len()
+            + if use_base64 { "&base64=1".len() } else { 0 }
+            + compression.map_or(0, |c| "&compression=".len() + c.len())
+            + encoding.len()
+            + encoded_message.len(),
+    );
+    query.push_str("connect=v1");
+    if use_base64 {
+        query.push_str("&base64=1");
+    }
+    if let Some(enc) = compression {
+        query.push_str("&compression=");
+        query.push_str(enc);
+    }
+    query.push_str("&encoding=");
+    query.push_str(encoding);
+    query.push_str("&message=");
+    query.push_str(encoded_message);
+    query
 }
 
 /// Remap decompression error codes for payloads received from the server.
@@ -5275,6 +5304,62 @@ mod tests {
     // ========================================================================
     // call_unary_get query encoding (Connect GET protocol)
     // ========================================================================
+
+    /// The order the conformance suite checks for: `connect`, `base64`,
+    /// `compression`, `encoding`, `message`. Servers accept any order; the
+    /// recommended order keeps the variable-length `message` last so the
+    /// prefix is stable for shared caches.
+    fn assert_connect_get_param_order(query: &str) {
+        const RANK: &[&str] = &["connect", "base64", "compression", "encoding", "message"];
+        let mut last = 0;
+        for pair in query.split('&') {
+            let key = pair.split_once('=').map_or(pair, |(k, _)| k);
+            let rank = RANK
+                .iter()
+                .position(|k| *k == key)
+                .unwrap_or_else(|| panic!("unknown query parameter {key:?} in {query:?}"));
+            assert!(
+                rank >= last,
+                "parameter {key:?} out of recommended order in {query:?}",
+            );
+            last = rank;
+        }
+    }
+
+    #[test]
+    fn get_query_param_order_proto() {
+        let q = build_connect_get_query(true, None, "proto", "AAAA");
+        assert_eq!(q, "connect=v1&base64=1&encoding=proto&message=AAAA");
+        assert_connect_get_param_order(&q);
+    }
+
+    #[test]
+    fn get_query_param_order_json_uncompressed() {
+        let q = build_connect_get_query(false, None, "json", "%7B%7D");
+        assert_eq!(q, "connect=v1&encoding=json&message=%7B%7D");
+        assert_connect_get_param_order(&q);
+    }
+
+    #[test]
+    fn get_query_param_order_compressed() {
+        let q = build_connect_get_query(true, Some("gzip"), "proto", "H4sI");
+        assert_eq!(
+            q,
+            "connect=v1&base64=1&compression=gzip&encoding=proto&message=H4sI",
+        );
+        assert_connect_get_param_order(&q);
+    }
+
+    #[test]
+    fn get_query_param_order_json_compressed() {
+        // Compressed JSON forces base64 (compressed bytes are binary).
+        let q = build_connect_get_query(true, Some("gzip"), "json", "H4sI");
+        assert_eq!(
+            q,
+            "connect=v1&base64=1&compression=gzip&encoding=json&message=H4sI",
+        );
+        assert_connect_get_param_order(&q);
+    }
 
     #[test]
     fn get_base64_encoding_matches_rfc4648_urlsafe_no_pad() {

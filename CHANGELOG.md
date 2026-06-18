@@ -10,6 +10,17 @@ increment the patch version.
 
 ## [Unreleased]
 
+### Changed
+
+- **Connect Unary-Get query parameters are emitted in the spec-recommended
+  order** ([#167]): `connect`, `base64`, `compression`, `encoding`, `message`.
+  Servers must accept any order, so this is not a wire-compatibility change;
+  the recommended order keeps the variable-length `message` last so the URL
+  prefix is stable for shared caches. Aligns with the order check added to
+  the upstream conformance suite.
+
+[#167]: https://github.com/anthropics/connect-rust/pull/167
+
 ### Fixed
 
 - **Connect client-streaming responses require the END_STREAM envelope**
