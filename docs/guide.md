@@ -152,8 +152,7 @@ impl GreetService for MyGreet {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let service = Arc::new(MyGreet);
-    let router = service.register(Router::new());
+    let router = Router::new().add_service(Arc::new(MyGreet));
     let app = router.into_axum_router();
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await?;
@@ -464,21 +463,36 @@ need to know which protocol the caller chose.
 
 ### Registering services on a Router
 
-Generated services have a `register` method (via the `register`
-extension trait) that wires every RPC into a `connectrpc::Router`:
+Register generated services from the router so multiple services read
+top-to-bottom:
 
 ```rust
-let service = Arc::new(MyGreet);
-let router = service.register(Router::new());
+let router = Router::new()
+    .add_service(Arc::new(MyGreet))
+    .add_service(Arc::new(MyBilling));
 ```
 
-To compose multiple services on one server, chain `register` calls:
+The generated `register` extension method remains available when the
+inside-out form is useful:
 
 ```rust
-let router = Router::new();
-let router = Arc::new(MyGreet).register(router);
-let router = Arc::new(MyBilling).register(router);
+let router = Arc::new(MyGreet).register(Router::new());
 ```
+
+To combine routers that were built separately, use `Router::merge` (owned,
+chainable), `Router::merge_in_place` (in place), or the `merge_routers` free
+function for many at once. Merging two routers that register the same method
+path panics by default, so an accidental collision fails loudly at startup;
+call `Router::allow_overrides()` first when last-wins replacement is intended:
+
+```rust
+let router = defaults.allow_overrides().merge(overrides);
+```
+
+When the routers come from dynamic input (a plugin list, config-driven
+service set) and a collision should be handled rather than crash the process,
+use `Router::try_merge` / `Router::try_merge_in_place`, which return a
+`RouterMergeError` listing the conflicting paths instead of panicking.
 
 The router is what you mount on axum (`router.into_axum_router()`)
 or pass to the built-in `Server`.
@@ -634,7 +648,7 @@ use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::{trace::TraceLayer, timeout::TimeoutLayer};
 
-let connect_router = service.register(Router::new());
+let connect_router = Router::new().add_service(service);
 let tokens = Arc::new(token_table());
 let app = axum::Router::new()
     .fallback_service(connect_router.into_axum_service())
@@ -960,7 +974,7 @@ configuration:
 ```rust
 use connectrpc::Server;
 
-let connect_router = service.register(Router::new());
+let connect_router = Router::new().add_service(service);
 Server::new(connect_router)
     .serve("127.0.0.1:8080".parse()?)
     .await?;
