@@ -107,22 +107,43 @@ It takes two coordinated settings:
    bounds from `Message + Serialize`/`DeserializeOwned` to just `Message`:
 
    ```toml
-   # Proto-only server: no JSON codec, no serde on message types
-   connectrpc = { version = "0.7", default-features = false, features = ["server"] }
+   # Proto-only server: no JSON codec, no serde on message types.
+   # `default-features = false` is the only way to drop `json`, so it also drops
+   # the default compression features (`gzip`/`zstd`/`streaming`) — re-list the
+   # ones you still want.
+   connectrpc = { version = "0.7", default-features = false, features = ["server", "gzip", "zstd", "streaming"] }
    ```
 
 With `json` off, the `Message + serde` requirement is replaced by the
 `JsonSerialize` / `JsonDeserialize` marker traits, which become empty bounds —
 so a serde-free generated type still satisfies every handler, router, and
-client signature. If a JSON request
-nonetheless reaches a proto-only server, the codec returns a Connect
-`Unimplemented` error (the error body itself is still JSON, as the Connect spec
-requires regardless of the request codec).
+client signature.
+
+A proto-only server **rejects JSON at content negotiation**, before it touches
+the request body: `application/json` and `application/connect+json` (and the
+Connect GET `encoding=json` parameter) are unsupported media types, so the
+server responds with a bodyless **HTTP 415 Unsupported Media Type** (the client
+maps the status to an error code); `application/grpc+json` and
+`application/grpc-web+json` get a gRPC error status. Message-level encode/decode
+also returns `Unimplemented` as a defense-in-depth backstop. Handler-level
+errors (and the streaming end-of-stream frame) remain JSON, as the Connect spec
+requires regardless of the request codec. On the client side, the
+`ClientConfig::json` shorthand is removed from the API in a proto-only build, so
+JSON cannot be selected by mistake.
 
 `connectrpc` itself still depends on `serde` and `serde_json` even in a
 proto-only build — the always-JSON error wire format needs them — so they stay
 in `cargo tree`. What proto-only mode removes is the serde *derive* on your
 generated message types and the per-message JSON (de)serialization paths.
+
+Because `json` is an additive, default-on Cargo feature, it is only truly off
+when *every* crate in your dependency graph that depends on `connectrpc`
+disables it. If any other crate pulls in `connectrpc` with `json` enabled,
+feature unification turns it back on for the whole build, the markers revert to
+`Serialize`/`DeserializeOwned`, and your serde-free generated types stop
+compiling (`Serialize is not satisfied` — note the error names the trait, not
+the feature). Proto-only mode therefore fits a leaf binary or a fully
+proto-only graph, not one library inside a mixed workspace.
 
 > View-body responses are already proto-only and return `Unimplemented` for the
 > JSON codec — see [Returning a view body](#returning-a-view-body) — so a

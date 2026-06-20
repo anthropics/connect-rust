@@ -355,14 +355,25 @@ feature:
 
 ```toml
 [dependencies]
-connectrpc = { version = "0.7", default-features = false, features = ["server"] }
+# Note: `default-features = false` is the only way to drop `json`, so it also
+# drops the default compression features — re-list any you still want.
+connectrpc = { version = "0.7", default-features = false, features = ["server", "gzip", "zstd", "streaming"] }
 ```
 
 With `json` off, message-type bounds relax from `Message + Serialize` to just
 `Message`, so serde-free generated code compiles. A JSON request to such a
-server gets a Connect `Unimplemented` error (the error body stays JSON, as the
-protocol requires). See the [user guide](docs/guide.md#proto-only-no-json-builds)
-for details.
+server is declined at content negotiation with HTTP 415 Unsupported Media Type
+(for gRPC / gRPC-Web, a gRPC error status); the JSON codec selectors on the
+client (`ClientConfig::json`) are removed from the API too. See the [user guide](docs/guide.md#proto-only-no-json-builds) for
+details.
+
+> **Cargo feature unification:** `json` is an additive, default-on feature, so
+> it is only truly off when *every* crate in your dependency graph that pulls in
+> `connectrpc` disables it. If any other crate depends on `connectrpc` with
+> `json` on, unification turns it back on for the whole build and your
+> serde-free generated types will fail to compile (`Serialize is not
+> satisfied`). Proto-only mode therefore fits leaf binaries and fully
+> proto-only graphs, not a single library in a mixed workspace.
 
 ### With Axum integration
 

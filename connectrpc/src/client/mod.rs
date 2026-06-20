@@ -647,6 +647,13 @@ impl ClientConfig {
     /// Set the codec format (proto or json).
     ///
     /// Read via [`Self::codec_format`].
+    ///
+    /// In a proto-only build (the `json` feature disabled) selecting
+    /// [`CodecFormat::Json`] produces a client whose every RPC returns
+    /// [`Unimplemented`](crate::ErrorCode::Unimplemented) before any
+    /// network I/O — the JSON codec is not compiled in. Prefer the default
+    /// [`CodecFormat::Proto`]; the [`json`](Self::json) shorthand is removed
+    /// from the API entirely in that build.
     #[must_use]
     pub fn with_codec_format(mut self, format: CodecFormat) -> Self {
         self.codec_format = format;
@@ -654,6 +661,11 @@ impl ClientConfig {
     }
 
     /// Use JSON encoding. Shorthand for `with_codec_format(CodecFormat::Json)`.
+    ///
+    /// Only available when the `json` feature is enabled; a proto-only build
+    /// omits it so JSON cannot be selected through this shorthand.
+    #[cfg(feature = "json")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
     #[must_use]
     pub fn json(mut self) -> Self {
         self.codec_format = CodecFormat::Json;
@@ -3710,6 +3722,7 @@ fn parse_grpc_web_trailer_frame_with_compression(
 mod tests {
     use super::*;
 
+    #[cfg(feature = "json")]
     #[test]
     fn test_client_config() {
         let config = ClientConfig::new("http://localhost:8080".parse().unwrap())
@@ -3717,6 +3730,18 @@ mod tests {
             .compress_requests("gzip");
 
         assert_eq!(config.codec_format, CodecFormat::Json);
+        assert_eq!(config.request_compression, Some("gzip".to_string()));
+    }
+
+    #[cfg(not(feature = "json"))]
+    #[test]
+    fn test_client_config_proto_only() {
+        // The `.json()` shorthand is removed in a proto-only build; the default
+        // codec is proto and the rest of the builder is unaffected.
+        let config =
+            ClientConfig::new("http://localhost:8080".parse().unwrap()).compress_requests("gzip");
+
+        assert_eq!(config.codec_format, CodecFormat::Proto);
         assert_eq!(config.request_compression, Some("gzip".to_string()));
     }
 

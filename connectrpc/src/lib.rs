@@ -151,6 +151,7 @@
 //!
 //! | Feature | Default | Description |
 //! |---------|---------|-------------|
+//! | `json` | ✓ | JSON codec for protobuf messages; disable for proto-only builds |
 //! | `gzip` | ✓ | Gzip compression |
 //! | `zstd` | ✓ | Zstandard compression |
 //! | `streaming` | ✓ | Streaming compression support |

@@ -110,11 +110,14 @@ pub(crate) const JSON_FEATURE_DISABLED: &str =
 
 /// Encode a message to JSON format.
 ///
-/// This (with [`decode_json`]) is the single place the `json` feature is gated:
-/// with it disabled, the JSON codec is unavailable and this returns
+/// This (with [`decode_json`]) is the primary place the `json` feature is
+/// gated: with it disabled, the JSON codec is unavailable and this returns
 /// [`ErrorCode::Unimplemented`](crate::ErrorCode::Unimplemented) without
 /// requiring `M: serde::Serialize`, so proto-only callers compile. Callers can
-/// therefore invoke it unconditionally on their `CodecFormat::Json` arm.
+/// therefore invoke it unconditionally on their `CodecFormat::Json` arm. The
+/// one deliberate exception is the client's `decode_response_view`, which keeps
+/// its own `#[cfg]` gate so a failed response decode stays an `internal` error
+/// rather than `decode_json`'s `invalid_argument`.
 #[cfg(feature = "json")]
 pub fn encode_json<M: Serialize>(message: &M) -> Result<Bytes, ConnectError> {
     serde_json::to_vec(message)
@@ -198,11 +201,16 @@ pub enum CodecFormat {
     Proto,
     /// JSON format.
     ///
-    /// Fully supported only when the `json` feature is enabled. With it
-    /// disabled the variant still exists (so content-type negotiation can
-    /// recognize JSON requests), but encoding or decoding a *message* in this
-    /// format returns [`ErrorCode::Unimplemented`](crate::ErrorCode::Unimplemented)
-    /// at runtime. Connect *error* bodies are always JSON regardless.
+    /// Fully supported only when the `json` feature is enabled. The variant
+    /// always exists (the wire-protocol enums are codec-total), but with the
+    /// feature disabled a proto-only build rejects JSON at the edges: the
+    /// server declines JSON content types at negotiation
+    /// ([`from_content_type`](Self::from_content_type) /
+    /// [`from_codec`](Self::from_codec) return `None`), which yields HTTP 415
+    /// for Connect or a gRPC error status for gRPC/gRPC-Web; and message
+    /// encode/decode returns
+    /// [`ErrorCode::Unimplemented`](crate::ErrorCode::Unimplemented) as a
+    /// backstop. Connect *error* bodies are always JSON regardless.
     Json,
 }
 
@@ -218,31 +226,36 @@ impl std::fmt::Display for CodecFormat {
 impl CodecFormat {
     /// Parse codec format from content type string.
     ///
-    /// These parsers stay codec-agnostic regardless of the `json` feature:
-    /// a JSON content type still parses to [`CodecFormat::Json`] in a
-    /// proto-only build so negotiation can recognize the request and the
-    /// codec layer can surface a precise `Unimplemented` error. The feature
-    /// gating lives at encode/decode, not here.
+    /// With the `json` feature disabled (a proto-only build) a JSON content
+    /// type returns `None` instead of [`CodecFormat::Json`], so the server
+    /// rejects it as an unsupported media type at content negotiation rather
+    /// than accepting it and failing later at decode. The message-level
+    /// encode/decode gating remains as a backstop.
     pub fn from_content_type(content_type: &str) -> Option<Self> {
         if content_type.starts_with(content_type::PROTO)
             || content_type.starts_with(content_type::CONNECT_PROTO)
         {
-            Some(Self::Proto)
-        } else if content_type.starts_with(content_type::JSON)
+            return Some(Self::Proto);
+        }
+        #[cfg(feature = "json")]
+        if content_type.starts_with(content_type::JSON)
             || content_type.starts_with(content_type::CONNECT_JSON)
         {
-            Some(Self::Json)
-        } else {
-            None
+            return Some(Self::Json);
         }
+        None
     }
 
     /// Parse codec format from encoding name (used in GET request query params).
     ///
-    /// Accepts "proto" or "json" (the values used in the `encoding` query parameter).
+    /// Accepts `"proto"`, and `"json"` only when the `json` feature is enabled
+    /// (the values used in the `encoding` query parameter). In a proto-only
+    /// build `"json"` returns `None`, so a Connect GET requesting the JSON
+    /// codec is rejected as an unsupported media type.
     pub fn from_codec(codec: &str) -> Option<Self> {
         match codec {
             "proto" => Some(Self::Proto),
+            #[cfg(feature = "json")]
             "json" => Some(Self::Json),
             _ => None,
         }
@@ -267,10 +280,20 @@ impl CodecFormat {
     }
 
     /// Check if the given content type indicates a streaming request.
+    ///
+    /// With the `json` feature disabled, the `application/connect+json`
+    /// streaming content type is not recognized (a proto-only build treats it
+    /// as an unsupported media type), matching [`Self::from_content_type`].
     #[inline]
     pub fn is_streaming_content_type(content_type: &str) -> bool {
-        content_type.starts_with(content_type::CONNECT_PROTO)
-            || content_type.starts_with(content_type::CONNECT_JSON)
+        if content_type.starts_with(content_type::CONNECT_PROTO) {
+            return true;
+        }
+        #[cfg(feature = "json")]
+        if content_type.starts_with(content_type::CONNECT_JSON) {
+            return true;
+        }
+        false
     }
 }
 
@@ -295,5 +318,46 @@ mod tests {
 
         assert_serialize::<NoSerde>();
         assert_deserialize::<NoSerde>();
+    }
+
+    /// Proto-only build: the codec parsers decline every JSON content type and
+    /// the `json` GET encoding, so the server rejects them at negotiation.
+    #[cfg(not(feature = "json"))]
+    #[test]
+    fn parsers_reject_json_without_feature() {
+        use super::CodecFormat;
+
+        assert_eq!(CodecFormat::from_codec("json"), None);
+        assert_eq!(CodecFormat::from_codec("proto"), Some(CodecFormat::Proto));
+
+        for ct in ["application/json", "application/connect+json"] {
+            assert_eq!(CodecFormat::from_content_type(ct), None, "{ct}");
+        }
+        assert_eq!(
+            CodecFormat::from_content_type("application/proto"),
+            Some(CodecFormat::Proto)
+        );
+
+        assert!(!CodecFormat::is_streaming_content_type(
+            "application/connect+json"
+        ));
+        assert!(CodecFormat::is_streaming_content_type(
+            "application/connect+proto"
+        ));
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn parsers_accept_json_with_feature() {
+        use super::CodecFormat;
+
+        assert_eq!(CodecFormat::from_codec("json"), Some(CodecFormat::Json));
+        assert_eq!(
+            CodecFormat::from_content_type("application/json"),
+            Some(CodecFormat::Json)
+        );
+        assert!(CodecFormat::is_streaming_content_type(
+            "application/connect+json"
+        ));
     }
 }

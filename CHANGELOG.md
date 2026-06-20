@@ -20,9 +20,15 @@ increment the patch version.
   message-type bounds to just `buffa::Message` via the new
   `JsonSerialize`/`JsonDeserialize` marker traits, so message types
   generated with the codegen `no_json` option (no serde derives) compile
-  against the runtime. A JSON request to a proto-only server returns
-  `Unimplemented`. The Connect error/end-stream wire format is always JSON per
-  spec, so `serde`/`serde_json` remain required dependencies. See the
+  against the runtime. A proto-only server declines JSON at content
+  negotiation — `application/json` / `application/connect+json` (and the
+  Connect GET `encoding=json` parameter) return HTTP 415, and
+  `application/grpc+json` / `application/grpc-web+json` return a gRPC error
+  status — with message-level encode/decode returning `Unimplemented` as a
+  backstop; the client's `ClientConfig::json` selector is removed from the API
+  in that build. The Connect error/end-stream wire format
+  is always JSON per spec, so `serde`/`serde_json` remain required
+  dependencies. See the
   [proto-only build guide](docs/guide.md#proto-only-no-json-builds).
 
 [#172]: https://github.com/anthropics/connect-rust/pull/172
