@@ -241,7 +241,9 @@ pub use service::StreamingResponseBody;
 // Router for registering RPC handlers
 pub use router::MethodKind;
 pub use router::Router;
+pub use router::RouterMergeError;
 pub use router::ServiceRegister;
+pub use router::merge_routers;
 
 // Dispatcher trait for monomorphic dispatch (codegen-backed alternative to Router)
 pub use dispatcher::Chain;

@@ -10,6 +10,23 @@ increment the patch version.
 
 ## [Unreleased]
 
+### Added
+
+- **Top-down service registration on `Router`** ([#164]). `Router::add_service`
+  registers a generated service from the router outward
+  (`Router::new().add_service(Arc::new(svc))`), the discoverable counterpart to
+  the existing `FooServiceExt::register` extension method, which remains
+  available. New `Router::merge` / `Router::merge_in_place` combine routers, and
+  a new public `ServiceRegister` trait (implemented by codegen) backs
+  `add_service`. Registering or merging a method path that already exists now
+  fails by default so an accidental collision — such as adding the same service
+  twice — surfaces loudly instead of silently shadowing a route: `add_service`,
+  `register`, `merge`, `merge_in_place`, and `merge_routers` panic. Call
+  `Router::allow_overrides` to opt into last-wins replacement across all of
+  them. For assembling routers from dynamic input, `Router::try_merge` /
+  `Router::try_merge_in_place` return a `RouterMergeError` listing the
+  conflicting paths instead of panicking.
+
 ### Fixed
 
 - **Connect client-streaming responses require the END_STREAM envelope**
@@ -20,6 +37,7 @@ increment the patch version.
   ([#140]); complete responses are unchanged.
 
 [#163]: https://github.com/anthropics/connect-rust/pull/163
+[#164]: https://github.com/anthropics/connect-rust/pull/164
 
 ## [0.7.0] - 2026-06-10
 

@@ -479,6 +479,21 @@ inside-out form is useful:
 let router = Arc::new(MyGreet).register(Router::new());
 ```
 
+To combine routers that were built separately, use `Router::merge` (owned,
+chainable), `Router::merge_in_place` (in place), or the `merge_routers` free
+function for many at once. Merging two routers that register the same method
+path panics by default, so an accidental collision fails loudly at startup;
+call `Router::allow_overrides()` first when last-wins replacement is intended:
+
+```rust
+let router = defaults.allow_overrides().merge(overrides);
+```
+
+When the routers come from dynamic input (a plugin list, config-driven
+service set) and a collision should be handled rather than crash the process,
+use `Router::try_merge` / `Router::try_merge_in_place`, which return a
+`RouterMergeError` listing the conflicting paths instead of panicking.
+
 The router is what you mount on axum (`router.into_axum_router()`)
 or pass to the built-in `Server`.
 
