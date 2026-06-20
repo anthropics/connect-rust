@@ -314,7 +314,7 @@ methods (new request-scoped metadata can then be added in minor releases):
 | `ctx.time_remaining()` | Saturating `Option<Duration>` until the deadline (`None` when no deadline is set) — budget downstream calls with this |
 | `ctx.extensions()` | `http::Extensions` carried from the underlying `http::Request` |
 | `ctx.path()` | Requested procedure path (`/package.Service/Method`) from the request URI |
-| `ctx.spec()` | Static metadata for the dispatched RPC method ([`Spec`](#static-method-metadata-spec)); `None` only for `route_*` registrations without `with_spec` |
+| `ctx.spec()` | Static metadata for the dispatched RPC method ([`Spec`](#static-method-metadata-spec)); `None` only for low-level manual registrations that do not attach one |
 | `ctx.protocol()` | The negotiated wire protocol for this request (`Connect` / `Grpc` / `GrpcWeb`) |
 | `ctx.peer_addr()` | Remote socket address (requires the `server` feature; `None` when the transport didn't insert it) |
 | `ctx.peer_certs()` | TLS client cert chain (requires the `server-tls` feature; `None` for plaintext or no client cert) |
@@ -740,7 +740,7 @@ assert_eq!(GREET_SERVICE_GREET_SPEC.origin, SpecOrigin::Server);
 > (used by `FooServiceExt::register(Router)`) does too — the generated
 > `register()` chains `.with_spec(SPEC_CONST)` after each route. The
 > only handlers that see `ctx.spec() == None` are those registered
-> through the manual `route_*` builders without a `with_spec` call.
+> through low-level manual registration without attaching a `Spec`.
 > `ctx.path()` is populated unconditionally regardless of dispatch path
 > — use it when you only need the procedure name and want to be robust
 > to a missing `Spec`.
