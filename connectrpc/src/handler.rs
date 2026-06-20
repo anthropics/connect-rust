@@ -2,8 +2,8 @@
 //!
 //! This module defines the traits that RPC method implementations must
 //! satisfy. Generated `FooService` traits are the primary surface; these
-//! lower-level traits exist for the [`Router`](crate::Router) path that
-//! registers handlers without codegen.
+//! lower-level traits are the building blocks that generated
+//! `<Service>Ext::register` wires into a [`Router`](crate::Router).
 //!
 //! Handlers receive a read-only [`RequestContext`] and return a
 //! [`Response<B>`](crate::Response) carrying the body plus any response

@@ -222,8 +222,9 @@ impl RequestContext {
     /// real RPC.
     ///
     /// Compare [`spec()`](Self::spec): that is the registered method's
-    /// *static* metadata, populated only when a generated
-    /// `FooServiceServer<T>` dispatcher resolved the route, and
+    /// *static* metadata, populated when a generated
+    /// `FooServiceServer<T>` dispatcher — or a `register()`-built
+    /// [`Router`](crate::Router) — resolved the route, and
     /// [`Spec::procedure`](crate::Spec::procedure) is its `&'static str`
     /// procedure name. When both are present they are identical strings;
     /// `path()` exists for the cases where `spec()` cannot be.

@@ -8,6 +8,8 @@
 //! ```rust,ignore
 //! use connectrpc::{Router, ConnectRpcService};
 //! use std::sync::Arc;
+//! // `register` is provided by the generated `<Service>Ext` extension trait:
+//! use my_proto::greet::v1::GreetServiceExt;
 //!
 //! let router = Arc::new(MyGreetService).register(Router::new());
 //! let service = ConnectRpcService::new(router);
