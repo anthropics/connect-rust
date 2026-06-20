@@ -32,6 +32,17 @@
 //!     })
 //!     .await?;
 //! ```
+//!
+//! # Maximum Connection Age
+//!
+//! Use [`Server::with_max_connection_age`] (or the [`BoundServer`] equivalent)
+//! to retire long-lived connections proactively — recommended behind load
+//! balancers so clients reconnect periodically and traffic redistributes
+//! across restarts. Each connection is sent a GOAWAY once it reaches the
+//! configured age (with a ±10% jitter), then force-closed after a grace
+//! period. This is independent of whole-server graceful shutdown, which still
+//! drains in-flight requests indefinitely even while a connection is in its
+//! age-grace window.
 
 use std::any::Any;
 use std::collections::hash_map::RandomState;
@@ -40,13 +51,8 @@ use std::hash::BuildHasher;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::Weak;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::task::Context;
 use std::task::Poll;
-use std::task::Waker;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -59,6 +65,7 @@ use hyper_util::rt::TokioIo;
 use hyper_util::server::conn::auto::Builder as AutoBuilder;
 use hyper_util::server::graceful::GracefulConnection;
 use tokio::net::TcpListener;
+use tokio::sync::watch;
 use tokio::task::JoinSet;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -149,6 +156,8 @@ pub struct Server {
     tls_config: Option<Arc<rustls::ServerConfig>>,
     #[cfg(feature = "server-tls")]
     tls_handshake_timeout: std::time::Duration,
+    max_connection_age: Option<Duration>,
+    max_connection_age_grace: Duration,
 }
 
 impl Server {
@@ -161,6 +170,8 @@ impl Server {
             tls_config: None,
             #[cfg(feature = "server-tls")]
             tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
+            max_connection_age: None,
+            max_connection_age_grace: DEFAULT_MAX_CONNECTION_AGE_GRACE,
         }
     }
 
@@ -173,6 +184,8 @@ impl Server {
             tls_config: None,
             #[cfg(feature = "server-tls")]
             tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
+            max_connection_age: None,
+            max_connection_age_grace: DEFAULT_MAX_CONNECTION_AGE_GRACE,
         }
     }
 
@@ -309,6 +322,41 @@ impl Server {
         self
     }
 
+    /// Set a maximum age for each accepted HTTP connection.
+    ///
+    /// The one-step counterpart of
+    /// [`BoundServer::with_max_connection_age`]; see it for full behaviour
+    /// (±10% jitter, GOAWAY, grace period). Disabled by default.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `max_age` is zero.
+    #[must_use]
+    pub fn with_max_connection_age(mut self, max_age: Duration) -> Self {
+        assert!(
+            !max_age.is_zero(),
+            "with_max_connection_age requires a non-zero duration",
+        );
+        self.max_connection_age = Some(max_age);
+        self
+    }
+
+    /// Set the grace period used after a max-age connection begins shutdown.
+    ///
+    /// The one-step counterpart of
+    /// [`BoundServer::with_max_connection_age_grace`]. Defaults to five
+    /// seconds; has no effect unless [`with_max_connection_age`](Self::with_max_connection_age)
+    /// is also set.
+    #[must_use]
+    pub fn with_max_connection_age_grace(mut self, grace: Duration) -> Self {
+        self.max_connection_age_grace = grace;
+        self
+    }
+
+    fn connection_age_config(&self) -> Option<ConnectionAgeConfig> {
+        build_connection_age_config(self.max_connection_age, self.max_connection_age_grace)
+    }
+
     /// Get a reference to the underlying router.
     pub fn router(&self) -> &Router {
         self.service.dispatcher()
@@ -323,6 +371,7 @@ impl Server {
         addr: SocketAddr,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let listener = TcpListener::bind(addr).await?;
+        let connection_age = self.connection_age_config();
         #[cfg(feature = "server-tls")]
         let tls_acceptor = self.tls_config.map(tokio_rustls::TlsAcceptor::from);
         #[cfg(not(feature = "server-tls"))]
@@ -343,7 +392,7 @@ impl Server {
             #[cfg(feature = "server-tls")]
             self.tls_handshake_timeout,
             None,
-            None,
+            connection_age,
         )
         .await
     }
@@ -454,11 +503,22 @@ impl BoundServer {
     /// Disabled by default. When enabled, the age is measured from the start
     /// of HTTP serving (after any TLS handshake) and each connection gets a
     /// symmetric ±10% jitter to avoid reconnect bursts. Once the age expires,
-    /// the server starts graceful shutdown for that connection and waits for
+    /// the server begins graceful shutdown for that connection — HTTP/2
+    /// connections receive a GOAWAY, HTTP/1.1 connections have keep-alive
+    /// disabled — then waits up to
     /// [`with_max_connection_age_grace`](Self::with_max_connection_age_grace)
-    /// before force-closing it.
+    /// for in-flight requests before force-closing it.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `max_age` is zero — a zero age is rejected rather than
+    /// silently retiring every connection the instant it starts serving.
     #[must_use]
     pub fn with_max_connection_age(mut self, max_age: Duration) -> Self {
+        assert!(
+            !max_age.is_zero(),
+            "with_max_connection_age requires a non-zero duration",
+        );
         self.max_connection_age = Some(max_age);
         self
     }
@@ -466,8 +526,9 @@ impl BoundServer {
     /// Set the grace period used after a max-age connection begins shutdown.
     ///
     /// Defaults to five seconds. This only affects connections retired by
-    /// [`with_max_connection_age`](Self::with_max_connection_age); whole-server
-    /// graceful shutdown still waits indefinitely for in-flight requests.
+    /// [`with_max_connection_age`](Self::with_max_connection_age) — setting it
+    /// without also setting a max age has no effect. Whole-server graceful
+    /// shutdown still waits indefinitely for in-flight requests.
     #[must_use]
     pub fn with_max_connection_age_grace(mut self, grace: Duration) -> Self {
         self.max_connection_age_grace = grace;
@@ -594,11 +655,26 @@ impl BoundServer {
     }
 
     fn connection_age_config(&self) -> Option<ConnectionAgeConfig> {
-        self.max_connection_age.map(|max_age| ConnectionAgeConfig {
-            max_age,
-            grace: self.max_connection_age_grace,
-        })
+        build_connection_age_config(self.max_connection_age, self.max_connection_age_grace)
     }
+}
+
+/// Build the per-connection age config, warning if a grace was configured
+/// without a max age (in which case the grace has no effect).
+fn build_connection_age_config(
+    max_age: Option<Duration>,
+    grace: Duration,
+) -> Option<ConnectionAgeConfig> {
+    let Some(max_age) = max_age else {
+        if grace != DEFAULT_MAX_CONNECTION_AGE_GRACE {
+            tracing::debug!(
+                "max_connection_age_grace is set but max_connection_age is not; \
+                 the grace period has no effect",
+            );
+        }
+        return None;
+    };
+    Some(ConnectionAgeConfig { max_age, grace })
 }
 
 /// Type alias for the panic-catching wrapper around ConnectRpcService, used
@@ -636,7 +712,7 @@ async fn serve_accepted_stream<D, S>(
     peer: PeerInfo,
     service: Arc<WrappedService<D>>,
     http1_keep_alive: bool,
-    global_shutdown: GlobalShutdown,
+    global_shutdown: watch::Receiver<bool>,
     connection_age: Option<ConnectionAgeConfig>,
 ) where
     D: Dispatcher,
@@ -661,7 +737,7 @@ async fn serve_accepted_stream<D, S>(
 fn serve_connection_with_lifecycle<C>(
     conn: C,
     remote_addr: SocketAddr,
-    global_shutdown: GlobalShutdown,
+    global_shutdown: watch::Receiver<bool>,
     connection_age: Option<ConnectionAgeConfig>,
 ) -> ConnectionLifecycle<C>
 where
@@ -671,16 +747,30 @@ where
     ConnectionLifecycle {
         conn: Box::pin(conn),
         remote_addr,
-        global_shutdown: global_shutdown.wait(),
+        global_shutdown: global_shutdown_future(global_shutdown),
         age: connection_age.map(|config| (Box::pin(tokio::time::sleep(config.max_age)), config)),
         state: ConnectionLifecycleState::Serving,
     }
 }
 
+/// The future a connection awaits to learn the server is shutting down.
+///
+/// Resolves when the accept loop sets the watch value to `true`, or drops the
+/// sender (for example on a fatal accept error). Both are treated as "begin
+/// graceful shutdown" so a connection always drains rather than hanging when
+/// the accept loop goes away.
+fn global_shutdown_future(
+    mut global_shutdown: watch::Receiver<bool>,
+) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        let _ = global_shutdown.wait_for(|fired| *fired).await;
+    })
+}
+
 struct ConnectionLifecycle<C: GracefulConnection> {
     conn: Pin<Box<C>>,
     remote_addr: SocketAddr,
-    global_shutdown: GlobalShutdownWait,
+    global_shutdown: Pin<Box<dyn Future<Output = ()> + Send>>,
     age: Option<(Pin<Box<tokio::time::Sleep>>, ConnectionAgeConfig)>,
     state: ConnectionLifecycleState,
 }
@@ -712,7 +802,7 @@ where
                         return Poll::Ready(());
                     }
 
-                    if let Poll::Ready(()) = Pin::new(&mut this.global_shutdown).poll(cx) {
+                    if let Poll::Ready(()) = this.global_shutdown.as_mut().poll(cx) {
                         this.conn.as_mut().graceful_shutdown();
                         this.state = ConnectionLifecycleState::GlobalDraining;
                         continue;
@@ -750,7 +840,7 @@ where
                         return Poll::Ready(());
                     }
 
-                    if let Poll::Ready(()) = Pin::new(&mut this.global_shutdown).poll(cx) {
+                    if let Poll::Ready(()) = this.global_shutdown.as_mut().poll(cx) {
                         this.state = ConnectionLifecycleState::GlobalDraining;
                         continue;
                     }
@@ -771,8 +861,6 @@ where
     }
 }
 
-impl<C: GracefulConnection> Unpin for ConnectionLifecycle<C> {}
-
 fn log_connection_result<E: std::fmt::Display>(remote_addr: SocketAddr, result: Result<(), E>) {
     match result {
         Ok(()) => {
@@ -785,111 +873,6 @@ fn log_connection_result<E: std::fmt::Display>(remote_addr: SocketAddr, result: 
                 "Connection ended with error",
             );
         }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct GlobalShutdown {
-    inner: Arc<GlobalShutdownInner>,
-}
-
-#[derive(Debug)]
-struct GlobalShutdownInner {
-    fired: AtomicBool,
-    waiters: Mutex<Vec<Weak<Mutex<Option<Waker>>>>>,
-}
-
-struct GlobalShutdownWait {
-    inner: Arc<GlobalShutdownInner>,
-    waiter: Arc<Mutex<Option<Waker>>>,
-    registered: bool,
-}
-
-impl GlobalShutdown {
-    fn new() -> Self {
-        Self {
-            inner: Arc::new(GlobalShutdownInner {
-                fired: AtomicBool::new(false),
-                waiters: Mutex::new(Vec::new()),
-            }),
-        }
-    }
-
-    fn signal(&self) {
-        if !self.inner.fired.swap(true, Ordering::AcqRel) {
-            let waiters = {
-                let mut waiters = self.inner.waiters.lock().unwrap();
-                std::mem::take(&mut *waiters)
-            };
-            for waiter in waiters {
-                let Some(waiter) = waiter.upgrade() else {
-                    continue;
-                };
-                if let Some(waker) = waiter.lock().unwrap().take() {
-                    waker.wake();
-                }
-            }
-        }
-    }
-
-    fn wait(&self) -> GlobalShutdownWait {
-        GlobalShutdownWait {
-            inner: Arc::clone(&self.inner),
-            waiter: Arc::new(Mutex::new(None)),
-            registered: false,
-        }
-    }
-}
-
-impl Future for GlobalShutdownWait {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let this = self.get_mut();
-        if this.inner.fired.load(Ordering::Acquire) {
-            return Poll::Ready(());
-        }
-
-        {
-            let mut waiter = this.waiter.lock().unwrap();
-            let update_waker = match waiter.as_ref() {
-                Some(waker) => !waker.will_wake(cx.waker()),
-                None => true,
-            };
-            if update_waker {
-                *waiter = Some(cx.waker().clone());
-            }
-        }
-
-        if !this.registered {
-            let mut waiters = this.inner.waiters.lock().unwrap();
-            if this.inner.fired.load(Ordering::Acquire) {
-                return Poll::Ready(());
-            }
-            waiters.push(Arc::downgrade(&this.waiter));
-            this.registered = true;
-        }
-
-        if this.inner.fired.load(Ordering::Acquire) {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
-    }
-}
-
-impl Drop for GlobalShutdownWait {
-    fn drop(&mut self) {
-        if !self.registered || self.inner.fired.load(Ordering::Acquire) {
-            return;
-        }
-
-        let mut waiters = self.inner.waiters.lock().unwrap();
-        waiters.retain(|waiter| {
-            waiter
-                .upgrade()
-                .is_some_and(|waiter| !Arc::ptr_eq(&waiter, &self.waiter))
-        });
     }
 }
 
@@ -958,7 +941,10 @@ async fn serve_with_listener<D: Dispatcher>(
     // Pin the shutdown future so we can poll it in select!. If no shutdown
     // signal was provided, use a never-resolving pending() future.
     let mut shutdown = shutdown.unwrap_or_else(|| Box::pin(std::future::pending()));
-    let global_shutdown = GlobalShutdown::new();
+    // Broadcasts "begin graceful shutdown" to every live connection. `watch`
+    // gives a cloneable receiver per connection and a sticky value, so a
+    // connection that registers after the signal still observes it.
+    let (global_shutdown_tx, global_shutdown_rx) = watch::channel(false);
     let mut connections = JoinSet::new();
     let jitter_state = RandomState::new();
     let mut connection_sequence = 0u64;
@@ -996,7 +982,7 @@ async fn serve_with_listener<D: Dispatcher>(
         }
 
         let service = Arc::clone(&service);
-        let global_shutdown = global_shutdown.clone();
+        let global_shutdown = global_shutdown_rx.clone();
         connection_sequence = connection_sequence.wrapping_add(1);
         let connection_age = connection_age.map(|config| {
             config.with_jitter(jitter_state.hash_one((remote_addr, connection_sequence)))
@@ -1074,7 +1060,9 @@ async fn serve_with_listener<D: Dispatcher>(
 
     // Drop the listener (refuse new conns), then signal & drain existing ones.
     drop(listener);
-    global_shutdown.signal();
+    // Errors only if every connection already finished (no receivers left),
+    // in which case there is nothing to drain.
+    let _ = global_shutdown_tx.send(true);
     while let Some(result) = connections.join_next().await {
         log_connection_task_result(result);
     }
@@ -1540,6 +1528,61 @@ mod tests {
             Server::from_listener(listener).with_max_connection_age_grace(Duration::from_secs(2));
         assert_eq!(bound.max_connection_age, None);
         assert_eq!(bound.max_connection_age_grace, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn server_max_connection_age_builder_threads_through() {
+        let server = Server::new(Router::new());
+        assert_eq!(server.max_connection_age, None);
+        assert_eq!(server.connection_age_config(), None);
+
+        let server = Server::new(Router::new())
+            .with_max_connection_age(Duration::from_secs(30))
+            .with_max_connection_age_grace(Duration::from_secs(2));
+        assert_eq!(
+            server.connection_age_config(),
+            Some(ConnectionAgeConfig {
+                max_age: Duration::from_secs(30),
+                grace: Duration::from_secs(2),
+            })
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "non-zero duration")]
+    fn with_max_connection_age_rejects_zero() {
+        let _ = Server::new(Router::new()).with_max_connection_age(Duration::ZERO);
+    }
+
+    #[tokio::test]
+    async fn global_shutdown_future_resolves_on_signal() {
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        let mut fut = global_shutdown_future(rx);
+        // Stays pending until the accept loop signals shutdown.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), &mut fut)
+                .await
+                .is_err(),
+            "shutdown future resolved before any signal",
+        );
+        tx.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), fut)
+            .await
+            .expect("shutdown future must resolve after send(true)");
+    }
+
+    #[tokio::test]
+    async fn global_shutdown_future_resolves_when_sender_dropped() {
+        // On a fatal accept error the accept loop drops the sender without
+        // sending; connections must still observe shutdown and drain rather
+        // than hang. `wait_for` returns `Err` on a closed channel, which the
+        // helper treats as shutdown.
+        let (tx, rx) = tokio::sync::watch::channel(false);
+        let fut = global_shutdown_future(rx);
+        drop(tx);
+        tokio::time::timeout(Duration::from_secs(1), fut)
+            .await
+            .expect("shutdown future must resolve when the sender is dropped");
     }
 
     #[tokio::test(start_paused = true)]

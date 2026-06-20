@@ -26,6 +26,14 @@ increment the patch version.
   them. For assembling routers from dynamic input, `Router::try_merge` /
   `Router::try_merge_in_place` return a `RouterMergeError` listing the
   conflicting paths instead of panicking.
+- **Maximum connection age for the built-in server** ([#151]).
+  `with_max_connection_age` (on both `Server` and `BoundServer`) retires
+  long-lived HTTP/2 connections by sending a GOAWAY once a connection reaches
+  the configured age, then force-closing after a grace period
+  (`with_max_connection_age_grace`, default 5s); HTTP/1.1 connections have
+  keep-alive disabled instead. A symmetric ±10% jitter is applied per
+  connection to avoid reconnect bursts. Disabled by default; whole-server
+  graceful shutdown still drains in-flight requests indefinitely.
 
 ### Fixed
 
@@ -36,6 +44,7 @@ increment the patch version.
   returns `Err(unavailable)`, matching the `ServerStream` Connect EOF path
   ([#140]); complete responses are unchanged.
 
+[#151]: https://github.com/anthropics/connect-rust/issues/151
 [#163]: https://github.com/anthropics/connect-rust/pull/163
 [#164]: https://github.com/anthropics/connect-rust/pull/164
 
@@ -138,10 +147,6 @@ regenerate with this release's toolchain and buffa ≥ 0.7.0.**
 
 ### Added
 
-- **`BoundServer::with_max_connection_age` and
-  `with_max_connection_age_grace`** ([#151]) let the built-in server retire
-  long-lived HTTP/1.1 and HTTP/2 connections gracefully with per-connection
-  jitter while preserving indefinite whole-server graceful shutdown drains.
 - **New `connectrpc-health` crate** ([#128]) — the standard
   `grpc.health.v1.Health` service for connectrpc routers, wire-compatible
   with `grpc_health_probe`, kubelet `grpc:` probes, and gRPC-aware service
