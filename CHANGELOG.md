@@ -53,6 +53,35 @@ increment the patch version.
   connection to avoid reconnect bursts. Disabled by default; whole-server
   graceful shutdown still drains in-flight requests indefinitely.
 
+- **Connection-level HTTP/1.1 header read timeout** ([#135]). The built-in
+  `Server`/`BoundServer` and the axum `serve_tls` path now install a
+  `TokioTimer` on every accepted connection and apply a header read timeout,
+  configurable via `with_header_read_timeout(Option<Duration>)` (default
+  `DEFAULT_HEADER_READ_TIMEOUT`, 30 seconds; pass `None` to disable). The
+  timeout bounds how long the server waits to read a complete request header
+  block, measured from when hyper begins reading a new request; on a keep-alive
+  connection it also bounds the idle wait between requests. A peer that opens a
+  connection — or finishes one request — and then stalls without sending the
+  next request's headers is now disconnected instead of holding a task and file
+  descriptor open indefinitely, which mitigates slowloris-style
+  connection-exhaustion attacks. Previously no timer was installed, so hyper's
+  built-in header read timeout never took effect; the default is now active.
+  Applies to HTTP/1.1 only — HTTP/2 connection liveness (keep-alive pings) and
+  idle-connection reaping are tracked separately.
+
+### Changed
+
+- **The built-in server now closes idle/stalled HTTP/1.1 connections by
+  default** ([#135]). Because a connection timer is now installed (see the
+  Added entry above), the 30-second header read timeout is active by default
+  where previously no timer was installed and it never fired. An HTTP/1.1
+  keep-alive connection that sits idle for more than 30 seconds between
+  requests — or that opens and never finishes sending request headers — is now
+  closed. Connect/gRPC traffic is predominantly HTTP/2 and is unaffected, but
+  an HTTP/1.1 client that pools a connection across long idle gaps must
+  reconnect. Raise the duration with `with_header_read_timeout(Some(d))` or
+  disable it with `with_header_read_timeout(None)`.
+
 ### Fixed
 
 - **Connect client-streaming responses require the END_STREAM envelope**
@@ -62,6 +91,7 @@ increment the patch version.
   returns `Err(unavailable)`, matching the `ServerStream` Connect EOF path
   ([#140]); complete responses are unchanged.
 
+[#135]: https://github.com/anthropics/connect-rust/issues/135
 [#151]: https://github.com/anthropics/connect-rust/issues/151
 [#163]: https://github.com/anthropics/connect-rust/pull/163
 [#164]: https://github.com/anthropics/connect-rust/pull/164
