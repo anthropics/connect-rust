@@ -194,9 +194,9 @@ impl RequestContext {
     /// by the dynamic [`Router`](crate::Router) when registered through
     /// the generated `register()` (which chains
     /// [`Router::with_spec`](crate::Router::with_spec) per route).
-    /// `None` only for routes registered through the manual `route_*`
-    /// builders without a `with_spec` call. See [`path`](Self::path) for
-    /// the always-present procedure path.
+    /// `None` only for low-level manual registrations that do not attach a
+    /// [`Spec`](crate::Spec). See [`path`](Self::path) for the always-present
+    /// procedure path.
     pub fn spec(&self) -> Option<crate::spec::Spec> {
         self.spec
     }
@@ -223,8 +223,9 @@ impl RequestContext {
     /// real RPC.
     ///
     /// Compare [`spec()`](Self::spec): that is the registered method's
-    /// *static* metadata, populated only when a generated
-    /// `FooServiceServer<T>` dispatcher resolved the route, and
+    /// *static* metadata, populated when a generated
+    /// `FooServiceServer<T>` dispatcher — or a `register()`-built
+    /// [`Router`](crate::Router) — resolved the route, and
     /// [`Spec::procedure`](crate::Spec::procedure) is its `&'static str`
     /// procedure name. When both are present they are identical strings;
     /// `path()` exists for the cases where `spec()` cannot be.

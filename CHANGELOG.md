@@ -30,8 +30,28 @@ increment the patch version.
   is always JSON per spec, so `serde`/`serde_json` remain required
   dependencies. See the
   [proto-only build guide](docs/guide.md#proto-only-no-json-builds).
-
-[#172]: https://github.com/anthropics/connect-rust/pull/172
+- **Top-down service registration on `Router`** ([#164]). `Router::add_service`
+  registers a generated service from the router outward
+  (`Router::new().add_service(Arc::new(svc))`), the discoverable counterpart to
+  the existing `FooServiceExt::register` extension method, which remains
+  available. New `Router::merge` / `Router::merge_in_place` combine routers, and
+  a new public `ServiceRegister` trait (implemented by codegen) backs
+  `add_service`. Registering or merging a method path that already exists now
+  fails by default so an accidental collision — such as adding the same service
+  twice — surfaces loudly instead of silently shadowing a route: `add_service`,
+  `register`, `merge`, `merge_in_place`, and `merge_routers` panic. Call
+  `Router::allow_overrides` to opt into last-wins replacement across all of
+  them. For assembling routers from dynamic input, `Router::try_merge` /
+  `Router::try_merge_in_place` return a `RouterMergeError` listing the
+  conflicting paths instead of panicking.
+- **Maximum connection age for the built-in server** ([#151]).
+  `with_max_connection_age` (on both `Server` and `BoundServer`) retires
+  long-lived HTTP/2 connections by sending a GOAWAY once a connection reaches
+  the configured age, then force-closing after a grace period
+  (`with_max_connection_age_grace`, default 5s); HTTP/1.1 connections have
+  keep-alive disabled instead. A symmetric ±10% jitter is applied per
+  connection to avoid reconnect bursts. Disabled by default; whole-server
+  graceful shutdown still drains in-flight requests indefinitely.
 
 ### Fixed
 
@@ -42,7 +62,10 @@ increment the patch version.
   returns `Err(unavailable)`, matching the `ServerStream` Connect EOF path
   ([#140]); complete responses are unchanged.
 
+[#151]: https://github.com/anthropics/connect-rust/issues/151
 [#163]: https://github.com/anthropics/connect-rust/pull/163
+[#164]: https://github.com/anthropics/connect-rust/pull/164
+[#172]: https://github.com/anthropics/connect-rust/pull/172
 
 ## [0.7.0] - 2026-06-10
 

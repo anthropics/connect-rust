@@ -224,8 +224,7 @@ use axum::{Router, routing::get};
 use connectrpc::Router as ConnectRouter;
 use std::sync::Arc;
 
-let service = Arc::new(MyGreetService);
-let connect = service.register(ConnectRouter::new());
+let connect = ConnectRouter::new().add_service(Arc::new(MyGreetService));
 
 // Plain HTTP liveness probe for `kubectl`'s httpGet style. For the
 // standard gRPC Health protocol (grpc_health_probe, kubelet `grpc:`
@@ -247,8 +246,7 @@ For simple cases, enable the `server` feature for a built-in hyper server:
 use connectrpc::{Router, Server};
 use std::sync::Arc;
 
-let service = Arc::new(MyGreetService);
-let router = service.register(Router::new());
+let router = Router::new().add_service(Arc::new(MyGreetService));
 
 Server::new(router).serve("127.0.0.1:8080".parse()?).await?;
 ```
