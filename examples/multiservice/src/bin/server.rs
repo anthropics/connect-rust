@@ -279,9 +279,10 @@ async fn main() {
     let math_service = Arc::new(MyMathService);
     let well_known_types_service = Arc::new(MyWellKnownTypesService);
 
-    let connect_router = greet_service.register(ConnectRouter::new());
-    let connect_router = math_service.register(connect_router);
-    let connect_router = well_known_types_service.register(connect_router);
+    let connect_router = ConnectRouter::new()
+        .add_service(greet_service)
+        .add_service(math_service)
+        .add_service(well_known_types_service);
 
     // Mount gRPC server reflection (v1 + v1alpha) so `grpcurl`, `buf curl`,
     // Postman, and `grpcui` can discover and call the services above with

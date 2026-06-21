@@ -10,6 +10,49 @@ increment the patch version.
 
 ## [Unreleased]
 
+### Added
+
+- **Optional `json` cargo feature for proto-only builds** ([#172]). The
+  Connect JSON codec requires `serde::Serialize`/`Deserialize` on every
+  message type, so the code generator derives them by default — pure cost for
+  crates that only speak binary proto. The new default-on `json` feature, when
+  disabled (`connectrpc = { default-features = false }`), relaxes the runtime's
+  message-type bounds to just `buffa::Message` via the new
+  `JsonSerialize`/`JsonDeserialize` marker traits, so message types
+  generated with the codegen `no_json` option (no serde derives) compile
+  against the runtime. A proto-only server declines JSON at content
+  negotiation — `application/json` / `application/connect+json` (and the
+  Connect GET `encoding=json` parameter) return HTTP 415, and
+  `application/grpc+json` / `application/grpc-web+json` return a gRPC error
+  status — with message-level encode/decode returning `Unimplemented` as a
+  backstop; the client's `ClientConfig::json` selector is removed from the API
+  in that build. The Connect error/end-stream wire format
+  is always JSON per spec, so `serde`/`serde_json` remain required
+  dependencies. See the
+  [proto-only build guide](docs/guide.md#proto-only-no-json-builds).
+- **Top-down service registration on `Router`** ([#164]). `Router::add_service`
+  registers a generated service from the router outward
+  (`Router::new().add_service(Arc::new(svc))`), the discoverable counterpart to
+  the existing `FooServiceExt::register` extension method, which remains
+  available. New `Router::merge` / `Router::merge_in_place` combine routers, and
+  a new public `ServiceRegister` trait (implemented by codegen) backs
+  `add_service`. Registering or merging a method path that already exists now
+  fails by default so an accidental collision — such as adding the same service
+  twice — surfaces loudly instead of silently shadowing a route: `add_service`,
+  `register`, `merge`, `merge_in_place`, and `merge_routers` panic. Call
+  `Router::allow_overrides` to opt into last-wins replacement across all of
+  them. For assembling routers from dynamic input, `Router::try_merge` /
+  `Router::try_merge_in_place` return a `RouterMergeError` listing the
+  conflicting paths instead of panicking.
+- **Maximum connection age for the built-in server** ([#151]).
+  `with_max_connection_age` (on both `Server` and `BoundServer`) retires
+  long-lived HTTP/2 connections by sending a GOAWAY once a connection reaches
+  the configured age, then force-closing after a grace period
+  (`with_max_connection_age_grace`, default 5s); HTTP/1.1 connections have
+  keep-alive disabled instead. A symmetric ±10% jitter is applied per
+  connection to avoid reconnect bursts. Disabled by default; whole-server
+  graceful shutdown still drains in-flight requests indefinitely.
+
 ### Changed
 
 - **Connect streaming EOF without END_STREAM now returns `internal`**
@@ -39,8 +82,11 @@ increment the patch version.
   a truncated response was indistinguishable from a complete one. It now
   returns `Err(internal)` (see [#168]); complete responses are unchanged.
 
+[#151]: https://github.com/anthropics/connect-rust/issues/151
 [#163]: https://github.com/anthropics/connect-rust/pull/163
+[#164]: https://github.com/anthropics/connect-rust/pull/164
 [#168]: https://github.com/anthropics/connect-rust/pull/168
+[#172]: https://github.com/anthropics/connect-rust/pull/172
 [connectrpc/conformance#1104]: https://github.com/connectrpc/conformance/pull/1104
 
 ## [0.7.0] - 2026-06-10
