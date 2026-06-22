@@ -73,6 +73,14 @@ increment the patch version.
   (The 0.7.0 [#140] entry's "matching connect-go" parenthetical was also
   inaccurate as to the code, but correct that connect-go is the reference:
   it returns `internal` for this path.)
+- **Unsupported gRPC/gRPC-Web message codecs return `unimplemented`**
+  ([#180]). A request with a valid `application/grpc` / `application/grpc-web`
+  prefix but a codec the server does not speak (for example
+  `application/grpc+thrift`, or `application/grpc+json` in a proto-only build)
+  now returns grpc-status `unimplemented` (12) instead of `internal` (13).
+  This matches the compression axis, which already returns `unimplemented` for
+  an unsupported `grpc-encoding`. Clients that branch on grpc-status will
+  observe 13 → 12 for this case on upgrade.
 
 ### Fixed
 
@@ -87,6 +95,7 @@ increment the patch version.
 [#164]: https://github.com/anthropics/connect-rust/pull/164
 [#168]: https://github.com/anthropics/connect-rust/pull/168
 [#172]: https://github.com/anthropics/connect-rust/pull/172
+[#180]: https://github.com/anthropics/connect-rust/issues/180
 [connectrpc/conformance#1104]: https://github.com/connectrpc/conformance/pull/1104
 
 ## [0.7.0] - 2026-06-10
