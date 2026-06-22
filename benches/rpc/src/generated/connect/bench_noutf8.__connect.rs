@@ -114,6 +114,9 @@ pub trait LogIngestService: Send + Sync + 'static {
 /// Extension trait for registering a service implementation with a Router.
 ///
 /// This trait is automatically implemented for all types that implement the service trait.
+/// Prefer [`Router::add_service`](::connectrpc::Router::add_service) for
+/// top-down registration; `register` remains available for compatibility
+/// and cases where the service-first call shape is more convenient.
 ///
 /// # Example
 ///
@@ -168,6 +171,15 @@ impl<S: LogIngestService> LogIngestServiceExt for S {
                 },
             )
             .with_spec(LOG_INGEST_SERVICE_INGEST_SPEC)
+    }
+}
+/// Type-inference marker used by [`Router::add_service`](::connectrpc::Router::add_service).
+#[doc(hidden)]
+pub struct LogIngestServiceRegisterMarker;
+impl<S: LogIngestService> ::connectrpc::ServiceRegister<LogIngestServiceRegisterMarker>
+for ::std::sync::Arc<S> {
+    fn register_service(self, router: ::connectrpc::Router) -> ::connectrpc::Router {
+        <S as LogIngestServiceExt>::register(self, router)
     }
 }
 /// Monomorphic dispatcher for `LogIngestService`.

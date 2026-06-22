@@ -112,6 +112,9 @@ pub trait FilterService: Send + Sync + 'static {
 /// Extension trait for registering a service implementation with a Router.
 ///
 /// This trait is automatically implemented for all types that implement the service trait.
+/// Prefer [`Router::add_service`](::connectrpc::Router::add_service) for
+/// top-down registration; `register` remains available for compatibility
+/// and cases where the service-first call shape is more convenient.
 ///
 /// # Example
 ///
@@ -166,6 +169,15 @@ impl<S: FilterService> FilterServiceExt for S {
                 },
             )
             .with_spec(FILTER_SERVICE_REDACT_SPEC)
+    }
+}
+/// Type-inference marker used by [`Router::add_service`](::connectrpc::Router::add_service).
+#[doc(hidden)]
+pub struct FilterServiceRegisterMarker;
+impl<S: FilterService> ::connectrpc::ServiceRegister<FilterServiceRegisterMarker>
+for ::std::sync::Arc<S> {
+    fn register_service(self, router: ::connectrpc::Router) -> ::connectrpc::Router {
+        <S as FilterServiceExt>::register(self, router)
     }
 }
 /// Monomorphic dispatcher for `FilterService`.

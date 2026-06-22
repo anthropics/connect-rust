@@ -120,6 +120,7 @@ use buffa::view::ViewReborrow;
 
 use crate::codec::CodecFormat;
 use crate::codec::content_type;
+use crate::codec::encode_json;
 use crate::codec::header as connect_header;
 use crate::compression::CompressionPolicy;
 use crate::compression::CompressionRegistry;
@@ -646,6 +647,13 @@ impl ClientConfig {
     /// Set the codec format (proto or json).
     ///
     /// Read via [`Self::codec_format`].
+    ///
+    /// In a proto-only build (the `json` feature disabled) selecting
+    /// [`CodecFormat::Json`] produces a client whose every RPC returns
+    /// [`Unimplemented`](crate::ErrorCode::Unimplemented) before any
+    /// network I/O — the JSON codec is not compiled in. Prefer the default
+    /// [`CodecFormat::Proto`]; the [`json`](Self::json) shorthand is removed
+    /// from the API entirely in that build.
     #[must_use]
     pub fn with_codec_format(mut self, format: CodecFormat) -> Self {
         self.codec_format = format;
@@ -653,6 +661,11 @@ impl ClientConfig {
     }
 
     /// Use JSON encoding. Shorthand for `with_codec_format(CodecFormat::Json)`.
+    ///
+    /// Only available when the `json` feature is enabled; a proto-only build
+    /// omits it so JSON cannot be selected through this shorthand.
+    #[cfg(feature = "json")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
     #[must_use]
     pub fn json(mut self) -> Self {
         self.codec_format = CodecFormat::Json;
@@ -1150,11 +1163,12 @@ fn decode_response_view<RespView>(
 ) -> Result<OwnedView<RespView>, ConnectError>
 where
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     match format {
         CodecFormat::Proto => OwnedView::<RespView>::decode(data)
             .map_err(|e| ConnectError::internal(format!("failed to decode response: {e}"))),
+        #[cfg(feature = "json")]
         CodecFormat::Json => {
             let owned: RespView::Owned = serde_json::from_slice(&data).map_err(|e| {
                 ConnectError::internal(format!("failed to decode JSON response: {e}"))
@@ -1162,6 +1176,10 @@ where
             OwnedView::<RespView>::from_owned(&owned)
                 .map_err(|e| ConnectError::internal(format!("failed to re-encode for view: {e}")))
         }
+        #[cfg(not(feature = "json"))]
+        CodecFormat::Json => Err(ConnectError::unimplemented(
+            crate::codec::JSON_FEATURE_DISABLED,
+        )),
     }
 }
 
@@ -1180,9 +1198,9 @@ pub async fn call_unary<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let options = effective_options(config, options);
 
@@ -1197,12 +1215,7 @@ where
     // Encode the request body
     let body = match config.codec_format {
         CodecFormat::Proto => request.encode_to_bytes(),
-        CodecFormat::Json => {
-            let buf = serde_json::to_vec(&request).map_err(|e| {
-                ConnectError::internal(format!("failed to encode JSON request: {e}"))
-            })?;
-            Bytes::from(buf)
-        }
+        CodecFormat::Json => encode_json(&request)?,
     };
 
     // Apply compression and framing based on protocol.
@@ -1320,9 +1333,9 @@ pub async fn call_unary_get<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     // Connect GET is a Connect-protocol-only feature.
     if !matches!(config.protocol, Protocol::Connect) {
@@ -1340,12 +1353,7 @@ where
     // Encode the request body
     let body = match config.codec_format {
         CodecFormat::Proto => request.encode_to_bytes(),
-        CodecFormat::Json => {
-            let buf = serde_json::to_vec(&request).map_err(|e| {
-                ConnectError::internal(format!("failed to encode JSON request: {e}"))
-            })?;
-            Bytes::from(buf)
-        }
+        CodecFormat::Json => encode_json(&request)?,
     };
 
     // Apply compression if configured (compression makes base64 mandatory).
@@ -1503,7 +1511,7 @@ where
     B: Body<Data = Bytes> + Send,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let status = response.status();
     if !status.is_success() {
@@ -1675,7 +1683,7 @@ where
     B: Body<Data = Bytes> + Send,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let status = response.status();
     let resp_headers = response.headers().clone();
@@ -2004,7 +2012,7 @@ where
     B: Body<Data = Bytes> + Unpin,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     /// Returns the response headers.
     #[must_use]
@@ -2040,7 +2048,7 @@ where
     ///
     /// A response body that ends without its protocol's termination
     /// metadata is not a clean end and returns `Err` rather than
-    /// `Ok(None)`: `unavailable` for a Connect stream missing its
+    /// `Ok(None)`: `internal` for a Connect stream missing its
     /// END_STREAM envelope; for gRPC/gRPC-Web, `internal` when no
     /// trailers arrived at all, `unknown` when trailers arrived without a
     /// `grpc-status`, and `unknown` for a malformed `grpc-status` value —
@@ -2146,7 +2154,12 @@ where
                     }
                     BodyPoll::Eof => {
                         if matches!(self.protocol, Protocol::Connect) {
-                            return Err(ConnectError::unavailable(
+                            // The HTTP body completed cleanly but the Connect
+                            // envelope sequence is missing its terminus: a
+                            // wire-level error, classified as `internal` the
+                            // same way connect-go and other gRPC stacks treat a
+                            // failed decompression or an unparseable response.
+                            return Err(ConnectError::internal(
                                 "Connect streaming response ended without END_STREAM envelope",
                             )
                             .into());
@@ -2406,9 +2419,9 @@ pub async fn call_server_stream<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let options = effective_options(config, options);
 
@@ -2423,12 +2436,7 @@ where
     // Encode the request body
     let body = match config.codec_format {
         CodecFormat::Proto => request.encode_to_bytes(),
-        CodecFormat::Json => {
-            let buf = serde_json::to_vec(&request).map_err(|e| {
-                ConnectError::internal(format!("failed to encode JSON request: {e}"))
-            })?;
-            Bytes::from(buf)
-        }
+        CodecFormat::Json => encode_json(&request)?,
     };
 
     // Compress and envelope-frame the request body (streaming protocol
@@ -2508,7 +2516,7 @@ where
     B: Body<Data = Bytes> + Send,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let response_headers = response.headers().clone();
     let status = response.status();
@@ -2727,9 +2735,9 @@ impl<B, Req, RespView> BidiStream<B, Req, RespView>
 where
     B: Body<Data = Bytes> + Send + Unpin,
     B::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     /// Send a request message.
     ///
@@ -2756,12 +2764,7 @@ where
         // compression). Same logic as call_server_stream's request encoding.
         let msg_bytes = match self.codec_format {
             CodecFormat::Proto => msg.encode_to_bytes(),
-            CodecFormat::Json => {
-                let buf = serde_json::to_vec(&msg).map_err(|e| {
-                    ConnectError::internal(format!("failed to encode JSON request: {e}"))
-                })?;
-                Bytes::from(buf)
-            }
+            CodecFormat::Json => encode_json(&msg)?,
         };
 
         let mut envelope_buf = BytesMut::new();
@@ -2922,9 +2925,9 @@ pub async fn call_bidi_stream<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let options = effective_options(config, options);
 
@@ -3024,9 +3027,9 @@ pub async fn call_client_stream<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let options = effective_options(config, options);
 
@@ -3095,12 +3098,7 @@ where
         for request in requests {
             let msg_bytes = match config.codec_format {
                 CodecFormat::Proto => request.encode_to_bytes(),
-                CodecFormat::Json => {
-                    let buf = serde_json::to_vec(&request).map_err(|e| {
-                        ConnectError::internal(format!("failed to encode JSON request: {e}"))
-                    })?;
-                    Bytes::from(buf)
-                }
+                CodecFormat::Json => encode_json(&request)?,
             };
 
             let mut envelope_buf = BytesMut::new();
@@ -3146,7 +3144,7 @@ where
     B: Body<Data = Bytes> + Send,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let status = response.status();
 
@@ -3247,8 +3245,10 @@ where
 /// envelope, the protocol-level terminus: it supplies the trailers (or a
 /// terminal Connect error) and marks the response complete. A body that
 /// yields the data message and then ends before END_STREAM is truncated, not
-/// successful, and is rejected with `unavailable`, matching the `ServerStream`
-/// Connect EOF behavior. Returns the (still encoded) message payload and any
+/// successful, and is rejected with `internal` (matching the `ServerStream`
+/// Connect EOF behavior and connect-go's classification of a missing
+/// terminus as a wire-level error). Returns the (still encoded) message
+/// payload and any
 /// trailers carried in the END_STREAM metadata.
 ///
 /// Scanning stops at END_STREAM, so anything after it is ignored rather than
@@ -3364,7 +3364,7 @@ fn parse_connect_client_stream_envelopes(
     // is a truncated response, not a completed one — match ServerStream's
     // Connect EOF handling rather than reporting success with no trailers.
     if !saw_end_stream {
-        return Err(ConnectError::unavailable(
+        return Err(ConnectError::internal(
             "Connect streaming response ended without END_STREAM envelope",
         ));
     }
@@ -3758,6 +3758,7 @@ fn parse_grpc_web_trailer_frame_with_compression(
 mod tests {
     use super::*;
 
+    #[cfg(feature = "json")]
     #[test]
     fn test_client_config() {
         let config = ClientConfig::new("http://localhost:8080".parse().unwrap())
@@ -3765,6 +3766,18 @@ mod tests {
             .compress_requests("gzip");
 
         assert_eq!(config.codec_format, CodecFormat::Json);
+        assert_eq!(config.request_compression, Some("gzip".to_string()));
+    }
+
+    #[cfg(not(feature = "json"))]
+    #[test]
+    fn test_client_config_proto_only() {
+        // The `.json()` shorthand is removed in a proto-only build; the default
+        // codec is proto and the rest of the builder is unaffected.
+        let config =
+            ClientConfig::new("http://localhost:8080".parse().unwrap()).compress_requests("gzip");
+
+        assert_eq!(config.codec_format, CodecFormat::Proto);
         assert_eq!(config.request_compression, Some("gzip".to_string()));
     }
 
@@ -3932,7 +3945,7 @@ mod tests {
             Ok(Some(_)) => panic!("truncated stream unexpectedly yielded another message"),
             Ok(None) => panic!("truncated stream ended cleanly without END_STREAM"),
         };
-        assert_eq!(err.code, ErrorCode::Unavailable);
+        assert_eq!(err.code, ErrorCode::Internal);
         assert!(
             err.to_string().contains("END_STREAM"),
             "unexpected error: {err}"
@@ -3944,7 +3957,7 @@ mod tests {
             .message()
             .await
             .expect_err("truncation error must be sticky");
-        assert_eq!(again.code, ErrorCode::Unavailable);
+        assert_eq!(again.code, ErrorCode::Internal);
     }
 
     /// A Connect streaming response whose body is empty (zero envelopes,
@@ -3975,7 +3988,7 @@ mod tests {
             Ok(Some(_)) => panic!("empty body unexpectedly yielded a message"),
             Ok(None) => panic!("empty body without END_STREAM ended cleanly"),
         };
-        assert_eq!(err.code, ErrorCode::Unavailable);
+        assert_eq!(err.code, ErrorCode::Internal);
         assert!(
             err.to_string().contains("END_STREAM"),
             "unexpected error: {err}"
@@ -3985,7 +3998,7 @@ mod tests {
             .message()
             .await
             .expect_err("truncation error must be sticky");
-        assert_eq!(again.code, ErrorCode::Unavailable);
+        assert_eq!(again.code, ErrorCode::Internal);
     }
 
     /// `Ok(None)` means the RPC succeeded — a Connect END_STREAM envelope
@@ -4847,6 +4860,28 @@ mod tests {
         assert_eq!(unary_request_content_type(&config), "application/json");
     }
 
+    #[cfg(not(feature = "json"))]
+    #[test]
+    fn decode_response_view_json_is_unimplemented_without_feature() {
+        use buffa::Message;
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+        // Proto-only client: the response-decode JSON arm is compiled out and
+        // surfaces `Unimplemented` instead of attempting serde. The
+        // request-encode paths are the symmetric `return Err(Unimplemented)`
+        // guards that fire before any transport I/O.
+        let err = decode_response_view::<StringValueView>(
+            Bytes::from_static(b"\"x\""),
+            CodecFormat::Json,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Unimplemented);
+
+        // Proto decoding still works.
+        let bytes = StringValue::from("ok").encode_to_bytes();
+        assert!(decode_response_view::<StringValueView>(bytes, CodecFormat::Proto).is_ok());
+    }
+
     #[test]
     fn test_unary_request_content_type_grpc() {
         let config =
@@ -5611,7 +5646,7 @@ mod tests {
 
     /// A data envelope followed by EOF, with no END_STREAM envelope, is a
     /// truncated response rather than a completed one: it is rejected with
-    /// `unavailable` instead of succeeding with empty trailers, matching the
+    /// `internal` instead of succeeding with empty trailers, matching the
     /// `ServerStream` Connect EOF behavior.
     #[test]
     fn client_stream_response_requires_end_stream_after_message() {
@@ -5627,7 +5662,7 @@ mod tests {
             &http::HeaderMap::new(),
         )
         .unwrap_err();
-        assert_eq!(err.code, ErrorCode::Unavailable);
+        assert_eq!(err.code, ErrorCode::Internal);
         assert_eq!(
             err.message.as_deref(),
             Some("Connect streaming response ended without END_STREAM envelope"),
@@ -5637,7 +5672,7 @@ mod tests {
     /// A data envelope followed by a truncated END_STREAM envelope (its
     /// declared payload never arrives) is also a truncated response: the
     /// partial envelope decodes to "needs more data", so END_STREAM is never
-    /// observed and the response is rejected with `unavailable`.
+    /// observed and the response is rejected with `internal`.
     #[test]
     fn client_stream_response_requires_complete_end_stream_after_message() {
         let registry = crate::compression::CompressionRegistry::new();
@@ -5657,7 +5692,7 @@ mod tests {
             &http::HeaderMap::new(),
         )
         .unwrap_err();
-        assert_eq!(err.code, ErrorCode::Unavailable);
+        assert_eq!(err.code, ErrorCode::Internal);
         assert_eq!(
             err.message.as_deref(),
             Some("Connect streaming response ended without END_STREAM envelope"),
