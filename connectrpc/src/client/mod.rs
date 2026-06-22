@@ -1029,6 +1029,89 @@ fn merge_headers(config_defaults: &http::HeaderMap, options: http::HeaderMap) ->
     merged
 }
 
+const CONNECT_TIMEOUT_MAX_MILLIS: u64 = 9_999_999_999;
+const GRPC_TIMEOUT_MAX_SECONDS: u64 = 99_999_999;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EncodedTimeout {
+    Connect {
+        millis: u64,
+    },
+    Grpc {
+        value: u64,
+        unit: char,
+        duration: Duration,
+    },
+}
+
+impl EncodedTimeout {
+    fn duration(self) -> Duration {
+        match self {
+            Self::Connect { millis } => Duration::from_millis(millis),
+            Self::Grpc { duration, .. } => duration,
+        }
+    }
+
+    fn header_value(self) -> String {
+        match self {
+            Self::Connect { millis } => millis.to_string(),
+            Self::Grpc { value, unit, .. } => format!("{value}{unit}"),
+        }
+    }
+}
+
+fn grpc_encoded_timeout(value: u128, unit: char, duration: Duration) -> EncodedTimeout {
+    EncodedTimeout::Grpc {
+        value: value as u64,
+        unit,
+        duration,
+    }
+}
+
+/// Encode a timeout for the wire and retain the exact duration that encoding
+/// represents so local deadline enforcement matches the transmitted budget.
+#[allow(clippy::manual_is_multiple_of)]
+fn encoded_timeout(timeout: Duration, protocol: Protocol) -> EncodedTimeout {
+    match protocol {
+        Protocol::Connect => EncodedTimeout::Connect {
+            millis: timeout.as_millis().min(CONNECT_TIMEOUT_MAX_MILLIS as u128) as u64,
+        },
+        Protocol::Grpc | Protocol::GrpcWeb => {
+            let max = GRPC_TIMEOUT_MAX_SECONDS as u128;
+            let nanos = timeout.as_nanos();
+            let secs = timeout.as_secs() as u128;
+            let millis = timeout.as_millis();
+            let micros = timeout.as_micros();
+
+            if nanos == 0 {
+                grpc_encoded_timeout(0, 'n', Duration::ZERO)
+            } else if nanos % 1_000_000_000 == 0 && secs <= max {
+                grpc_encoded_timeout(secs, 'S', Duration::from_secs(secs as u64))
+            } else if nanos % 1_000_000 == 0 && millis <= max {
+                grpc_encoded_timeout(millis, 'm', Duration::from_millis(millis as u64))
+            } else if nanos % 1_000 == 0 && micros <= max {
+                grpc_encoded_timeout(micros, 'u', Duration::from_micros(micros as u64))
+            } else if nanos <= max {
+                grpc_encoded_timeout(nanos, 'n', Duration::from_nanos(nanos as u64))
+            } else if micros <= max {
+                grpc_encoded_timeout(micros, 'u', Duration::from_micros(micros as u64))
+            } else if millis <= max {
+                grpc_encoded_timeout(millis, 'm', Duration::from_millis(millis as u64))
+            } else if secs <= max {
+                grpc_encoded_timeout(secs, 'S', Duration::from_secs(secs as u64))
+            } else {
+                grpc_encoded_timeout(max, 'S', Duration::from_secs(GRPC_TIMEOUT_MAX_SECONDS))
+            }
+        }
+    }
+}
+
+fn client_deadline(timeout: Option<Duration>, protocol: Protocol) -> Option<std::time::Instant> {
+    timeout
+        .map(|t| encoded_timeout(t, protocol).duration())
+        .and_then(|t| std::time::Instant::now().checked_add(t))
+}
+
 /// Enforce a client-side deadline by wrapping a future in `timeout_at`.
 ///
 /// gRPC deadline semantics: the deadline applies to the **entire call** from
@@ -1263,7 +1346,7 @@ where
     // ctx.Deadline() works. The server enforces the same deadline via
     // grpc-timeout, so by the time we check, the elapsed time since
     // request start is what matters.
-    let deadline = options.timeout.map(|t| std::time::Instant::now() + t);
+    let deadline = client_deadline(options.timeout, config.protocol);
 
     // Build the HTTP request with protocol-aware headers
     let mut builder = Request::builder().method(http::Method::POST).uri(uri);
@@ -1409,7 +1492,7 @@ where
         .parse()
         .map_err(|e| ConnectError::internal(format!("invalid GET URI: {e}")))?;
 
-    let deadline = options.timeout.map(|t| std::time::Instant::now() + t);
+    let deadline = client_deadline(options.timeout, Protocol::Connect);
 
     // GET request: no body, no Content-Type, no Content-Encoding.
     // Timeout still goes in the header (spec: "timeouts, if specified,
@@ -2427,7 +2510,7 @@ where
     let request_body = request_buf.freeze();
 
     // Compute deadline BEFORE sending, matching Go's ctx.Deadline() semantics
-    let deadline = options.timeout.map(|t| std::time::Instant::now() + t);
+    let deadline = client_deadline(options.timeout, config.protocol);
 
     // Build the HTTP request with protocol-aware streaming headers
     let mut builder = Request::builder().method(http::Method::POST).uri(uri);
@@ -2927,7 +3010,7 @@ where
         config.compression_policy.with_override(options.compress),
     );
 
-    let deadline = options.timeout.map(|t| std::time::Instant::now() + t);
+    let deadline = client_deadline(options.timeout, config.protocol);
 
     // Build the HTTP request with protocol-aware streaming headers
     let mut builder = Request::builder().method(http::Method::POST).uri(uri);
@@ -3029,7 +3112,7 @@ where
     );
 
     // Compute deadline BEFORE sending, matching Go's ctx.Deadline() semantics
-    let deadline = options.timeout.map(|t| std::time::Instant::now() + t);
+    let deadline = client_deadline(options.timeout, config.protocol);
 
     // Build the HTTP request with protocol-aware streaming headers
     let mut builder = Request::builder().method(http::Method::POST).uri(uri);
@@ -3411,58 +3494,8 @@ fn streaming_request_content_type(config: &ClientConfig) -> &'static str {
 }
 
 /// Format a timeout value for the protocol's timeout header.
-///
-/// gRPC spec requires at most 8 ASCII digits followed by a unit suffix.
-/// We select the largest unit that represents the value without precision
-/// loss and fits within 8 digits.
-#[allow(clippy::manual_is_multiple_of)]
 fn format_timeout(timeout: Duration, protocol: Protocol) -> String {
-    match protocol {
-        Protocol::Connect => {
-            // Connect spec: "at most 10 digits" → max 9_999_999_999 ms ≈ 115 days.
-            // Clamp so a large Duration doesn't produce a spec-violating
-            // header that our own server (and connect-go) will reject.
-            const MAX_MILLIS: u128 = 9_999_999_999;
-            timeout.as_millis().min(MAX_MILLIS).to_string()
-        }
-        Protocol::Grpc | Protocol::GrpcWeb => {
-            const MAX_DIGITS: u128 = 99_999_999; // 8 digits max per gRPC spec
-
-            // Try each unit from largest to smallest, picking the first
-            // that has no precision loss and fits in 8 digits.
-            let nanos = timeout.as_nanos();
-            let secs = timeout.as_secs() as u128;
-            let millis = timeout.as_millis();
-            let micros = timeout.as_micros();
-
-            if nanos == 0 {
-                "0n".to_owned()
-            } else if nanos % 1_000_000_000 == 0 && secs <= MAX_DIGITS {
-                format!("{secs}S")
-            } else if nanos % 1_000_000 == 0 && millis <= MAX_DIGITS {
-                format!("{millis}m")
-            } else if nanos % 1_000 == 0 && micros <= MAX_DIGITS {
-                format!("{micros}u")
-            } else if nanos <= MAX_DIGITS {
-                format!("{nanos}n")
-            } else if micros <= MAX_DIGITS {
-                // Value exceeds 8 nano-digits and has sub-microsecond
-                // precision — truncate to the smallest unit that fits,
-                // minimizing precision loss. Without this branch a
-                // sub-second duration like 100ms+1ns (natural from
-                // `Instant` arithmetic) would fall through to secs=0 →
-                // "0S" → server sees expired deadline.
-                format!("{micros}u")
-            } else if millis <= MAX_DIGITS {
-                format!("{millis}m")
-            } else if secs <= MAX_DIGITS {
-                format!("{secs}S")
-            } else {
-                // Extremely large timeout (>3.17 years) — use max
-                format!("{MAX_DIGITS}S")
-            }
-        }
-    }
+    encoded_timeout(timeout, protocol).header_value()
 }
 
 /// Add protocol-specific headers to a request builder for unary RPCs.
@@ -4500,6 +4533,17 @@ mod tests {
     }
 
     #[test]
+    fn connect_huge_timeout_clamps_before_deadline() {
+        let encoded = encoded_timeout(Duration::MAX, Protocol::Connect);
+        assert_eq!(encoded.header_value(), "9999999999");
+        assert_eq!(
+            encoded.duration(),
+            Duration::from_millis(CONNECT_TIMEOUT_MAX_MILLIS)
+        );
+        assert!(client_deadline(Some(Duration::MAX), Protocol::Connect).is_some());
+    }
+
+    #[test]
     fn test_format_timeout_grpc_seconds() {
         assert_eq!(
             format_timeout(Duration::from_secs(30), Protocol::Grpc),
@@ -4551,6 +4595,17 @@ mod tests {
     }
 
     #[test]
+    fn grpc_huge_timeout_clamps_before_deadline() {
+        let encoded = encoded_timeout(Duration::MAX, Protocol::Grpc);
+        assert_eq!(encoded.header_value(), "99999999S");
+        assert_eq!(
+            encoded.duration(),
+            Duration::from_secs(GRPC_TIMEOUT_MAX_SECONDS)
+        );
+        assert!(client_deadline(Some(Duration::MAX), Protocol::Grpc).is_some());
+    }
+
+    #[test]
     fn test_format_timeout_grpc_web_same_as_grpc() {
         assert_eq!(
             format_timeout(Duration::from_millis(500), Protocol::GrpcWeb),
@@ -4567,6 +4622,8 @@ mod tests {
             format_timeout(Duration::from_nanos(100_000_001), Protocol::Grpc),
             "100000u" // 100ms, 1ns truncated
         );
+        let encoded = encoded_timeout(Duration::from_nanos(100_000_001), Protocol::Grpc);
+        assert_eq!(encoded.duration(), Duration::from_micros(100_000));
         // Boundary: exactly 1ns over the 8-digit nano limit.
         assert_eq!(
             format_timeout(Duration::from_nanos(100_000_000), Protocol::Grpc),
