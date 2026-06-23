@@ -12,6 +12,13 @@ increment the patch version.
 
 ### Added
 
+- **Configurable codegen client feature gate name** ([#181]).
+  `gate_client_feature=<name>` lets `protoc-gen-connect-rust` emit generated
+  client items behind `#[cfg(feature = "<name>")]` instead of the default
+  `client`; `connectrpc-build` exposes the same through
+  `Config::client_feature_name`. The existing bare `gate_client_feature`
+  option and `Config::gate_client_feature(true)` behavior continue to use
+  `client`.
 - **Optional `json` cargo feature for proto-only builds** ([#172]). The
   Connect JSON codec requires `serde::Serialize`/`Deserialize` on every
   message type, so the code generator derives them by default — pure cost for

@@ -203,6 +203,19 @@ impl Config {
         self
     }
 
+    /// Set the Cargo feature name used by [`Config::gate_client_feature`]
+    /// (default: `"client"`).
+    ///
+    /// Use this when the generated crate exposes its client surface under a
+    /// different feature name, such as `grpc-client` or `transport`. This
+    /// method does not enable gating by itself; pair it with
+    /// `gate_client_feature(true)`.
+    #[must_use]
+    pub fn client_feature_name(mut self, feature: impl Into<String>) -> Self {
+        self.options.client_feature_name = feature.into();
+        self
+    }
+
     /// Replace the underlying buffa [`CodeGenConfig`] wholesale.
     ///
     /// Any buffa knob not surfaced as a builder method here can be set this
@@ -707,6 +720,7 @@ mod tests {
             .generate_json(false)
             .emit_register_fn(false)
             .gate_client_feature(true)
+            .client_feature_name("grpc-client")
             .include_file("_inc.rs");
         assert_eq!(cfg.files.len(), 2);
         assert_eq!(cfg.includes.len(), 1);
@@ -714,6 +728,7 @@ mod tests {
         assert!(!cfg.options.buffa.generate_json);
         assert!(!cfg.options.buffa.emit_register_fn);
         assert!(cfg.options.gate_client_feature);
+        assert_eq!(cfg.options.client_feature_name, "grpc-client");
         assert_eq!(cfg.include_file.as_deref(), Some("_inc.rs"));
     }
 
@@ -726,6 +741,7 @@ mod tests {
         // `gate_client_feature` defaults off — build.rs consumers don't
         // have to declare a `client` Cargo feature unless they opt in.
         assert!(!cfg.options.gate_client_feature);
+        assert_eq!(cfg.options.client_feature_name, "client");
         assert!(cfg.emit_rerun_directives);
         assert!(matches!(cfg.descriptor_source, DescriptorSource::Protoc));
     }
@@ -768,6 +784,31 @@ mod tests {
                 "`{marker}` must not be gated:\n{gated}"
             );
         }
+
+        // Custom name: cfg attrs use the configured feature name, not the
+        // default `client`.
+        let out_custom = tempfile::tempdir().unwrap();
+        Config::new()
+            .descriptor_set(&fixture)
+            .files(&["echo.proto"])
+            .out_dir(out_custom.path())
+            .gate_client_feature(true)
+            .client_feature_name("grpc-client")
+            .emit_rerun_directives(false)
+            .compile()
+            .expect("compile with custom client feature name");
+        let custom = std::fs::read_to_string(out_custom.path().join("echo.__connect.rs"))
+            .expect("read custom __connect.rs");
+        let custom_count = custom.matches("#[cfg(feature = \"grpc-client\")]").count();
+        assert_eq!(
+            custom_count, 2,
+            "expected exactly 2 custom cfg attrs (struct + impl); got \
+             {custom_count}:\n{custom}"
+        );
+        assert!(
+            !custom.contains("#[cfg(feature = \"client\")]"),
+            "custom client feature name must replace the default gate:\n{custom}"
+        );
 
         // Opt-out (default): no cfg attrs anywhere in the same file.
         let out_without = tempfile::tempdir().unwrap();

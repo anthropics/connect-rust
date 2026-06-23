@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use heck::ToSnakeCase;
 use heck::ToUpperCamelCase;
-use proc_macro2::{Ident, TokenStream};
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::format_ident;
 use quote::quote;
 
@@ -68,10 +68,14 @@ pub struct Options {
     pub buffa: CodeGenConfig,
 
     /// When `true`, prefix every emitted `FooClient<T>` struct and its
-    /// `impl` block with `#[cfg(feature = "client")]`. Opt in when
+    /// `impl` block with `#[cfg(feature = "...")]`. Opt in when
     /// the consuming crate wants to give server-only deployments a way
     /// to drop the client transport stack from their dependency graph.
     pub gate_client_feature: bool,
+
+    /// Cargo feature name used when [`Options::gate_client_feature`] is
+    /// enabled (default: `"client"`).
+    pub client_feature_name: String,
 }
 
 impl Default for Options {
@@ -81,6 +85,7 @@ impl Default for Options {
         Self {
             buffa,
             gate_client_feature: false,
+            client_feature_name: "client".into(),
         }
     }
 }
@@ -93,6 +98,14 @@ impl Options {
         config.generate_views = true;
         config
     }
+
+    fn client_feature_name(&self) -> Result<&str> {
+        let name = self.client_feature_name.trim();
+        if self.gate_client_feature && name.is_empty() {
+            anyhow::bail!("client feature name must not be empty");
+        }
+        Ok(if name.is_empty() { "client" } else { name })
+    }
 }
 
 /// Emit one [`GeneratedFile`] per proto file in `file_to_generate` that
@@ -102,6 +115,7 @@ fn emit_service_files(
     file_to_generate: &[String],
     resolver: &TypeResolver<'_>,
     gate_client_feature: bool,
+    client_feature_name: &str,
 ) -> Result<Vec<GeneratedFile>> {
     let mut out = Vec::new();
     // Dedup state shared across the whole batch, not per file:
@@ -114,6 +128,7 @@ fn emit_service_files(
     let mut batch = BatchState {
         colliding_aliases: collect_alias_collisions(proto_file, file_to_generate),
         gate_client_feature,
+        client_feature_name: client_feature_name.to_string(),
         ..BatchState::default()
     };
     for file_name in file_to_generate {
@@ -183,11 +198,13 @@ pub fn generate_files(
         .map_err(|e| anyhow::anyhow!("buffa-codegen failed: {e}"))?;
 
     let resolver = TypeResolver::new(proto_file, file_to_generate, &config, false);
+    let client_feature_name = options.client_feature_name()?;
     let service_files = emit_service_files(
         proto_file,
         file_to_generate,
         &resolver,
         options.gate_client_feature,
+        client_feature_name,
     )?;
 
     if config.file_per_package {
@@ -316,11 +333,13 @@ pub fn generate_services(
 
     let config = options.to_buffa_config();
     let resolver = TypeResolver::new(proto_file, file_to_generate, &config, true);
+    let client_feature_name = options.client_feature_name()?;
     let mut files = emit_service_files(
         proto_file,
         file_to_generate,
         &resolver,
         options.gate_client_feature,
+        client_feature_name,
     )?;
 
     if config.file_per_package {
@@ -461,11 +480,13 @@ pub fn generate_services(
 ///   types emitted); accepted for compatibility with the unified path.
 /// - `gate_client_feature` — prefix every emitted `FooClient<T>`
 ///   struct and its `impl` block with `#[cfg(feature = "client")]`.
+/// - `gate_client_feature=<name>` — same gate, but use `<name>` as the
+///   Cargo feature instead of `client`.
 ///
 /// # Client-side cfg gate
 ///
 /// When `gate_client_feature` is set, the consumer crate must declare
-/// a Cargo feature literally named `client`. Without it, the generated
+/// the named Cargo feature (`client` by default). Without it, the generated
 /// `FooClient` items will be absent from the crate namespace.
 ///
 /// Two consumer patterns:
@@ -520,6 +541,13 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                     proto.insert(0, '.');
                 }
                 options.buffa.extern_paths.push((proto, rust.to_string()));
+            } else if let Some(value) = opt.strip_prefix("gate_client_feature=") {
+                let feature = value.trim();
+                if feature.is_empty() {
+                    anyhow::bail!("gate_client_feature requires a non-empty feature name");
+                }
+                options.gate_client_feature = true;
+                options.client_feature_name = feature.to_string();
             } else {
                 match opt {
                     "file_per_package" => options.buffa.file_per_package = true,
@@ -532,7 +560,8 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                             "unknown plugin option: {opt:?}. Supported: \
                              buffa_module=<rust_path>, extern_path=<proto>=<rust>, \
                              file_per_package, strict_utf8_mapping, no_json, \
-                             no_register_fn, gate_client_feature"
+                             no_register_fn, gate_client_feature, \
+                             gate_client_feature=<name>"
                         ));
                     }
                 }
@@ -761,10 +790,22 @@ struct BatchState {
     colliding_aliases: std::collections::BTreeSet<(String, String)>,
     /// Mirrors [`Options::gate_client_feature`]. When `true`, prefix
     /// each emitted `FooClient<T>` struct + `impl` with
-    /// `#[cfg(feature = "client")]`. Threaded here so it propagates
+    /// `#[cfg(feature = "...")]`. Threaded here so it propagates
     /// through the per-file emission loop without changing every
     /// helper's signature.
     gate_client_feature: bool,
+    /// Mirrors [`Options::client_feature_name`].
+    client_feature_name: String,
+}
+
+impl BatchState {
+    fn client_feature_name(&self) -> &str {
+        if self.client_feature_name.is_empty() {
+            "client"
+        } else {
+            &self.client_feature_name
+        }
+    }
 }
 
 fn generate_connect_services(
@@ -1396,7 +1437,7 @@ received message from `.message().await` — bind `msg.reborrow()` for field
 access, or convert with `.to_owned_message()`."#
     );
     let client_doc_tokens = doc_attrs(&client_doc);
-    // Opt-in `#[cfg(feature = "client")]` on every client-side item.
+    // Opt-in feature cfg on every client-side item.
     //
     // INVARIANT: any future emission referencing
     // `::connectrpc::client::*` (an additional `impl`, a free fn, a
@@ -1404,7 +1445,8 @@ access, or convert with `.to_owned_message()`."#
     // The `no_ungated_client_references` test enforces this by scanning
     // the formatted output under the opt-in path.
     let client_cfg_attr: TokenStream = if batch.gate_client_feature {
-        quote! { #[cfg(feature = "client")] }
+        let feature_name = syn::LitStr::new(batch.client_feature_name(), Span::call_site());
+        quote! { #[cfg(feature = #feature_name)] }
     } else {
         TokenStream::new()
     };
@@ -3458,6 +3500,13 @@ mod tests {
     /// whether the opt-in cfg attr is emitted; shared by the `*_client_*`
     /// tests below.
     fn format_minimal_service(gate_client_feature: bool) -> String {
+        format_minimal_service_with_client_feature_name(gate_client_feature, "client")
+    }
+
+    fn format_minimal_service_with_client_feature_name(
+        gate_client_feature: bool,
+        client_feature_name: &str,
+    ) -> String {
         let file = minimal_file(
             Some("example.v1"),
             ".example.v1.PingReq",
@@ -3471,6 +3520,7 @@ mod tests {
         let batch = BatchState {
             colliding_aliases: collect_alias_collisions(std::slice::from_ref(&file), &target),
             gate_client_feature,
+            client_feature_name: client_feature_name.to_string(),
             ..BatchState::default()
         };
         format_token_stream(&generate_service(&file, service, &resolver, &batch).unwrap()).unwrap()
@@ -3504,6 +3554,22 @@ mod tests {
             "expected exactly two #[cfg(feature = \"client\")] attrs (one on \
              `pub struct PingServiceClient`, one on its `impl<T>` block); got \
              {cfg_count}:\n{out}"
+        );
+    }
+
+    #[test]
+    fn client_items_use_custom_feature_name_when_configured() {
+        let out = format_minimal_service_with_client_feature_name(true, "grpc-client");
+        let cfg_count = out.matches("#[cfg(feature = \"grpc-client\")]").count();
+        assert_eq!(
+            cfg_count, 2,
+            "expected exactly two #[cfg(feature = \"grpc-client\")] attrs \
+             (one on `pub struct PingServiceClient`, one on its `impl<T>` \
+             block); got {cfg_count}:\n{out}"
+        );
+        assert!(
+            !out.contains("#[cfg(feature = \"client\")]"),
+            "custom feature name must replace the default `client` gate:\n{out}"
         );
     }
 
@@ -3895,11 +3961,61 @@ mod tests {
     }
 
     #[test]
+    fn plugin_accepts_gate_client_feature_value_form() {
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let request = CodeGeneratorRequest {
+            parameter: Some("buffa_module=crate::proto,gate_client_feature=grpc-client".into()),
+            file_to_generate: vec!["ping.proto".into()],
+            proto_file: vec![file],
+            ..Default::default()
+        };
+        let response =
+            generate(&request).expect("custom gate_client_feature value should be recognized");
+        let connect_file = response
+            .file
+            .iter()
+            .find(|f| f.name.as_deref() == Some("ping.__connect.rs"))
+            .expect("plugin should emit a connect service companion");
+        let content = connect_file.content.as_deref().unwrap_or_default();
+        let cfg_count = content.matches("#[cfg(feature = \"grpc-client\")]").count();
+        assert_eq!(
+            cfg_count, 2,
+            "expected custom feature gate on generated client struct and impl; got \
+             {cfg_count}:\n{content}"
+        );
+        assert!(
+            !content.contains("#[cfg(feature = \"client\")]"),
+            "custom plugin feature name must replace the default gate:\n{content}"
+        );
+    }
+
+    #[test]
+    fn plugin_rejects_empty_gate_client_feature_value() {
+        let request = CodeGeneratorRequest {
+            parameter: Some("buffa_module=crate::proto,gate_client_feature=".into()),
+            file_to_generate: vec![],
+            proto_file: vec![],
+            ..Default::default()
+        };
+        let err = generate(&request).expect_err("empty gate_client_feature value must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("gate_client_feature requires a non-empty feature name"),
+            "error should describe the empty feature-name problem: {msg}"
+        );
+    }
+
+    #[test]
     fn plugin_rejects_old_client_feature_value_form() {
         // The previous design used `client_feature=<name>` with an
         // arbitrary feature name. That option was renamed to the bare
-        // flag `gate_client_feature` (the feature name is fixed as
-        // `client`). A stale buf.gen.yaml using the old form must fail
+        // flag `gate_client_feature`, and custom names now use
+        // `gate_client_feature=<name>`. A stale buf.gen.yaml using the old form must fail
         // loudly, not silently no-op.
         let request = CodeGeneratorRequest {
             parameter: Some("buffa_module=crate::proto,client_feature=client".into()),
