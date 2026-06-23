@@ -52,6 +52,10 @@
 //! `SETTINGS_MAX_CONCURRENT_STREAMS`; it is left at hyper's default (200)
 //! when unset. Raise it for high-fan-in internal services, or lower it as a
 //! cheap hardening measure against less-trusted clients.
+//!
+//! For transport and HTTP/2 knobs that [`Server`] does not expose, drive
+//! [`ConnectRpcService`] directly from a hyper accept loop. The crate guide's
+//! "Advanced transport configuration" section shows the `hyper_util` pattern.
 
 use std::any::Any;
 use std::collections::hash_map::RandomState;
