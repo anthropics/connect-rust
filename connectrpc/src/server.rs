@@ -55,6 +55,10 @@
 //! server-streaming or bidirectional connections that have gone silent (NAT
 //! timeout, client crash, network partition) instead of leaving them
 //! half-open until the OS TCP timeout.
+//!
+//! For transport and HTTP/2 knobs that [`Server`] does not expose, drive
+//! [`ConnectRpcService`] directly from a hyper accept loop. The crate guide's
+//! "Advanced transport configuration" section shows the `hyper_util` pattern.
 
 use std::any::Any;
 use std::collections::hash_map::RandomState;
