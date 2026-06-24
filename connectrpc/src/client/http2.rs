@@ -88,6 +88,56 @@ where
     )
 }
 
+/// DNS resolver that rotates the address list across successive resolutions.
+///
+/// `HttpConnector` tries same-family addresses serially and stops at the first
+/// TCP success — so if address A accepts TCP but stalls TLS, B and C are never
+/// tried within that attempt and the establishment timeout fires. Rotating the
+/// list per attempt means the next reconnect starts with B, bounding the
+/// worst-case time to reach a healthy address at `establishment_timeout × N`
+/// rather than relying on DNS-result reordering.
+#[derive(Clone, Debug)]
+struct RotatingGaiResolver {
+    inner: hyper_util::client::legacy::connect::dns::GaiResolver,
+    attempt: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl RotatingGaiResolver {
+    fn new() -> Self {
+        Self {
+            inner: hyper_util::client::legacy::connect::dns::GaiResolver::new(),
+            attempt: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+}
+
+impl tower::Service<hyper_util::client::legacy::connect::dns::Name> for RotatingGaiResolver {
+    type Response = std::vec::IntoIter<std::net::SocketAddr>;
+    type Error = std::io::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, name: hyper_util::client::legacy::connect::dns::Name) -> Self::Future {
+        let n = self
+            .attempt
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let fut = self.inner.call(name);
+        Box::pin(async move {
+            let mut addrs: Vec<std::net::SocketAddr> = fut.await?.collect();
+            if addrs.len() > 1 {
+                let len = addrs.len();
+                addrs.rotate_left(n % len);
+            }
+            Ok(addrs.into_iter())
+        })
+    }
+}
+
+type Http2HttpConnector = hyper_util::client::legacy::connect::HttpConnector<RotatingGaiResolver>;
+
 /// Build a connector that dials a Unix domain socket. The URI argument
 /// is ignored — `:authority` is supplied separately to
 /// [`Http2Connection::lazy_unix`].
@@ -243,15 +293,16 @@ fn require_http_scheme(uri: &Uri) -> Result<(), ConnectError> {
 }
 
 impl Http2Connection {
-    /// Returns a builder for bounding connection establishment (TCP connect,
-    /// TLS handshake, HTTP/2 preface) before choosing a transport flavour.
+    /// Returns a builder for configuring connection establishment (timeout
+    /// bounds, HTTP/2 keep-alive, flow-control windows) before choosing a
+    /// transport flavour.
     ///
     /// The constructors on `Http2Connection` are shortcuts for the builder
-    /// with no bounds set, so `Http2Connection::lazy_plaintext(uri)` is exactly
-    /// `Http2Connection::builder().lazy_plaintext(uri)`. Reach for the builder
-    /// when you want to bound a stalled connect or handshake — see
-    /// [`Http2ConnectionBuilder::connect_timeout`] and
-    /// [`Http2ConnectionBuilder::handshake_timeout`].
+    /// with default settings, so `Http2Connection::lazy_plaintext(uri)` is
+    /// exactly `Http2Connection::builder().lazy_plaintext(uri)`. The default
+    /// establishment bounds are finite — see
+    /// [`Http2ConnectionBuilder::establishment_timeout`] and
+    /// [`Http2ConnectionBuilder::tcp_connect_timeout`].
     #[must_use]
     pub fn builder() -> Http2ConnectionBuilder {
         Http2ConnectionBuilder::default()
@@ -459,82 +510,94 @@ impl Http2Connection {
 /// Builder for [`Http2Connection`] connection-establishment bounds.
 ///
 /// Obtain one via [`Http2Connection::builder`]. The terminal methods mirror the
-/// `Http2Connection` constructors; the bare constructors delegate here with no
-/// bounds set, so behaviour is unchanged unless you call a setter.
+/// `Http2Connection` constructors; the bare constructors delegate here with
+/// default settings.
 ///
-/// Both bounds default to unset (no time limit). Establishment then runs until
-/// it succeeds, errors, or the kernel gives up — a server that accepts the TCP
-/// connection but stalls during the TLS handshake would otherwise stall
-/// `poll_ready` for every caller sharing the connection. The bounds here are the
-/// *establishment* budget; [`CallOptions::with_timeout`] remains the end-to-end
-/// per-request bound.
+/// Establishment is bounded by default ([`DEFAULT_ESTABLISHMENT_TIMEOUT`] /
+/// [`DEFAULT_TCP_CONNECT_TIMEOUT`]), so a server that accepts the TCP
+/// connection but stalls during the TLS handshake cannot stall `poll_ready` for
+/// every caller sharing the connection. The bounds here are the *establishment*
+/// budget; [`CallOptions::with_timeout`] remains the end-to-end per-request
+/// bound.
 ///
 /// # Scope
 ///
 /// The builder covers every [`Http2Connection`] transport: plaintext, TLS,
 /// caller-supplied connectors, and Unix sockets. HTTP/2 keep-alive and
 /// flow-control knobs are proxied directly; for hyper settings not surfaced
-/// here use [`h2_settings`](Self::h2_settings). [`connect_timeout`] is the
+/// here use [`h2_settings`](Self::h2_settings). [`tcp_connect_timeout`] is the
 /// per-address TCP bound on the built-in connector and is ignored by the
-/// custom-connector / Unix-socket terminals — use [`handshake_timeout`] there
+/// custom-connector / Unix-socket terminals — use [`establishment_timeout`] there
 /// as the establishment bound.
 ///
-/// [`connect_timeout`]: Self::connect_timeout
-/// [`handshake_timeout`]: Self::handshake_timeout
+/// [`tcp_connect_timeout`]: Self::tcp_connect_timeout
+/// [`establishment_timeout`]: Self::establishment_timeout
 ///
 /// [`CallOptions::with_timeout`]: super::CallOptions::with_timeout
 #[derive(Debug, Clone)]
 pub struct Http2ConnectionBuilder {
-    connect_timeout: Option<Duration>,
-    handshake_timeout: Option<Duration>,
+    tcp_connect_timeout: Option<Duration>,
+    establishment_timeout: Option<Duration>,
     h2_builder: hyper::client::conn::http2::Builder<hyper_util::rt::TokioExecutor>,
 }
 
+/// Default wall-clock bound on connection establishment (DNS, TCP, TLS, h2
+/// preface). Override via [`Http2ConnectionBuilder::establishment_timeout`].
+/// Matches grpc-go's default `MinConnectTimeout`.
+pub const DEFAULT_ESTABLISHMENT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Default per-address TCP `connect(2)` budget on the built-in connector.
+/// Override via [`Http2ConnectionBuilder::tcp_connect_timeout`].
+pub const DEFAULT_TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl Default for Http2ConnectionBuilder {
-    /// A fresh builder with no establishment bounds and default HTTP/2
-    /// settings. A [`TokioTimer`](hyper_util::rt::TokioTimer) is pre-wired so
-    /// the keep-alive setters work without the caller having to install one
-    /// (hyper otherwise panics at handshake time if a keep-alive interval is
-    /// set without a timer).
+    /// A fresh builder with [`DEFAULT_ESTABLISHMENT_TIMEOUT`] /
+    /// [`DEFAULT_TCP_CONNECT_TIMEOUT`] and default HTTP/2 settings. A
+    /// [`TokioTimer`](hyper_util::rt::TokioTimer) is pre-wired so the
+    /// keep-alive setters work without the caller having to install one (hyper
+    /// otherwise panics at handshake time if a keep-alive interval is set
+    /// without a timer).
     fn default() -> Self {
         let mut h2_builder =
             hyper::client::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new());
         h2_builder.timer(hyper_util::rt::TokioTimer::new());
         Self {
-            connect_timeout: None,
-            handshake_timeout: None,
+            tcp_connect_timeout: Some(DEFAULT_TCP_CONNECT_TIMEOUT),
+            establishment_timeout: Some(DEFAULT_ESTABLISHMENT_TIMEOUT),
             h2_builder,
         }
     }
 }
 
 impl Http2ConnectionBuilder {
-    /// Bound the TCP connect phase.
+    /// Set the per-address TCP connect budget.
     ///
     /// Applied to the built-in connector via hyper's
     /// [`HttpConnector::set_connect_timeout`][hyper-ct]; it covers only the TCP
     /// `connect(2)` call (per resolved address — the budget is divided across
-    /// the address set). It does **not** cover DNS resolution, the TLS
-    /// handshake, or the HTTP/2 preface — set
-    /// [`handshake_timeout`](Self::handshake_timeout) too to bound those — and
-    /// is **ignored** by the custom-connector / Unix-socket terminals (which
+    /// the address set), so the connector moves on to the next address rather
+    /// than burning the whole [`establishment_timeout`] on one blackholed peer.
+    /// It is **ignored** by the custom-connector / Unix-socket terminals (which
     /// have no built-in `HttpConnector` to apply it to).
     ///
-    /// Unset (the default) means TCP connect is governed by the kernel's
-    /// `tcp_syn_retries` (typically ~130s on Linux).
+    /// Defaults to [`DEFAULT_TCP_CONNECT_TIMEOUT`]. Pass `Duration::MAX` to
+    /// effectively disable.
     ///
+    /// [`establishment_timeout`]: Self::establishment_timeout
     /// [hyper-ct]: hyper_util::client::legacy::connect::HttpConnector::set_connect_timeout
     #[must_use]
-    pub fn connect_timeout(mut self, dur: Duration) -> Self {
-        self.connect_timeout = Some(dur);
+    pub fn tcp_connect_timeout(mut self, dur: Duration) -> Self {
+        self.tcp_connect_timeout = Some(dur);
         self
     }
 
-    /// Bound the connection handshake: DNS resolution, TCP connect, the TLS
-    /// handshake (for `tls` connections), and the HTTP/2 preface, as one
-    /// wall-clock budget. [`connect_timeout`](Self::connect_timeout) is an
-    /// additional per-address TCP bound *inside* this budget. It mirrors the
-    /// server-side TLS handshake timeout (`Server::with_tls_handshake_timeout`).
+    /// Set the wall-clock bound on connection establishment: DNS resolution,
+    /// TCP connect, the TLS handshake (for `tls` connections), and the HTTP/2
+    /// preface, as one budget. [`tcp_connect_timeout`](Self::tcp_connect_timeout)
+    /// is an additional per-address TCP bound *inside* this budget.
+    ///
+    /// Defaults to [`DEFAULT_ESTABLISHMENT_TIMEOUT`]. Pass `Duration::MAX` to
+    /// effectively disable.
     ///
     /// # Where this bites
     ///
@@ -553,11 +616,9 @@ impl Http2ConnectionBuilder {
     /// Exceeding this bound surfaces as a [`ConnectError`] with
     /// [`ErrorCode::Unavailable`](crate::error::ErrorCode::Unavailable) (the
     /// connect is retryable); the message names the phase.
-    ///
-    /// Unset (the default) means the handshake is unbounded.
     #[must_use]
-    pub fn handshake_timeout(mut self, dur: Duration) -> Self {
-        self.handshake_timeout = Some(dur);
+    pub fn establishment_timeout(mut self, dur: Duration) -> Self {
+        self.establishment_timeout = Some(dur);
         self
     }
 
@@ -569,7 +630,7 @@ impl Http2ConnectionBuilder {
     /// [`keep_alive_timeout`](Self::keep_alive_timeout) the connection is
     /// closed and the next `poll_ready` reconnects. This is the post-handshake
     /// liveness bound — together with
-    /// [`handshake_timeout`](Self::handshake_timeout) it bounds the transport
+    /// [`establishment_timeout`](Self::establishment_timeout) it bounds the transport
     /// against a peer that goes silent at any point.
     #[must_use]
     pub fn keep_alive_interval(mut self, interval: Duration) -> Self {
@@ -594,7 +655,7 @@ impl Http2ConnectionBuilder {
     /// window between handshake completion and the first request (where no
     /// stream is open yet) is not covered by keep-alive, so a peer that goes
     /// half-open exactly there is unbounded by both
-    /// [`handshake_timeout`](Self::handshake_timeout) (already ended) and
+    /// [`establishment_timeout`](Self::establishment_timeout) (already ended) and
     /// keep-alive (not armed).
     #[must_use]
     pub fn keep_alive_while_idle(mut self, enabled: bool) -> Self {
@@ -706,9 +767,9 @@ impl Http2ConnectionBuilder {
     /// Finish as a lazily-established connection over a **caller-supplied
     /// connector**. See [`Http2Connection::lazy_with_connector`].
     ///
-    /// `handshake_timeout` bounds the connector's dial *and* the HTTP/2 preface
+    /// `establishment_timeout` bounds the connector's dial *and* the HTTP/2 preface
     /// as one wall-clock budget — the same semantics as the built-in
-    /// transports. `connect_timeout` is the per-address TCP bound on the
+    /// transports. `tcp_connect_timeout` is the per-address TCP bound on the
     /// built-in connector and is **ignored** here; to bound the dial separately
     /// from the preface, wrap the connector in `tower::timeout::Timeout`.
     #[must_use]
@@ -732,7 +793,7 @@ impl Http2ConnectionBuilder {
     /// # Errors
     ///
     /// Returns an error if the connector or h2 handshake fails (including
-    /// exceeding a configured `handshake_timeout`).
+    /// exceeding a configured `establishment_timeout`).
     pub async fn connect_with_connector<C>(
         self,
         connector: C,
@@ -768,7 +829,7 @@ impl Http2ConnectionBuilder {
     /// # Errors
     ///
     /// Returns an error if the socket path doesn't exist or the h2 handshake
-    /// fails (including exceeding a configured `handshake_timeout`).
+    /// fails (including exceeding a configured `establishment_timeout`).
     #[cfg(unix)]
     #[cfg_attr(docsrs, doc(cfg(unix)))]
     pub async fn connect_unix(
@@ -780,12 +841,14 @@ impl Http2ConnectionBuilder {
             .await
     }
 
-    /// Built-in TCP connector with `nodelay` and the configured
-    /// `connect_timeout` applied. Mirrors `HttpClientBuilder::http_connector`.
-    fn http_connector(&self) -> hyper_util::client::legacy::connect::HttpConnector {
-        let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
+    /// Built-in TCP connector with `nodelay`, the configured
+    /// `tcp_connect_timeout`, and a [`RotatingGaiResolver`] applied.
+    fn http_connector(&self) -> Http2HttpConnector {
+        let mut connector = hyper_util::client::legacy::connect::HttpConnector::new_with_resolver(
+            RotatingGaiResolver::new(),
+        );
         connector.set_nodelay(true);
-        connector.set_connect_timeout(self.connect_timeout);
+        connector.set_connect_timeout(self.tcp_connect_timeout);
         connector
     }
 
@@ -796,7 +859,7 @@ impl Http2ConnectionBuilder {
             #[cfg(feature = "client-tls")]
             tls: None,
             custom: None,
-            handshake_timeout: self.handshake_timeout,
+            establishment_timeout: self.establishment_timeout,
         }
     }
 
@@ -809,21 +872,21 @@ impl Http2ConnectionBuilder {
             builder: self.h2_builder,
             tls: Some(prepare_tls_for_h2(&tls_config)),
             custom: None,
-            handshake_timeout: self.handshake_timeout,
+            establishment_timeout: self.establishment_timeout,
         }
     }
 
     fn make_custom(self, conn: BoxedConnector) -> MakeSendRequest {
         MakeSendRequest {
             // Unused when `custom` is Some — `call()` branches to the custom
-            // connector before touching it. `connect_timeout` is therefore
+            // connector before touching it. `tcp_connect_timeout` is therefore
             // dropped here (it's the per-address TCP bound on this connector).
-            connector: hyper_util::client::legacy::connect::HttpConnector::new(),
+            connector: self.http_connector(),
             builder: self.h2_builder,
             #[cfg(feature = "client-tls")]
             tls: None,
             custom: Some(conn),
-            handshake_timeout: self.handshake_timeout,
+            establishment_timeout: self.establishment_timeout,
         }
     }
 }
@@ -967,7 +1030,7 @@ impl tower::Service<Request<ClientBody>> for SendRequest {
 /// HTTP/2 handshake, returning a ready `SendRequest`. Used by [`Reconnect`]
 /// to (re)establish connections.
 struct MakeSendRequest {
-    connector: hyper_util::client::legacy::connect::HttpConnector,
+    connector: Http2HttpConnector,
     builder: hyper::client::conn::http2::Builder<hyper_util::rt::TokioExecutor>,
     /// TLS config for https:// connections. When `Some`, the URI scheme
     /// must be https:// and a TLS handshake happens after TCP connect.
@@ -982,7 +1045,7 @@ struct MakeSendRequest {
     /// connect, TLS handshake (if any), and the HTTP/2 preface. `None` means
     /// unbounded. `connector`'s `set_connect_timeout` is an additional
     /// per-address TCP bound inside this budget.
-    handshake_timeout: Option<Duration>,
+    establishment_timeout: Option<Duration>,
 }
 
 impl tower::Service<Uri> for MakeSendRequest {
@@ -1001,7 +1064,7 @@ impl tower::Service<Uri> for MakeSendRequest {
         if let Some(c) = &mut self.custom {
             let io_fut = c.call(uri);
             let builder = self.builder.clone();
-            let handshake_timeout = self.handshake_timeout;
+            let establishment_timeout = self.establishment_timeout;
             return Box::pin(async move {
                 // Dial + HTTP/2 preface as one wall-clock budget — same
                 // semantics as the built-in branch's `establish` block below.
@@ -1009,7 +1072,8 @@ impl tower::Service<Uri> for MakeSendRequest {
                     let io = io_fut.await?;
                     builder.handshake(io).await.map_err(BoxError::from)
                 };
-                let (send_request, conn) = run_handshake(establish, handshake_timeout).await?;
+                let (send_request, conn) =
+                    run_establishment(establish, establishment_timeout).await?;
                 tokio::spawn(async move {
                     if let Err(e) = conn.await {
                         tracing::debug!("h2 connection task exited with error: {e}");
@@ -1050,15 +1114,15 @@ impl tower::Service<Uri> for MakeSendRequest {
 
         let connect_fut = <_ as tower::Service<Uri>>::call(&mut self.connector, uri);
         let builder = self.builder.clone();
-        let handshake_timeout = self.handshake_timeout;
+        let establishment_timeout = self.establishment_timeout;
 
         Box::pin(async move {
             // DNS + TCP connect + TLS handshake (if configured) + HTTP/2
-            // preface — bounded together by `handshake_timeout` so a server
+            // preface — bounded together by `establishment_timeout` so a server
             // that accepts the TCP connection but stalls the handshake (or a
             // hung resolver) can't hang `poll_ready` for every caller sharing
             // this connection. The per-address TCP connect is additionally
-            // bounded by `connect_timeout` on the connector.
+            // bounded by `tcp_connect_timeout` on the connector.
             let establish = async move {
                 let io = connect_fut.await.map_err(Into::<BoxError>::into)?;
 
@@ -1097,7 +1161,7 @@ impl tower::Service<Uri> for MakeSendRequest {
                 builder.handshake(io).await.map_err(BoxError::from)
             };
 
-            let (send_request, conn) = run_handshake(establish, handshake_timeout).await?;
+            let (send_request, conn) = run_establishment(establish, establishment_timeout).await?;
             // The connection task drives the h2 state machine (reads frames,
             // processes flow control, etc). Detach it — it exits when the
             // connection closes or errors.
@@ -1118,7 +1182,10 @@ impl tower::Service<Uri> for MakeSendRequest {
 /// `None` runs it unbounded; `Some(dur)` cancels it (dropping the in-flight
 /// handshake) and returns an `unavailable` error if it doesn't finish within
 /// `dur`. The future's own error type is coerced to [`BoxError`].
-pub(super) async fn run_handshake<F, T, E>(fut: F, timeout: Option<Duration>) -> Result<T, BoxError>
+pub(super) async fn run_establishment<F, T, E>(
+    fut: F,
+    timeout: Option<Duration>,
+) -> Result<T, BoxError>
 where
     F: Future<Output = Result<T, E>>,
     E: Into<BoxError> + 'static,
@@ -1127,7 +1194,7 @@ where
         Some(dur) => match tokio::time::timeout(dur, fut).await {
             Ok(res) => res.map_err(Into::into),
             Err(_) => Err(ConnectError::unavailable(format!(
-                "connection handshake did not complete within {dur:?}"
+                "connection establishment did not complete within {dur:?}"
             ))
             .into()),
         },
@@ -1443,31 +1510,40 @@ mod tests {
     }
 
     #[test]
-    fn builder_defaults_are_unset() {
+    fn builder_defaults_are_finite() {
         let builder = Http2Connection::builder();
-        assert!(builder.connect_timeout.is_none());
-        assert!(builder.handshake_timeout.is_none());
+        assert_eq!(
+            builder.tcp_connect_timeout,
+            Some(DEFAULT_TCP_CONNECT_TIMEOUT)
+        );
+        assert_eq!(
+            builder.establishment_timeout,
+            Some(DEFAULT_ESTABLISHMENT_TIMEOUT)
+        );
     }
 
     #[test]
     fn builder_setters_record_durations() {
         let builder = Http2Connection::builder()
-            .connect_timeout(Duration::from_millis(10))
-            .handshake_timeout(Duration::from_millis(20));
-        assert_eq!(builder.connect_timeout, Some(Duration::from_millis(10)));
-        assert_eq!(builder.handshake_timeout, Some(Duration::from_millis(20)));
+            .tcp_connect_timeout(Duration::from_millis(10))
+            .establishment_timeout(Duration::from_millis(20));
+        assert_eq!(builder.tcp_connect_timeout, Some(Duration::from_millis(10)));
+        assert_eq!(
+            builder.establishment_timeout,
+            Some(Duration::from_millis(20))
+        );
     }
 
     #[tokio::test]
-    async fn builder_connect_timeout_bounds_tcp_connect() {
+    async fn builder_tcp_connect_timeout_bounds_tcp_connect() {
         use std::time::Instant;
 
         // RFC 5737 TEST-NET-1: guaranteed unroutable, so SYNs are dropped and an
         // unbounded connect would stall on kernel retransmits (~130s). A 100ms
-        // connect_timeout must abort well before that.
+        // tcp_connect_timeout must abort well before that.
         let start = Instant::now();
         let err = Http2Connection::builder()
-            .connect_timeout(Duration::from_millis(100))
+            .tcp_connect_timeout(Duration::from_millis(100))
             .connect_plaintext("http://192.0.2.1:9".parse().unwrap())
             .await
             .unwrap_err();
@@ -1490,7 +1566,7 @@ mod tests {
         );
         assert!(
             elapsed < Duration::from_secs(2),
-            "connect_timeout(100ms) should abort within ~2s, took {elapsed:?}: {err:?}"
+            "tcp_connect_timeout(100ms) should abort within ~2s, took {elapsed:?}: {err:?}"
         );
     }
 
@@ -1498,14 +1574,14 @@ mod tests {
     // preface without waiting for the server's SETTINGS), so a stalled cleartext
     // server stalls the first *request*, not the handshake. The TLS handshake,
     // by contrast, genuinely blocks on the server, so that is where
-    // handshake_timeout has observable effect — exercised here.
+    // establishment_timeout has observable effect — exercised here.
     #[cfg(feature = "client-tls")]
     #[tokio::test]
-    async fn handshake_timeout_fires_when_tls_server_stalls_after_accept() {
+    async fn establishment_timeout_fires_when_tls_server_stalls_after_accept() {
         use std::time::Instant;
 
         // A listener that accepts the TCP connection but never performs the TLS
-        // handshake. The TCP connect succeeds, so only handshake_timeout can
+        // handshake. The TCP connect succeeds, so only establishment_timeout can
         // release the stalled connect.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1524,7 +1600,7 @@ mod tests {
         let uri: Uri = format!("https://{addr}").parse().unwrap();
         let start = Instant::now();
         let err = Http2Connection::builder()
-            .handshake_timeout(Duration::from_millis(150))
+            .establishment_timeout(Duration::from_millis(150))
             .connect_tls(uri, tls_config)
             .await
             .unwrap_err();
@@ -1535,12 +1611,12 @@ mod tests {
             err.message
                 .as_deref()
                 .unwrap()
-                .contains("handshake did not complete"),
+                .contains("establishment did not complete"),
             "expected a handshake-timeout message, got: {err:?}"
         );
         assert!(
             elapsed < Duration::from_secs(2),
-            "handshake_timeout(150ms) should fire within ~2s, took {elapsed:?}"
+            "establishment_timeout(150ms) should fire within ~2s, took {elapsed:?}"
         );
 
         server.abort();
@@ -1548,7 +1624,7 @@ mod tests {
 
     #[cfg(feature = "client-tls")]
     #[tokio::test]
-    async fn handshake_timeout_applies_with_custom_h2_settings() {
+    async fn establishment_timeout_applies_with_custom_h2_settings() {
         use std::time::Instant;
 
         // Same stalled-TLS scenario, but constructed via the proxied keep-alive
@@ -1573,7 +1649,7 @@ mod tests {
         let err = Http2Connection::builder()
             .keep_alive_interval(Duration::from_secs(30))
             .keep_alive_while_idle(true)
-            .handshake_timeout(Duration::from_millis(150))
+            .establishment_timeout(Duration::from_millis(150))
             .connect_tls(uri, tls_config)
             .await
             .unwrap_err();
@@ -1584,22 +1660,22 @@ mod tests {
             err.message
                 .as_deref()
                 .unwrap()
-                .contains("handshake did not complete"),
+                .contains("establishment did not complete"),
             "expected a handshake-timeout message, got: {err:?}"
         );
         assert!(
             elapsed < Duration::from_secs(2),
-            "handshake_timeout(150ms) should fire within ~2s, took {elapsed:?}"
+            "establishment_timeout(150ms) should fire within ~2s, took {elapsed:?}"
         );
 
         server.abort();
     }
 
     #[tokio::test]
-    async fn handshake_timeout_bounds_custom_connector_dial() {
+    async fn establishment_timeout_bounds_custom_connector_dial() {
         use std::time::Instant;
 
-        // A connector that never resolves — handshake_timeout must bound the
+        // A connector that never resolves — establishment_timeout must bound the
         // caller's dial, not just the h2 preface, so this fires.
         let never = tower::service_fn(|_uri: Uri| async move {
             std::future::pending::<()>().await;
@@ -1608,7 +1684,7 @@ mod tests {
         });
         let start = Instant::now();
         let err = Http2Connection::builder()
-            .handshake_timeout(Duration::from_millis(150))
+            .establishment_timeout(Duration::from_millis(150))
             .connect_with_connector(never, "http://localhost".parse().unwrap())
             .await
             .unwrap_err();
@@ -1619,12 +1695,12 @@ mod tests {
             err.message
                 .as_deref()
                 .unwrap()
-                .contains("handshake did not complete"),
+                .contains("establishment did not complete"),
             "expected a handshake-timeout message, got: {err:?}"
         );
         assert!(
             elapsed < Duration::from_secs(2),
-            "handshake_timeout(150ms) should fire within ~2s, took {elapsed:?}"
+            "establishment_timeout(150ms) should fire within ~2s, took {elapsed:?}"
         );
     }
 
@@ -1632,7 +1708,7 @@ mod tests {
     #[tokio::test]
     async fn handshake_succeeds_within_generous_bound() {
         // A real h2c server completes the preface promptly, so a generous
-        // handshake_timeout must not interfere with normal establishment.
+        // establishment_timeout must not interfere with normal establishment.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
@@ -1656,8 +1732,8 @@ mod tests {
 
         let uri: Uri = format!("http://{addr}").parse().unwrap();
         let conn = Http2Connection::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .handshake_timeout(Duration::from_secs(5))
+            .tcp_connect_timeout(Duration::from_secs(5))
+            .establishment_timeout(Duration::from_secs(5))
             .connect_plaintext(uri)
             .await
             .expect("establishment should succeed within a generous bound");
