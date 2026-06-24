@@ -330,6 +330,7 @@ impl Http2Connection {
     ///     "http://localhost".parse().unwrap(),
     /// );
     /// ```
+    #[must_use]
     pub fn lazy_with_connector<C>(connector: C, authority: Uri) -> Self
     where
         C: tower::Service<Uri> + Send + 'static,
@@ -337,16 +338,12 @@ impl Http2Connection {
         C::Error: Into<BoxError>,
         C::Future: Send + 'static,
     {
-        Self {
-            inner: Reconnect::new(
-                MakeSendRequest::new_custom(box_connector(connector)),
-                authority,
-                true,
-            ),
-        }
+        Self::builder().lazy_with_connector(connector, authority)
     }
 
     /// Eagerly establish an h2c connection using a **caller-supplied connector**.
+    ///
+    /// # Errors
     ///
     /// Returns an error if the connector or h2 handshake fails. See
     /// [`lazy_with_connector`](Self::lazy_with_connector) for details.
@@ -360,17 +357,9 @@ impl Http2Connection {
         C::Error: Into<BoxError>,
         C::Future: Send + 'static,
     {
-        let mut conn = Self {
-            inner: Reconnect::new(
-                MakeSendRequest::new_custom(box_connector(connector)),
-                authority,
-                false,
-            ),
-        };
-        std::future::poll_fn(|cx| conn.inner.poll_ready(cx))
+        Self::builder()
+            .connect_with_connector(connector, authority)
             .await
-            .map_err(|e| ConnectError::unavailable(format!("connect failed: {e}")))?;
-        Ok(conn)
     }
 
     /// Create an h2c connection over a **Unix domain socket** that
@@ -385,11 +374,14 @@ impl Http2Connection {
     /// generally doesn't validate it.
     #[cfg(unix)]
     #[cfg_attr(docsrs, doc(cfg(unix)))]
+    #[must_use]
     pub fn lazy_unix(path: impl Into<std::path::PathBuf>, authority: Uri) -> Self {
-        Self::lazy_with_connector(unix_connector(path.into()), authority)
+        Self::builder().lazy_unix(path, authority)
     }
 
     /// Eagerly establish an h2c connection over a **Unix domain socket**.
+    ///
+    /// # Errors
     ///
     /// Returns an error if the socket path doesn't exist or the h2
     /// handshake fails. See [`lazy_unix`](Self::lazy_unix) for details.
@@ -399,7 +391,7 @@ impl Http2Connection {
         path: impl Into<std::path::PathBuf>,
         authority: Uri,
     ) -> Result<Self, ConnectError> {
-        Self::connect_with_connector(unix_connector(path.into()), authority).await
+        Self::builder().connect_unix(path, authority).await
     }
 
     /// Create a **TLS** h2 connection that establishes lazily on first
@@ -483,12 +475,16 @@ impl Http2Connection {
 ///
 /// # Scope
 ///
-/// The builder covers the **plaintext** and **TLS** transports (the ones that
-/// dial through the built-in connector). HTTP/2 keep-alive and flow-control
-/// knobs are proxied directly; for hyper settings not surfaced here use
-/// [`h2_settings`](Self::h2_settings). The custom-connector and Unix-socket
-/// constructors on [`Http2Connection`] own their own dialing and are not
-/// reachable through this builder, so they establish without these bounds.
+/// The builder covers every [`Http2Connection`] transport: plaintext, TLS,
+/// caller-supplied connectors, and Unix sockets. HTTP/2 keep-alive and
+/// flow-control knobs are proxied directly; for hyper settings not surfaced
+/// here use [`h2_settings`](Self::h2_settings). [`connect_timeout`] is the
+/// per-address TCP bound on the built-in connector and is ignored by the
+/// custom-connector / Unix-socket terminals — use [`handshake_timeout`] there
+/// as the establishment bound.
+///
+/// [`connect_timeout`]: Self::connect_timeout
+/// [`handshake_timeout`]: Self::handshake_timeout
 ///
 /// [`CallOptions::with_timeout`]: super::CallOptions::with_timeout
 #[derive(Debug, Clone)]
@@ -524,7 +520,9 @@ impl Http2ConnectionBuilder {
     /// `connect(2)` call (per resolved address — the budget is divided across
     /// the address set). It does **not** cover DNS resolution, the TLS
     /// handshake, or the HTTP/2 preface — set
-    /// [`handshake_timeout`](Self::handshake_timeout) too to bound those.
+    /// [`handshake_timeout`](Self::handshake_timeout) too to bound those — and
+    /// is **ignored** by the custom-connector / Unix-socket terminals (which
+    /// have no built-in `HttpConnector` to apply it to).
     ///
     /// Unset (the default) means TCP connect is governed by the kernel's
     /// `tcp_syn_retries` (typically ~130s on Linux).
@@ -636,15 +634,16 @@ impl Http2ConnectionBuilder {
     ///
     /// This is the escape hatch for hyper knobs not proxied above. It
     /// **replaces** any prior keep-alive / window-size settings on this
-    /// builder, and the caller takes ownership of timer setup — set
-    /// `.timer(hyper_util::rt::TokioTimer::new())` on the passed builder if
-    /// enabling keep-alive (hyper panics at handshake time otherwise). Prefer
-    /// the individual setters above for the common cases.
+    /// builder, so call it before the individual setters if you use both. A
+    /// [`TokioTimer`](hyper_util::rt::TokioTimer) is re-applied to the passed
+    /// builder so keep-alive works without the caller wiring one. Prefer the
+    /// individual setters above for the common cases.
     #[must_use]
     pub fn h2_settings(
         mut self,
-        builder: hyper::client::conn::http2::Builder<hyper_util::rt::TokioExecutor>,
+        mut builder: hyper::client::conn::http2::Builder<hyper_util::rt::TokioExecutor>,
     ) -> Self {
+        builder.timer(hyper_util::rt::TokioTimer::new());
         self.h2_builder = builder;
         self
     }
@@ -708,6 +707,83 @@ impl Http2ConnectionBuilder {
         Ok(conn)
     }
 
+    /// Finish as a lazily-established connection over a **caller-supplied
+    /// connector**. See [`Http2Connection::lazy_with_connector`].
+    ///
+    /// `handshake_timeout` bounds the connector's dial *and* the HTTP/2 preface
+    /// as one wall-clock budget — the same semantics as the built-in
+    /// transports. `connect_timeout` is the per-address TCP bound on the
+    /// built-in connector and is **ignored** here; to bound the dial separately
+    /// from the preface, wrap the connector in `tower::timeout::Timeout`.
+    #[must_use]
+    pub fn lazy_with_connector<C>(self, connector: C, authority: Uri) -> Http2Connection
+    where
+        C: tower::Service<Uri> + Send + 'static,
+        C::Response: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
+        C::Error: Into<BoxError>,
+        C::Future: Send + 'static,
+    {
+        Http2Connection {
+            inner: Reconnect::new(self.make_custom(box_connector(connector)), authority, true),
+        }
+    }
+
+    /// Finish by eagerly establishing a connection over a **caller-supplied
+    /// connector**. See [`Http2Connection::connect_with_connector`] and
+    /// [`lazy_with_connector`](Self::lazy_with_connector) for the timeout
+    /// semantics.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connector or h2 handshake fails (including
+    /// exceeding a configured `handshake_timeout`).
+    pub async fn connect_with_connector<C>(
+        self,
+        connector: C,
+        authority: Uri,
+    ) -> Result<Http2Connection, ConnectError>
+    where
+        C: tower::Service<Uri> + Send + 'static,
+        C::Response: hyper::rt::Read + hyper::rt::Write + Send + Unpin + 'static,
+        C::Error: Into<BoxError>,
+        C::Future: Send + 'static,
+    {
+        let mut conn = Http2Connection {
+            inner: Reconnect::new(self.make_custom(box_connector(connector)), authority, false),
+        };
+        drive_connect(&mut conn, "connect failed").await?;
+        Ok(conn)
+    }
+
+    /// Finish as a lazily-established connection over a **Unix domain socket**.
+    /// See [`Http2Connection::lazy_unix`] and
+    /// [`lazy_with_connector`](Self::lazy_with_connector) for the timeout
+    /// semantics.
+    #[cfg(unix)]
+    #[cfg_attr(docsrs, doc(cfg(unix)))]
+    #[must_use]
+    pub fn lazy_unix(self, path: impl Into<std::path::PathBuf>, authority: Uri) -> Http2Connection {
+        self.lazy_with_connector(unix_connector(path.into()), authority)
+    }
+
+    /// Finish by eagerly establishing a connection over a **Unix domain
+    /// socket**. See [`Http2Connection::connect_unix`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the socket path doesn't exist or the h2 handshake
+    /// fails (including exceeding a configured `handshake_timeout`).
+    #[cfg(unix)]
+    #[cfg_attr(docsrs, doc(cfg(unix)))]
+    pub async fn connect_unix(
+        self,
+        path: impl Into<std::path::PathBuf>,
+        authority: Uri,
+    ) -> Result<Http2Connection, ConnectError> {
+        self.connect_with_connector(unix_connector(path.into()), authority)
+            .await
+    }
+
     fn make_plaintext(self) -> MakeSendRequest {
         MakeSendRequest::with_builder(self.h2_builder)
             .with_timeouts(self.connect_timeout, self.handshake_timeout)
@@ -717,6 +793,12 @@ impl Http2ConnectionBuilder {
     fn make_tls(self, tls_config: Arc<rustls::ClientConfig>) -> MakeSendRequest {
         MakeSendRequest::with_builder_tls(self.h2_builder, tls_config)
             .with_timeouts(self.connect_timeout, self.handshake_timeout)
+    }
+
+    fn make_custom(self, conn: BoxedConnector) -> MakeSendRequest {
+        // `connect_timeout` is intentionally dropped: it's the per-address TCP
+        // bound on the built-in `HttpConnector`, which is not in play here.
+        MakeSendRequest::new_custom(self.h2_builder, conn, self.handshake_timeout)
     }
 }
 
@@ -893,20 +975,20 @@ impl MakeSendRequest {
         }
     }
 
-    fn new_custom(conn: BoxedConnector) -> Self {
-        // `connector` is unused when `custom` is Some — `call()` branches
-        // to the custom connector before touching it. Kept to avoid
-        // restructuring the shared struct; HttpConnector::new() is cheap.
-        let connector = hyper_util::client::legacy::connect::HttpConnector::new();
-        let builder =
-            hyper::client::conn::http2::Builder::new(hyper_util::rt::TokioExecutor::new());
+    fn new_custom(
+        builder: hyper::client::conn::http2::Builder<hyper_util::rt::TokioExecutor>,
+        conn: BoxedConnector,
+        handshake_timeout: Option<Duration>,
+    ) -> Self {
         Self {
-            connector,
+            // Unused when `custom` is Some — `call()` branches to the custom
+            // connector before touching it. `HttpConnector::new()` is cheap.
+            connector: hyper_util::client::legacy::connect::HttpConnector::new(),
             builder,
             #[cfg(feature = "client-tls")]
             tls: None,
             custom: Some(conn),
-            handshake_timeout: None,
+            handshake_timeout,
         }
     }
 
@@ -928,8 +1010,10 @@ impl MakeSendRequest {
     }
 
     /// Apply connection-establishment bounds. `connect_timeout` is pushed into
-    /// the built-in `HttpConnector` (TCP connect); `handshake_timeout` is stored
-    /// and applied around the TLS handshake and HTTP/2 preface in `call()`.
+    /// the built-in `HttpConnector` (per-address TCP connect);
+    /// `handshake_timeout` is stored and applied around the whole
+    /// establishment future (DNS, TCP, TLS handshake, HTTP/2 preface) in
+    /// `call()`.
     fn with_timeouts(
         mut self,
         connect_timeout: Option<Duration>,
@@ -961,11 +1045,13 @@ impl tower::Service<Uri> for MakeSendRequest {
             let builder = self.builder.clone();
             let handshake_timeout = self.handshake_timeout;
             return Box::pin(async move {
-                let io = io_fut.await?;
-                // The caller owns the dial, so only the HTTP/2 preface is
-                // bounded here (there is no TLS handshake we control).
-                let handshake = builder.handshake(io);
-                let (send_request, conn) = run_handshake(handshake, handshake_timeout).await?;
+                // Dial + HTTP/2 preface as one wall-clock budget — same
+                // semantics as the built-in branch's `establish` block below.
+                let establish = async move {
+                    let io = io_fut.await?;
+                    builder.handshake(io).await.map_err(BoxError::from)
+                };
+                let (send_request, conn) = run_handshake(establish, handshake_timeout).await?;
                 tokio::spawn(async move {
                     if let Err(e) = conn.await {
                         tracing::debug!("h2 connection task exited with error: {e}");
@@ -1549,6 +1635,39 @@ mod tests {
         );
 
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn handshake_timeout_bounds_custom_connector_dial() {
+        use std::time::Instant;
+
+        // A connector that never resolves — handshake_timeout must bound the
+        // caller's dial, not just the h2 preface, so this fires.
+        let never = tower::service_fn(|_uri: Uri| async move {
+            std::future::pending::<()>().await;
+            // Unreachable; concrete type for inference.
+            Ok::<_, std::io::Error>(hyper_util::rt::TokioIo::new(tokio::io::duplex(1).0))
+        });
+        let start = Instant::now();
+        let err = Http2Connection::builder()
+            .handshake_timeout(Duration::from_millis(150))
+            .connect_with_connector(never, "http://localhost".parse().unwrap())
+            .await
+            .unwrap_err();
+        let elapsed = start.elapsed();
+
+        assert_eq!(err.code, crate::error::ErrorCode::Unavailable);
+        assert!(
+            err.message
+                .as_deref()
+                .unwrap()
+                .contains("handshake did not complete"),
+            "expected a handshake-timeout message, got: {err:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "handshake_timeout(150ms) should fire within ~2s, took {elapsed:?}"
+        );
     }
 
     #[cfg(feature = "server")]

@@ -531,9 +531,9 @@ impl HttpClientBuilder {
     ///
     /// Because `HttpClient` pools connections through hyper's legacy client, the
     /// HTTP/2 preface runs *inside* the pool and is not separately observable
-    /// here — this bound covers **TCP and TLS, not the h2 preface**.
-    /// [`Http2Connection`]'s handshake bound additionally covers the h2 preface
-    /// (and DNS resolution). Use a per-request timeout (e.g.
+    /// here — this bound covers **DNS, TCP and TLS, not the h2 preface**.
+    /// [`Http2Connection`]'s handshake bound additionally covers the h2
+    /// preface. Use a per-request timeout (e.g.
     /// [`CallOptions::with_timeout`]) for a true end-to-end bound. For a
     /// transport that bounds the h2 preface too, use [`Http2Connection`].
     ///
