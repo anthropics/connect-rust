@@ -514,12 +514,12 @@ impl HttpClientBuilder {
     /// whole.
     ///
     /// Defaults to [`DEFAULT_TCP_CONNECT_TIMEOUT`]. Pass `Duration::MAX` to
-    /// effectively disable.
+    /// disable.
     ///
     /// [hyper-ct]: hyper_util::client::legacy::connect::HttpConnector::set_connect_timeout
     #[must_use]
     pub fn connect_timeout(mut self, dur: Duration) -> Self {
-        self.connect_timeout = Some(dur);
+        self.connect_timeout = http2::finite(dur);
         self
     }
 
@@ -546,10 +546,10 @@ impl HttpClientBuilder {
     /// the establishment phase.
     ///
     /// Defaults to [`DEFAULT_ESTABLISHMENT_TIMEOUT`]. Pass `Duration::MAX` to
-    /// effectively disable.
+    /// disable.
     #[must_use]
     pub fn establishment_timeout(mut self, dur: Duration) -> Self {
-        self.establishment_timeout = Some(dur);
+        self.establishment_timeout = http2::finite(dur);
         self
     }
 

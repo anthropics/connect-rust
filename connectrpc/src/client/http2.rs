@@ -88,56 +88,6 @@ where
     )
 }
 
-/// DNS resolver that rotates the address list across successive resolutions.
-///
-/// `HttpConnector` tries same-family addresses serially and stops at the first
-/// TCP success — so if address A accepts TCP but stalls TLS, B and C are never
-/// tried within that attempt and the establishment timeout fires. Rotating the
-/// list per attempt means the next reconnect starts with B, bounding the
-/// worst-case time to reach a healthy address at `establishment_timeout × N`
-/// rather than relying on DNS-result reordering.
-#[derive(Clone, Debug)]
-struct RotatingGaiResolver {
-    inner: hyper_util::client::legacy::connect::dns::GaiResolver,
-    attempt: std::sync::Arc<std::sync::atomic::AtomicUsize>,
-}
-
-impl RotatingGaiResolver {
-    fn new() -> Self {
-        Self {
-            inner: hyper_util::client::legacy::connect::dns::GaiResolver::new(),
-            attempt: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        }
-    }
-}
-
-impl tower::Service<hyper_util::client::legacy::connect::dns::Name> for RotatingGaiResolver {
-    type Response = std::vec::IntoIter<std::net::SocketAddr>;
-    type Error = std::io::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
-    }
-
-    fn call(&mut self, name: hyper_util::client::legacy::connect::dns::Name) -> Self::Future {
-        let n = self
-            .attempt
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let fut = self.inner.call(name);
-        Box::pin(async move {
-            let mut addrs: Vec<std::net::SocketAddr> = fut.await?.collect();
-            if addrs.len() > 1 {
-                let len = addrs.len();
-                addrs.rotate_left(n % len);
-            }
-            Ok(addrs.into_iter())
-        })
-    }
-}
-
-type Http2HttpConnector = hyper_util::client::legacy::connect::HttpConnector<RotatingGaiResolver>;
-
 /// Build a connector that dials a Unix domain socket. The URI argument
 /// is ignored — `:authority` is supplied separately to
 /// [`Http2Connection::lazy_unix`].
@@ -543,12 +493,21 @@ pub struct Http2ConnectionBuilder {
 
 /// Default wall-clock bound on connection establishment (DNS, TCP, TLS, h2
 /// preface). Override via [`Http2ConnectionBuilder::establishment_timeout`].
-/// Matches grpc-go's default `MinConnectTimeout`.
+/// Same default value as grpc-go's `MinConnectTimeout` (note: grpc-go's is a
+/// floor that grows with exponential backoff; this is a fixed ceiling).
 pub const DEFAULT_ESTABLISHMENT_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// Default per-address TCP `connect(2)` budget on the built-in connector.
+/// Default TCP `connect(2)` budget on the built-in connector. hyper divides
+/// this evenly across the resolved address set (e.g. 8 addresses → 625ms each).
 /// Override via [`Http2ConnectionBuilder::tcp_connect_timeout`].
 pub const DEFAULT_TCP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Normalize a setter argument: `Duration::MAX` is the documented opt-out, so
+/// store it as `None` (no timer at all) rather than arming a saturated tokio
+/// timer.
+pub(super) fn finite(dur: Duration) -> Option<Duration> {
+    (dur != Duration::MAX).then_some(dur)
+}
 
 impl Default for Http2ConnectionBuilder {
     /// A fresh builder with [`DEFAULT_ESTABLISHMENT_TIMEOUT`] /
@@ -581,13 +540,13 @@ impl Http2ConnectionBuilder {
     /// have no built-in `HttpConnector` to apply it to).
     ///
     /// Defaults to [`DEFAULT_TCP_CONNECT_TIMEOUT`]. Pass `Duration::MAX` to
-    /// effectively disable.
+    /// disable.
     ///
     /// [`establishment_timeout`]: Self::establishment_timeout
     /// [hyper-ct]: hyper_util::client::legacy::connect::HttpConnector::set_connect_timeout
     #[must_use]
     pub fn tcp_connect_timeout(mut self, dur: Duration) -> Self {
-        self.tcp_connect_timeout = Some(dur);
+        self.tcp_connect_timeout = finite(dur);
         self
     }
 
@@ -597,7 +556,7 @@ impl Http2ConnectionBuilder {
     /// is an additional per-address TCP bound *inside* this budget.
     ///
     /// Defaults to [`DEFAULT_ESTABLISHMENT_TIMEOUT`]. Pass `Duration::MAX` to
-    /// effectively disable.
+    /// disable.
     ///
     /// # Where this bites
     ///
@@ -618,7 +577,7 @@ impl Http2ConnectionBuilder {
     /// connect is retryable); the message names the phase.
     #[must_use]
     pub fn establishment_timeout(mut self, dur: Duration) -> Self {
-        self.establishment_timeout = Some(dur);
+        self.establishment_timeout = finite(dur);
         self
     }
 
@@ -841,12 +800,10 @@ impl Http2ConnectionBuilder {
             .await
     }
 
-    /// Built-in TCP connector with `nodelay`, the configured
-    /// `tcp_connect_timeout`, and a [`RotatingGaiResolver`] applied.
-    fn http_connector(&self) -> Http2HttpConnector {
-        let mut connector = hyper_util::client::legacy::connect::HttpConnector::new_with_resolver(
-            RotatingGaiResolver::new(),
-        );
+    /// Built-in TCP connector with `nodelay` and the configured
+    /// `tcp_connect_timeout` applied. Mirrors `HttpClientBuilder::http_connector`.
+    fn http_connector(&self) -> hyper_util::client::legacy::connect::HttpConnector {
+        let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
         connector.set_nodelay(true);
         connector.set_connect_timeout(self.tcp_connect_timeout);
         connector
@@ -1030,7 +987,7 @@ impl tower::Service<Request<ClientBody>> for SendRequest {
 /// HTTP/2 handshake, returning a ready `SendRequest`. Used by [`Reconnect`]
 /// to (re)establish connections.
 struct MakeSendRequest {
-    connector: Http2HttpConnector,
+    connector: hyper_util::client::legacy::connect::HttpConnector,
     builder: hyper::client::conn::http2::Builder<hyper_util::rt::TokioExecutor>,
     /// TLS config for https:// connections. When `Some`, the URI scheme
     /// must be https:// and a TLS handshake happens after TCP connect.
@@ -1532,6 +1489,14 @@ mod tests {
             builder.establishment_timeout,
             Some(Duration::from_millis(20))
         );
+
+        // Duration::MAX is the documented opt-out — normalized to None so no
+        // timer is armed.
+        let unbounded = Http2Connection::builder()
+            .tcp_connect_timeout(Duration::MAX)
+            .establishment_timeout(Duration::MAX);
+        assert_eq!(unbounded.tcp_connect_timeout, None);
+        assert_eq!(unbounded.establishment_timeout, None);
     }
 
     #[tokio::test]
