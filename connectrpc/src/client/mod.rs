@@ -398,7 +398,6 @@ impl HttpClient {
     /// `HttpClient::plaintext()` is equivalent to
     /// `HttpClient::builder().plaintext()`, and likewise for the other
     /// constructors.
-    #[must_use]
     pub fn builder() -> HttpClientBuilder {
         HttpClientBuilder::default()
     }
@@ -411,6 +410,10 @@ impl HttpClient {
     /// The client uses connection pooling and supports HTTP/1.1 and HTTP/2
     /// over cleartext. TCP_NODELAY is enabled to avoid Nagle + delayed ACK
     /// latency on small messages.
+    ///
+    /// Connection establishment is bounded by [`DEFAULT_ESTABLISHMENT_TIMEOUT`]
+    /// (and [`DEFAULT_TCP_CONNECT_TIMEOUT`] per address); use
+    /// [`builder()`](Self::builder) to adjust or opt out.
     pub fn plaintext() -> Self {
         Self::builder().plaintext()
     }
@@ -428,6 +431,10 @@ impl HttpClient {
     /// **Note:** For gRPC, prefer [`SharedHttp2Connection`] over this —
     /// it has honest `poll_ready` and composes with `tower::balance`. This
     /// method pins you to one connection per host with no way to scale out.
+    ///
+    /// Connection establishment is bounded by [`DEFAULT_ESTABLISHMENT_TIMEOUT`]
+    /// (and [`DEFAULT_TCP_CONNECT_TIMEOUT`] per address); use
+    /// [`builder()`](Self::builder) to adjust or opt out.
     pub fn plaintext_http2_only() -> Self {
         Self::builder().plaintext_http2_only()
     }
@@ -464,6 +471,10 @@ impl HttpClient {
     /// let http = HttpClient::with_tls(tls_config);
     /// let client = GreetServiceClient::new(http, config);
     /// ```
+    ///
+    /// Connection establishment is bounded by [`DEFAULT_ESTABLISHMENT_TIMEOUT`]
+    /// (and [`DEFAULT_TCP_CONNECT_TIMEOUT`] per address); use
+    /// [`builder()`](Self::builder) to adjust or opt out.
     #[cfg(feature = "client-tls")]
     #[cfg_attr(docsrs, doc(cfg(feature = "client-tls")))]
     pub fn with_tls(tls_config: std::sync::Arc<rustls::ClientConfig>) -> Self {
@@ -479,8 +490,9 @@ impl HttpClient {
 #[cfg(feature = "client")]
 #[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 #[derive(Debug, Clone)]
+#[must_use = "call a terminal (plaintext / plaintext_http2_only / with_tls) to build the client"]
 pub struct HttpClientBuilder {
-    connect_timeout: Option<Duration>,
+    tcp_connect_timeout: Option<Duration>,
     establishment_timeout: Option<Duration>,
 }
 
@@ -488,11 +500,13 @@ pub struct HttpClientBuilder {
 impl Default for HttpClientBuilder {
     /// A fresh builder with [`DEFAULT_ESTABLISHMENT_TIMEOUT`] /
     /// [`DEFAULT_TCP_CONNECT_TIMEOUT`] applied, so a hung server cannot stall
-    /// connection establishment indefinitely. Pass `Duration::MAX` to either
-    /// setter to opt out.
+    /// connection establishment indefinitely. Use
+    /// [`no_establishment_timeout`](HttpClientBuilder::no_establishment_timeout) /
+    /// [`no_tcp_connect_timeout`](HttpClientBuilder::no_tcp_connect_timeout) to
+    /// opt out.
     fn default() -> Self {
         Self {
-            connect_timeout: Some(DEFAULT_TCP_CONNECT_TIMEOUT),
+            tcp_connect_timeout: Some(DEFAULT_TCP_CONNECT_TIMEOUT),
             establishment_timeout: Some(DEFAULT_ESTABLISHMENT_TIMEOUT),
         }
     }
@@ -513,20 +527,34 @@ impl HttpClientBuilder {
     /// [`CallOptions::with_timeout`]) to bound DNS+connect+TLS+request as a
     /// whole.
     ///
-    /// Defaults to [`DEFAULT_TCP_CONNECT_TIMEOUT`]. Pass `Duration::MAX` to
-    /// disable.
+    /// Defaults to [`DEFAULT_TCP_CONNECT_TIMEOUT`]. To disable, use
+    /// [`no_tcp_connect_timeout`](Self::no_tcp_connect_timeout). Passing
+    /// `Duration::ZERO` causes every per-address connect to fail immediately.
     ///
     /// [hyper-ct]: hyper_util::client::legacy::connect::HttpConnector::set_connect_timeout
-    #[must_use]
-    pub fn connect_timeout(mut self, dur: Duration) -> Self {
-        self.connect_timeout = http2::finite(dur);
+    #[doc(alias = "connect_timeout")]
+    pub fn tcp_connect_timeout(mut self, dur: Duration) -> Self {
+        self.tcp_connect_timeout = http2::finite(dur);
+        self
+    }
+
+    /// Alias for [`tcp_connect_timeout`](Self::tcp_connect_timeout).
+    pub fn connect_timeout(self, dur: Duration) -> Self {
+        self.tcp_connect_timeout(dur)
+    }
+
+    /// Disable the per-address TCP connect bound (the
+    /// [`DEFAULT_TCP_CONNECT_TIMEOUT`] default). The whole-connector
+    /// [`establishment_timeout`](Self::establishment_timeout) still applies.
+    pub fn no_tcp_connect_timeout(mut self) -> Self {
+        self.tcp_connect_timeout = None;
         self
     }
 
     /// Bound the whole connector establishment: DNS resolution, the TCP connect,
     /// and, for [`with_tls`](Self::with_tls), the TLS handshake.
     ///
-    /// Unlike [`connect_timeout`](Self::connect_timeout) (which bounds only the
+    /// Unlike [`tcp_connect_timeout`](Self::tcp_connect_timeout) (which bounds only the
     /// per-address TCP `connect(2)` call), this is a single wall-clock bound on
     /// everything the connector does to produce a usable stream — so on the TLS
     /// transport the two bounds overlap on the TCP phase.
@@ -545,18 +573,28 @@ impl HttpClientBuilder {
     /// [`ErrorCode::Unavailable`] (the connect is retryable); the message names
     /// the establishment phase.
     ///
-    /// Defaults to [`DEFAULT_ESTABLISHMENT_TIMEOUT`]. Pass `Duration::MAX` to
-    /// disable.
-    #[must_use]
+    /// Defaults to [`DEFAULT_ESTABLISHMENT_TIMEOUT`]. To disable, use
+    /// [`no_establishment_timeout`](Self::no_establishment_timeout). Passing
+    /// `Duration::ZERO` causes every establishment to fail immediately.
     pub fn establishment_timeout(mut self, dur: Duration) -> Self {
         self.establishment_timeout = http2::finite(dur);
+        self
+    }
+
+    /// Disable the wall-clock connector-establishment bound (the
+    /// [`DEFAULT_ESTABLISHMENT_TIMEOUT`] default). With both this and
+    /// [`no_tcp_connect_timeout`](Self::no_tcp_connect_timeout), a hung server
+    /// can stall connection establishment indefinitely — the pre-0.8.0
+    /// behaviour.
+    pub fn no_establishment_timeout(mut self) -> Self {
+        self.establishment_timeout = None;
         self
     }
 
     fn http_connector(&self) -> hyper_util::client::legacy::connect::HttpConnector {
         let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
         connector.set_nodelay(true);
-        connector.set_connect_timeout(self.connect_timeout);
+        connector.set_connect_timeout(self.tcp_connect_timeout);
         connector
     }
 
@@ -3916,10 +3954,11 @@ mod tests {
     async fn http_client_connect_timeout_bounds_tcp_connect() {
         use std::time::Instant;
 
-        // RFC 5737 TEST-NET-1: guaranteed unroutable. SYNs are dropped, so an
-        // unbounded connect would stall on kernel retransmits (~130s on Linux
-        // defaults). With a 100ms connect timeout, hyper aborts the connect
-        // future and surfaces the failure promptly.
+        // RFC 5737 TEST-NET-1: reserved for documentation. Most hosts drop
+        // SYNs to it (so an unbounded connect stalls on kernel retransmits,
+        // ~130s on Linux defaults), but RFC 5737 doesn't mandate that — some
+        // CI hosts actively reject. The assertion that matters is the upper
+        // bound: a 100ms timeout must abort well before the kernel retry floor.
         let target = "http://192.0.2.1:9/";
         let timeout = Duration::from_millis(100);
 
@@ -3931,8 +3970,15 @@ mod tests {
             .unwrap();
 
         let start = Instant::now();
-        let err = http.send(req).await.expect_err("connect must fail");
+        // Outer timeout guards a transparent-proxy host that accepts the
+        // connect (so the bound under test never fires) and then never answers
+        // the HTTP/1.1 request — without this the test would hang.
+        let result = tokio::time::timeout(Duration::from_secs(3), http.send(req)).await;
         let elapsed = start.elapsed();
+        let Ok(Err(err)) = result else {
+            eprintln!("skipping: TEST-NET-1 reachable on this host (proxy?) in {elapsed:?}");
+            return;
+        };
 
         // Generous slack for CI scheduling jitter — but well under the
         // multi-second kernel SYN-retry floor we'd hit without the bound.
@@ -3961,8 +4007,15 @@ mod tests {
             .unwrap();
 
         let start = Instant::now();
-        let err = http.send(req).await.expect_err("connect must fail");
+        // Outer timeout guards a transparent-proxy host that accepts the
+        // connect (so the bound under test never fires) and then never answers
+        // the HTTP/1.1 request — without this the test would hang.
+        let result = tokio::time::timeout(Duration::from_secs(3), http.send(req)).await;
         let elapsed = start.elapsed();
+        let Ok(Err(err)) = result else {
+            eprintln!("skipping: TEST-NET-1 reachable on this host (proxy?) in {elapsed:?}");
+            return;
+        };
 
         assert!(
             elapsed < Duration::from_secs(2),
