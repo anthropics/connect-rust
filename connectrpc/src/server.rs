@@ -44,6 +44,15 @@
 //! drains in-flight requests indefinitely even while a connection is in its
 //! age-grace window.
 //!
+//! # Maximum Concurrent Streams
+//!
+//! Use [`Server::with_max_concurrent_streams`] (or the [`BoundServer`]
+//! equivalent) to bound the number of concurrent HTTP/2 streams (in-flight
+//! requests) a single connection may have open. This maps to hyper's
+//! `SETTINGS_MAX_CONCURRENT_STREAMS`; it is left at hyper's default (200)
+//! when unset. Raise it for high-fan-in internal services, or lower it as a
+//! cheap hardening measure against less-trusted clients.
+//!
 //! For transport and HTTP/2 knobs that [`Server`] does not expose, drive
 //! [`ConnectRpcService`] directly from a hyper accept loop. The crate guide's
 //! "Advanced transport configuration" section shows the `hyper_util` pattern.
@@ -179,6 +188,7 @@ struct Http2Config {
     adaptive_window: bool,
     initial_stream_window_size: Option<u32>,
     initial_connection_window_size: Option<u32>,
+    max_concurrent_streams: Option<u32>,
 }
 
 impl Default for Http2Config {
@@ -187,6 +197,7 @@ impl Default for Http2Config {
             adaptive_window: DEFAULT_HTTP2_ADAPTIVE_WINDOW,
             initial_stream_window_size: None,
             initial_connection_window_size: None,
+            max_concurrent_streams: None,
         }
     }
 }
@@ -463,6 +474,26 @@ impl Server {
         self
     }
 
+    /// Set the maximum number of concurrent HTTP/2 streams per connection.
+    ///
+    /// The one-step counterpart of
+    /// [`BoundServer::with_max_concurrent_streams`]; see it for full
+    /// behaviour. Left at hyper's default (200) when unset.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `max_streams` is zero; see
+    /// [`BoundServer::with_max_concurrent_streams`].
+    #[must_use]
+    pub fn with_max_concurrent_streams(mut self, max_streams: u32) -> Self {
+        assert!(
+            max_streams != 0,
+            "with_max_concurrent_streams requires a non-zero value",
+        );
+        self.http2.max_concurrent_streams = Some(max_streams);
+        self
+    }
+
     fn connection_age_config(&self) -> Option<ConnectionAgeConfig> {
         build_connection_age_config(self.max_connection_age, self.max_connection_age_grace)
     }
@@ -717,6 +748,36 @@ impl BoundServer {
         self
     }
 
+    /// Set the maximum number of concurrent HTTP/2 streams per connection.
+    ///
+    /// This maps to hyper's HTTP/2 `SETTINGS_MAX_CONCURRENT_STREAMS`, which
+    /// the server advertises to each peer. A client may have at most this
+    /// many in-flight requests (streams) open at once on a single connection;
+    /// attempts to exceed it are refused with a `REFUSED_STREAM` error and
+    /// can be safely retried. The setting has no effect on HTTP/1.1
+    /// connections, which are not multiplexed.
+    ///
+    /// Left at hyper's default (200) when unset. Raise it for high-fan-in
+    /// internal services that multiplex many concurrent RPCs over one
+    /// connection, or lower it as an additional hardening measure when
+    /// serving less-trusted clients.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `max_streams` is zero — advertising a limit of zero refuses
+    /// every stream, leaving a server that accepts connections but rejects
+    /// all requests. It is rejected at configuration time rather than
+    /// silently producing a dead server.
+    #[must_use]
+    pub fn with_max_concurrent_streams(mut self, max_streams: u32) -> Self {
+        assert!(
+            max_streams != 0,
+            "with_max_concurrent_streams requires a non-zero value",
+        );
+        self.http2.max_concurrent_streams = Some(max_streams);
+        self
+    }
+
     /// Start serving requests with the given router.
     ///
     /// Runs until the process is killed. For graceful shutdown use
@@ -920,7 +981,7 @@ async fn serve_accepted_stream<D, S>(
     serve_connection_with_lifecycle(conn, peer.addr, global_shutdown, connection_age).await;
 }
 
-/// Apply the HTTP/2 flow-control window configuration to a connection builder.
+/// Apply the HTTP/2 configuration to a connection builder.
 ///
 /// `adaptive_window` is always set explicitly so the default tracks
 /// [`DEFAULT_HTTP2_ADAPTIVE_WINDOW`] regardless of hyper's own default. Explicit
@@ -936,6 +997,9 @@ fn configure_http2(builder: &mut AutoBuilder<TokioExecutor>, config: Http2Config
     }
     if let Some(size) = connection_window {
         http2.initial_connection_window_size(size);
+    }
+    if let Some(max) = config.max_concurrent_streams {
+        http2.max_concurrent_streams(max);
     }
 }
 
@@ -1973,6 +2037,140 @@ mod tests {
             .expect("join error");
         assert!(result.is_ok(), "serve returned error: {result:?}");
         h2_task.await.expect("h2 connection task panicked").ok();
+    }
+
+    #[tokio::test]
+    async fn max_concurrent_streams_builder_defaults_and_overrides() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = Server::from_listener(listener);
+        assert_eq!(bound.http2.max_concurrent_streams, None);
+        let bound = bound.with_max_concurrent_streams(64);
+        assert_eq!(bound.http2.max_concurrent_streams, Some(64));
+
+        let server = Server::new(Router::new());
+        assert_eq!(server.http2.max_concurrent_streams, None);
+        let server = server.with_max_concurrent_streams(64);
+        assert_eq!(server.http2.max_concurrent_streams, Some(64));
+    }
+
+    #[test]
+    #[should_panic(expected = "non-zero value")]
+    fn with_max_concurrent_streams_rejects_zero() {
+        let _ = Server::new(Router::new()).with_max_concurrent_streams(0);
+    }
+
+    #[tokio::test]
+    async fn max_concurrent_streams_is_advertised_in_settings() {
+        // The server must advertise the configured limit to peers via the
+        // HTTP/2 SETTINGS_MAX_CONCURRENT_STREAMS parameter. Read the server's
+        // initial SETTINGS frame off the raw connection and assert its value.
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_max_concurrent_streams(7);
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(Router::new(), async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let advertised = read_advertised_max_concurrent_streams(addr).await;
+        assert_eq!(
+            advertised,
+            Some(7),
+            "server did not advertise the configured max_concurrent_streams",
+        );
+
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+    }
+
+    #[tokio::test]
+    async fn max_concurrent_streams_unset_uses_hyper_default() {
+        // When unset, the value is left to hyper. hyper's HTTP/2 server
+        // default is 200, so the advertised value must remain that default.
+        // This deliberately tracks hyper's internal default: if a hyper bump
+        // changes it (or stops advertising it), this canary fails so the doc
+        // comments that quote "200" can be updated in lockstep.
+        let bound = Server::bind("127.0.0.1:0").await.unwrap();
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(Router::new(), async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let advertised = read_advertised_max_concurrent_streams(addr).await;
+        assert_eq!(
+            advertised,
+            Some(200),
+            "unset max_concurrent_streams should keep hyper's default of 200",
+        );
+
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(1), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+    }
+
+    /// HTTP/2 SETTINGS_MAX_CONCURRENT_STREAMS identifier (RFC 7540 §6.5.2).
+    const SETTINGS_MAX_CONCURRENT_STREAMS_ID: u16 = 0x3;
+
+    /// Open a raw HTTP/2 connection, send the client preface plus an empty
+    /// SETTINGS frame, then read the server's initial SETTINGS frame and
+    /// return the advertised `MAX_CONCURRENT_STREAMS` value, if present.
+    async fn read_advertised_max_concurrent_streams(addr: SocketAddr) -> Option<u32> {
+        let mut tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+
+        // Client connection preface, then an empty SETTINGS frame (length 0,
+        // type 0x4, flags 0, stream 0) so the server proceeds with the
+        // connection.
+        tcp.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+            .await
+            .unwrap();
+        tcp.write_all(&[0, 0, 0, 0x4, 0, 0, 0, 0, 0]).await.unwrap();
+        tcp.flush().await.unwrap();
+
+        // Scan frames until the first non-ACK SETTINGS frame from the server.
+        loop {
+            let mut header = [0u8; 9];
+            tcp.read_exact(&mut header).await.unwrap();
+            let length = u32::from_be_bytes([0, header[0], header[1], header[2]]) as usize;
+            let frame_type = header[3];
+            let flags = header[4];
+
+            let mut payload = vec![0u8; length];
+            tcp.read_exact(&mut payload).await.unwrap();
+
+            // SETTINGS = 0x4; skip the ACK (flag 0x1) the server sends for our
+            // empty SETTINGS frame.
+            if frame_type == 0x4 && flags & 0x1 == 0 {
+                return parse_max_concurrent_streams(&payload);
+            }
+        }
+    }
+
+    /// Parse a SETTINGS frame payload (6-byte id/value entries) for the
+    /// `MAX_CONCURRENT_STREAMS` value.
+    fn parse_max_concurrent_streams(payload: &[u8]) -> Option<u32> {
+        payload.chunks_exact(6).find_map(|entry| {
+            let id = u16::from_be_bytes([entry[0], entry[1]]);
+            (id == SETTINGS_MAX_CONCURRENT_STREAMS_ID)
+                .then(|| u32::from_be_bytes([entry[2], entry[3], entry[4], entry[5]]))
+        })
     }
 
     #[tokio::test]
