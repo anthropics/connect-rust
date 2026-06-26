@@ -174,6 +174,69 @@ const MAX_CONNECTION_AGE_JITTER_BASIS_POINTS: u128 = 10_000;
 const MAX_CONNECTION_AGE_JITTER_SPREAD_BASIS_POINTS: u128 = 1_000;
 const NANOS_PER_SEC: u128 = 1_000_000_000;
 
+/// Default for HTTP/2 adaptive (BDP-based) flow-control window sizing.
+///
+/// Enabled by default so connections over high bandwidth-delay-product links
+/// (cross-region, high-throughput streaming) are not throttled by hyper's
+/// fixed 64 KiB stream/connection windows. hyper grows the window based on the
+/// measured bandwidth-delay product, matching grpc-go and grpc-java, which both
+/// autotune by default. The trade-off is slightly higher per-connection memory
+/// under load.
+///
+/// Disable with [`Server::with_http2_adaptive_window`] /
+/// [`BoundServer::with_http2_adaptive_window`], or override the windows
+/// explicitly with the `with_http2_initial_*_window_size` setters (which turn
+/// adaptive sizing off).
+pub const DEFAULT_HTTP2_ADAPTIVE_WINDOW: bool = true;
+
+/// HTTP/2 flow-control window configuration applied to every accepted
+/// connection's hyper builder.
+///
+/// `adaptive_window` and the explicit window sizes are mutually exclusive in
+/// hyper: enabling adaptive sizing overrides any explicit window size. The
+/// public setters keep them consistent by clearing the adaptive flag whenever
+/// an explicit size is supplied.
+#[derive(Clone, Copy, Debug)]
+struct Http2Config {
+    adaptive_window: bool,
+    initial_stream_window_size: Option<u32>,
+    initial_connection_window_size: Option<u32>,
+    max_concurrent_streams: Option<u32>,
+}
+
+impl Default for Http2Config {
+    fn default() -> Self {
+        Self {
+            adaptive_window: DEFAULT_HTTP2_ADAPTIVE_WINDOW,
+            initial_stream_window_size: None,
+            initial_connection_window_size: None,
+            max_concurrent_streams: None,
+        }
+    }
+}
+
+impl Http2Config {
+    /// The `(stream, connection)` explicit window sizes that should actually be
+    /// applied to hyper's builder.
+    ///
+    /// Adaptive sizing takes precedence: when it is on, no explicit window is
+    /// applied, so the two never reach hyper at once regardless of the order
+    /// the builder methods were called in. The public setters already clear the
+    /// adaptive flag when a size is supplied, but a later
+    /// `with_http2_adaptive_window(true)` can leave both set; this resolves that
+    /// case deterministically in favour of adaptive sizing.
+    fn effective_windows(self) -> (Option<u32>, Option<u32>) {
+        if self.adaptive_window {
+            (None, None)
+        } else {
+            (
+                self.initial_stream_window_size,
+                self.initial_connection_window_size,
+            )
+        }
+    }
+}
+
 /// ConnectRPC server built on hyper.
 pub struct Server {
     service: ConnectRpcService,
@@ -184,7 +247,7 @@ pub struct Server {
     tls_handshake_timeout: std::time::Duration,
     max_connection_age: Option<Duration>,
     max_connection_age_grace: Duration,
-    max_concurrent_streams: Option<u32>,
+    http2: Http2Config,
     max_requests_per_connection: Option<NonZeroU64>,
 }
 
@@ -200,7 +263,7 @@ impl Server {
             tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
             max_connection_age: None,
             max_connection_age_grace: DEFAULT_MAX_CONNECTION_AGE_GRACE,
-            max_concurrent_streams: None,
+            http2: Http2Config::default(),
             max_requests_per_connection: None,
         }
     }
@@ -216,7 +279,7 @@ impl Server {
             tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
             max_connection_age: None,
             max_connection_age_grace: DEFAULT_MAX_CONNECTION_AGE_GRACE,
-            max_concurrent_streams: None,
+            http2: Http2Config::default(),
             max_requests_per_connection: None,
         }
     }
@@ -387,6 +450,48 @@ impl Server {
         self
     }
 
+    /// Enable or disable HTTP/2 adaptive flow-control window sizing.
+    ///
+    /// The one-step counterpart of
+    /// [`BoundServer::with_http2_adaptive_window`]; see it for full behaviour.
+    /// Enabled by default ([`DEFAULT_HTTP2_ADAPTIVE_WINDOW`]).
+    #[must_use]
+    pub fn with_http2_adaptive_window(mut self, enabled: bool) -> Self {
+        self.http2.adaptive_window = enabled;
+        self
+    }
+
+    /// Set the HTTP/2 initial stream-level flow-control window size, in bytes.
+    ///
+    /// The one-step counterpart of
+    /// [`BoundServer::with_http2_initial_stream_window_size`]; see it for full
+    /// behaviour. Supplying a size turns adaptive sizing off.
+    #[must_use]
+    pub fn with_http2_initial_stream_window_size(mut self, size: impl Into<Option<u32>>) -> Self {
+        self.http2.initial_stream_window_size = size.into();
+        if self.http2.initial_stream_window_size.is_some() {
+            self.http2.adaptive_window = false;
+        }
+        self
+    }
+
+    /// Set the HTTP/2 initial connection-level flow-control window size, in bytes.
+    ///
+    /// The one-step counterpart of
+    /// [`BoundServer::with_http2_initial_connection_window_size`]; see it for
+    /// full behaviour. Supplying a size turns adaptive sizing off.
+    #[must_use]
+    pub fn with_http2_initial_connection_window_size(
+        mut self,
+        size: impl Into<Option<u32>>,
+    ) -> Self {
+        self.http2.initial_connection_window_size = size.into();
+        if self.http2.initial_connection_window_size.is_some() {
+            self.http2.adaptive_window = false;
+        }
+        self
+    }
+
     /// Set the maximum number of concurrent HTTP/2 streams per connection.
     ///
     /// The one-step counterpart of
@@ -403,7 +508,7 @@ impl Server {
             max_streams != 0,
             "with_max_concurrent_streams requires a non-zero value",
         );
-        self.max_concurrent_streams = Some(max_streams);
+        self.http2.max_concurrent_streams = Some(max_streams);
         self
     }
 
@@ -471,7 +576,7 @@ impl Server {
             self.tls_handshake_timeout,
             None,
             connection_age,
-            self.max_concurrent_streams,
+            self.http2,
             request_retirement,
         )
         .await
@@ -504,7 +609,7 @@ impl Server {
             tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
             max_connection_age: None,
             max_connection_age_grace: DEFAULT_MAX_CONNECTION_AGE_GRACE,
-            max_concurrent_streams: None,
+            http2: Http2Config::default(),
             max_requests_per_connection: None,
         }
     }
@@ -524,7 +629,7 @@ impl Server {
             tls_handshake_timeout: DEFAULT_TLS_HANDSHAKE_TIMEOUT,
             max_connection_age: None,
             max_connection_age_grace: DEFAULT_MAX_CONNECTION_AGE_GRACE,
-            max_concurrent_streams: None,
+            http2: Http2Config::default(),
             max_requests_per_connection: None,
         })
     }
@@ -540,7 +645,7 @@ pub struct BoundServer {
     tls_handshake_timeout: std::time::Duration,
     max_connection_age: Option<Duration>,
     max_connection_age_grace: Duration,
-    max_concurrent_streams: Option<u32>,
+    http2: Http2Config,
     max_requests_per_connection: Option<NonZeroU64>,
 }
 
@@ -623,6 +728,74 @@ impl BoundServer {
         self
     }
 
+    /// Enable or disable HTTP/2 adaptive flow-control window sizing.
+    ///
+    /// Enabled by default ([`DEFAULT_HTTP2_ADAPTIVE_WINDOW`]). When enabled,
+    /// hyper grows the stream and connection flow-control windows based on the
+    /// measured bandwidth-delay product, which improves throughput on
+    /// high-latency, high-bandwidth links at the cost of slightly higher
+    /// per-connection memory under load.
+    ///
+    /// Adaptive sizing and an explicit window size are mutually exclusive:
+    /// enabling adaptive sizing overrides any window set via
+    /// [`with_http2_initial_stream_window_size`](Self::with_http2_initial_stream_window_size)
+    /// or
+    /// [`with_http2_initial_connection_window_size`](Self::with_http2_initial_connection_window_size).
+    /// Whichever is set last wins.
+    #[must_use]
+    pub fn with_http2_adaptive_window(mut self, enabled: bool) -> Self {
+        self.http2.adaptive_window = enabled;
+        self
+    }
+
+    /// Set the HTTP/2 initial stream-level flow-control window size, in bytes.
+    ///
+    /// Controls the per-stream `SETTINGS_INITIAL_WINDOW_SIZE` advertised to
+    /// clients. Supplying a size turns
+    /// [adaptive sizing](Self::with_http2_adaptive_window) off, mirroring
+    /// grpc-go semantics; passing `None` leaves hyper's default in place and
+    /// does not change the adaptive flag. The window can be raised above
+    /// hyper's 64 KiB default to improve throughput when adaptive sizing is
+    /// not wanted.
+    ///
+    /// The adaptive toggle and the explicit window are last-write-wins: a later
+    /// [`with_http2_adaptive_window(true)`](Self::with_http2_adaptive_window)
+    /// re-enables autotuning and the explicit window is ignored. Per HTTP/2,
+    /// the window must not exceed `2^31 - 1`; larger values are a protocol error.
+    #[must_use]
+    pub fn with_http2_initial_stream_window_size(mut self, size: impl Into<Option<u32>>) -> Self {
+        self.http2.initial_stream_window_size = size.into();
+        if self.http2.initial_stream_window_size.is_some() {
+            self.http2.adaptive_window = false;
+        }
+        self
+    }
+
+    /// Set the HTTP/2 initial connection-level flow-control window size, in bytes.
+    ///
+    /// Controls the whole-connection flow-control window, which bounds the
+    /// total unacknowledged data across all streams on the connection.
+    /// Supplying a size turns
+    /// [adaptive sizing](Self::with_http2_adaptive_window) off, mirroring
+    /// grpc-go semantics; passing `None` leaves hyper's default in place and
+    /// does not change the adaptive flag.
+    ///
+    /// The adaptive toggle and the explicit window are last-write-wins: a later
+    /// [`with_http2_adaptive_window(true)`](Self::with_http2_adaptive_window)
+    /// re-enables autotuning and the explicit window is ignored. Per HTTP/2,
+    /// the window must not exceed `2^31 - 1`; larger values are a protocol error.
+    #[must_use]
+    pub fn with_http2_initial_connection_window_size(
+        mut self,
+        size: impl Into<Option<u32>>,
+    ) -> Self {
+        self.http2.initial_connection_window_size = size.into();
+        if self.http2.initial_connection_window_size.is_some() {
+            self.http2.adaptive_window = false;
+        }
+        self
+    }
+
     /// Set the maximum number of concurrent HTTP/2 streams per connection.
     ///
     /// This maps to hyper's HTTP/2 `SETTINGS_MAX_CONCURRENT_STREAMS`, which
@@ -649,7 +822,7 @@ impl BoundServer {
             max_streams != 0,
             "with_max_concurrent_streams requires a non-zero value",
         );
-        self.max_concurrent_streams = Some(max_streams);
+        self.http2.max_concurrent_streams = Some(max_streams);
         self
     }
 
@@ -770,7 +943,7 @@ impl BoundServer {
             self.tls_handshake_timeout,
             None,
             connection_age,
-            self.max_concurrent_streams,
+            self.http2,
             request_retirement,
         )
         .await
@@ -806,7 +979,7 @@ impl BoundServer {
             self.tls_handshake_timeout,
             Some(Box::pin(signal)),
             connection_age,
-            self.max_concurrent_streams,
+            self.http2,
             request_retirement,
         )
         .await
@@ -910,7 +1083,7 @@ async fn serve_accepted_stream<D, S>(
     http1_keep_alive: bool,
     global_shutdown: watch::Receiver<bool>,
     connection_age: Option<ConnectionAgeConfig>,
-    max_concurrent_streams: Option<u32>,
+    http2: Http2Config,
     request_retirement: Option<RequestRetirementConfig>,
 ) where
     D: Dispatcher,
@@ -949,9 +1122,7 @@ async fn serve_accepted_stream<D, S>(
 
     let mut builder = AutoBuilder::new(TokioExecutor::new());
     builder.http1().keep_alive(http1_keep_alive);
-    if let Some(max) = max_concurrent_streams {
-        builder.http2().max_concurrent_streams(max);
-    }
+    configure_http2(&mut builder, http2);
 
     let conn = builder.serve_connection(TokioIo::new(io), svc).into_owned();
     serve_connection_with_lifecycle(
@@ -989,6 +1160,28 @@ impl RequestCounter {
             // already gone), in which case there is nothing left to retire.
             let _ = self.retire.send(true);
         }
+    }
+}
+
+/// Apply the HTTP/2 configuration to a connection builder.
+///
+/// `adaptive_window` is always set explicitly so the default tracks
+/// [`DEFAULT_HTTP2_ADAPTIVE_WINDOW`] regardless of hyper's own default. Explicit
+/// window sizes are applied only when adaptive sizing is off (see
+/// [`Http2Config::effective_windows`]), so the two never reach hyper at once and
+/// the precedence does not depend on hyper's internal call ordering.
+fn configure_http2(builder: &mut AutoBuilder<TokioExecutor>, config: Http2Config) {
+    let mut http2 = builder.http2();
+    http2.adaptive_window(config.adaptive_window);
+    let (stream_window, connection_window) = config.effective_windows();
+    if let Some(size) = stream_window {
+        http2.initial_stream_window_size(size);
+    }
+    if let Some(size) = connection_window {
+        http2.initial_connection_window_size(size);
+    }
+    if let Some(max) = config.max_concurrent_streams {
+        http2.max_concurrent_streams(max);
     }
 }
 
@@ -1208,9 +1401,10 @@ type MaybeTlsAcceptor = Option<()>;
 /// Optional boxed shutdown-signal future.
 type ShutdownSignal = Option<Pin<Box<dyn Future<Output = ()> + Send>>>;
 
-// Internal plumbing fn: each accepted-connection knob is forwarded verbatim
-// to the per-connection task, so a parameter list is clearer here than a
-// one-off config struct.
+// This internal accept loop carries one parameter per connection-level config
+// knob (TLS, keep-alive, connection age, HTTP/2 flow control, ...), so it
+// exceeds clippy's default argument count. The parameters are all plumbing for
+// the same call; grouping them into a struct would not improve clarity here.
 #[allow(clippy::too_many_arguments)]
 async fn serve_with_listener<D: Dispatcher>(
     listener: TcpListener,
@@ -1220,7 +1414,7 @@ async fn serve_with_listener<D: Dispatcher>(
     #[cfg(feature = "server-tls")] tls_handshake_timeout: std::time::Duration,
     shutdown: ShutdownSignal,
     connection_age: Option<ConnectionAgeConfig>,
-    max_concurrent_streams: Option<u32>,
+    http2: Http2Config,
     request_retirement: Option<RequestRetirementConfig>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Wrap the service with panic handling to convert panics to 500 responses
@@ -1316,7 +1510,7 @@ async fn serve_with_listener<D: Dispatcher>(
                             http1_keep_alive,
                             global_shutdown,
                             connection_age,
-                            max_concurrent_streams,
+                            http2,
                             request_retirement,
                         )
                         .await;
@@ -1351,7 +1545,7 @@ async fn serve_with_listener<D: Dispatcher>(
                 http1_keep_alive,
                 global_shutdown,
                 connection_age,
-                max_concurrent_streams,
+                http2,
                 request_retirement,
             )
             .await;
@@ -1854,18 +2048,226 @@ mod tests {
         let _ = Server::new(Router::new()).with_max_connection_age(Duration::ZERO);
     }
 
+    #[test]
+    fn http2_config_default_enables_adaptive_window() {
+        let config = Http2Config::default();
+        assert!(config.adaptive_window);
+        assert_eq!(config.adaptive_window, DEFAULT_HTTP2_ADAPTIVE_WINDOW);
+        assert_eq!(config.initial_stream_window_size, None);
+        assert_eq!(config.initial_connection_window_size, None);
+    }
+
+    #[test]
+    fn server_http2_builder_defaults_match_adaptive_on() {
+        let server = Server::new(Router::new());
+        assert!(server.http2.adaptive_window);
+        assert_eq!(server.http2.initial_stream_window_size, None);
+        assert_eq!(server.http2.initial_connection_window_size, None);
+
+        // `from_service` must seed the same defaults as `new`.
+        let from_service = Server::from_service(ConnectRpcService::new(Router::new()));
+        assert!(from_service.http2.adaptive_window);
+    }
+
+    #[tokio::test]
+    async fn bound_server_http2_builder_defaults_match_adaptive_on() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = Server::from_listener(listener);
+        assert!(bound.http2.adaptive_window);
+        assert_eq!(bound.http2.initial_stream_window_size, None);
+        assert_eq!(bound.http2.initial_connection_window_size, None);
+
+        let bound = Server::bind("127.0.0.1:0").await.unwrap();
+        assert!(bound.http2.adaptive_window);
+    }
+
+    #[test]
+    fn with_http2_adaptive_window_toggles_flag() {
+        let server = Server::new(Router::new()).with_http2_adaptive_window(false);
+        assert!(!server.http2.adaptive_window);
+
+        let server = server.with_http2_adaptive_window(true);
+        assert!(server.http2.adaptive_window);
+    }
+
+    #[test]
+    fn explicit_stream_window_disables_adaptive() {
+        let server = Server::new(Router::new()).with_http2_initial_stream_window_size(1 << 20);
+        assert_eq!(server.http2.initial_stream_window_size, Some(1 << 20));
+        assert!(
+            !server.http2.adaptive_window,
+            "an explicit stream window must turn adaptive sizing off"
+        );
+    }
+
+    #[test]
+    fn explicit_connection_window_disables_adaptive() {
+        let server = Server::new(Router::new()).with_http2_initial_connection_window_size(2 << 20);
+        assert_eq!(server.http2.initial_connection_window_size, Some(2 << 20));
+        assert!(
+            !server.http2.adaptive_window,
+            "an explicit connection window must turn adaptive sizing off"
+        );
+    }
+
+    #[test]
+    fn clearing_window_with_none_keeps_adaptive_flag() {
+        // Passing `None` must not flip the adaptive flag in either direction.
+        let server = Server::new(Router::new())
+            .with_http2_initial_stream_window_size(None)
+            .with_http2_initial_connection_window_size(None);
+        assert!(server.http2.adaptive_window);
+        assert_eq!(server.http2.initial_stream_window_size, None);
+        assert_eq!(server.http2.initial_connection_window_size, None);
+    }
+
+    #[test]
+    fn re_enabling_adaptive_after_explicit_window_wins() {
+        // The setters are last-write-wins: re-enabling adaptive after setting a
+        // window leaves the window stored but turns adaptive back on, matching
+        // the documented precedence (and hyper, where adaptive overrides the
+        // explicit window).
+        let server = Server::new(Router::new())
+            .with_http2_initial_stream_window_size(1 << 20)
+            .with_http2_adaptive_window(true);
+        assert!(server.http2.adaptive_window);
+        assert_eq!(server.http2.initial_stream_window_size, Some(1 << 20));
+        // ...and the stored window must not reach hyper while adaptive is on.
+        assert_eq!(server.http2.effective_windows(), (None, None));
+    }
+
+    #[test]
+    fn effective_windows_resolves_adaptive_precedence() {
+        // Default (adaptive on): no explicit window reaches hyper.
+        assert_eq!(Http2Config::default().effective_windows(), (None, None));
+
+        // Adaptive explicitly off but no sizes set: still nothing to apply.
+        let off = Server::new(Router::new()).with_http2_adaptive_window(false);
+        assert_eq!(off.http2.effective_windows(), (None, None));
+
+        // Adaptive off with explicit sizes: both windows are applied.
+        let fixed = Server::new(Router::new())
+            .with_http2_initial_stream_window_size(1 << 20)
+            .with_http2_initial_connection_window_size(2 << 20);
+        assert!(!fixed.http2.adaptive_window);
+        assert_eq!(
+            fixed.http2.effective_windows(),
+            (Some(1 << 20), Some(2 << 20))
+        );
+    }
+
+    #[tokio::test]
+    async fn bound_server_http2_window_setters_thread_through() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = Server::from_listener(listener)
+            .with_http2_initial_stream_window_size(512 * 1024)
+            .with_http2_initial_connection_window_size(1024 * 1024);
+        assert_eq!(bound.http2.initial_stream_window_size, Some(512 * 1024));
+        assert_eq!(
+            bound.http2.initial_connection_window_size,
+            Some(1024 * 1024)
+        );
+        assert!(!bound.http2.adaptive_window);
+    }
+
+    /// End-to-end check that explicit window knobs reach hyper's builder
+    /// (`configure_http2`) without breaking the connection: a server with
+    /// custom stream/connection windows still completes an HTTP/2 request.
+    #[tokio::test]
+    async fn http2_explicit_windows_serve_request() {
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_http2_initial_stream_window_size(256 * 1024)
+            .with_http2_initial_connection_window_size(512 * 1024);
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(Router::new(), async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut send_request, h2_conn) = h2::client::handshake(tcp).await.unwrap();
+        let h2_task = tokio::spawn(h2_conn);
+
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("http://{addr}/svc/Unknown"))
+            .body(())
+            .unwrap();
+        let (resp, _) = send_request.send_request(req, true).unwrap();
+        // The route is unknown; we only need the response to resolve, which
+        // proves the connection negotiated and served under the configured
+        // flow-control windows.
+        let _resp = resp.await.expect("h2 request failed");
+
+        drop(send_request);
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(5), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+        h2_task.await.expect("h2 connection task panicked").ok();
+    }
+
+    /// Same as above but with adaptive window left on (the default), proving the
+    /// default `configure_http2` path also serves requests cleanly.
+    #[tokio::test]
+    async fn http2_adaptive_window_default_serves_request() {
+        let bound = Server::bind("127.0.0.1:0").await.unwrap();
+        assert!(bound.http2.adaptive_window);
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(Router::new(), async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut send_request, h2_conn) = h2::client::handshake(tcp).await.unwrap();
+        let h2_task = tokio::spawn(h2_conn);
+
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("http://{addr}/svc/Unknown"))
+            .body(())
+            .unwrap();
+        let (resp, _) = send_request.send_request(req, true).unwrap();
+        // The route is unknown; we only need the response to resolve, which
+        // proves the connection negotiated and served under the configured
+        // flow-control windows.
+        let _resp = resp.await.expect("h2 request failed");
+
+        drop(send_request);
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(5), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
+        h2_task.await.expect("h2 connection task panicked").ok();
+    }
+
     #[tokio::test]
     async fn max_concurrent_streams_builder_defaults_and_overrides() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = Server::from_listener(listener);
-        assert_eq!(bound.max_concurrent_streams, None);
+        assert_eq!(bound.http2.max_concurrent_streams, None);
         let bound = bound.with_max_concurrent_streams(64);
-        assert_eq!(bound.max_concurrent_streams, Some(64));
+        assert_eq!(bound.http2.max_concurrent_streams, Some(64));
 
         let server = Server::new(Router::new());
-        assert_eq!(server.max_concurrent_streams, None);
+        assert_eq!(server.http2.max_concurrent_streams, None);
         let server = server.with_max_concurrent_streams(64);
-        assert_eq!(server.max_concurrent_streams, Some(64));
+        assert_eq!(server.http2.max_concurrent_streams, Some(64));
     }
 
     #[test]
