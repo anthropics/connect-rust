@@ -120,6 +120,7 @@ use buffa::view::ViewReborrow;
 
 use crate::codec::CodecFormat;
 use crate::codec::content_type;
+use crate::codec::encode_json;
 use crate::codec::header as connect_header;
 use crate::compression::CompressionPolicy;
 use crate::compression::CompressionRegistry;
@@ -262,7 +263,13 @@ mod http2;
 pub use http2::Http2Connection;
 #[cfg(feature = "client")]
 #[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+pub use http2::Http2ConnectionBuilder;
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
 pub use http2::SharedHttp2Connection;
+#[cfg(feature = "client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client")))]
+pub use http2::{DEFAULT_ESTABLISHMENT_TIMEOUT, DEFAULT_TCP_CONNECT_TIMEOUT};
 
 /// General-purpose HTTP client supporting both HTTP/1.1 and HTTP/2.
 ///
@@ -314,16 +321,17 @@ impl std::fmt::Debug for HttpClient {
 
 /// Inner hyper client, parameterized over connector type via an enum.
 ///
-/// This keeps the plaintext case exactly as before (zero cost) while
-/// allowing the TLS variant to use a different connector type without
-/// leaking generics into the public `HttpClient` signature.
+/// Both connectors are wrapped in [`TimeoutConnector`] so an optional
+/// `establishment_timeout` can bound the whole connector establishment. When no
+/// timeout is set the wrapper forwards each connect unchanged (a single boxed
+/// future per *connection*, not per request — negligible).
 #[cfg(feature = "client")]
 #[derive(Clone)]
 enum HttpClientInner {
     /// Plaintext HTTP (http:// only). Rejects https:// at send-time.
     Plain(
         hyper_util::client::legacy::Client<
-            hyper_util::client::legacy::connect::HttpConnector,
+            TimeoutConnector<hyper_util::client::legacy::connect::HttpConnector>,
             ClientBody,
         >,
     ),
@@ -332,10 +340,53 @@ enum HttpClientInner {
     #[cfg(feature = "client-tls")]
     Tls(
         hyper_util::client::legacy::Client<
-            hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+            TimeoutConnector<
+                hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+            >,
             ClientBody,
         >,
     ),
+}
+
+/// A `tower::Service<Uri>` connector wrapper that bounds connection
+/// establishment with an optional timeout.
+///
+/// Wraps the built-in `HttpConnector` (plaintext) or hyper-rustls's
+/// `HttpsConnector` (TLS). When `timeout` is `Some`, a connect that doesn't
+/// resolve in time is cancelled (dropping the in-flight TCP/TLS work) and
+/// surfaced as an `unavailable` error. When `None`, the inner connector's
+/// future is awaited unchanged.
+#[cfg(feature = "client")]
+#[derive(Clone)]
+struct TimeoutConnector<C> {
+    inner: C,
+    timeout: Option<Duration>,
+}
+
+#[cfg(feature = "client")]
+impl<C> tower::Service<Uri> for TimeoutConnector<C>
+where
+    C: tower::Service<Uri>,
+    C::Error: Into<Box<dyn std::error::Error + Send + Sync>> + 'static,
+    C::Future: Send + 'static,
+    C::Response: Send + 'static,
+{
+    type Response = C::Response;
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+    type Future = BoxFuture<'static, Result<C::Response, Self::Error>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx).map_err(Into::into)
+    }
+
+    fn call(&mut self, uri: Uri) -> Self::Future {
+        let fut = self.inner.call(uri);
+        let timeout = self.timeout;
+        Box::pin(http2::run_establishment(fut, timeout))
+    }
 }
 
 #[cfg(feature = "client")]
@@ -359,6 +410,10 @@ impl HttpClient {
     /// The client uses connection pooling and supports HTTP/1.1 and HTTP/2
     /// over cleartext. TCP_NODELAY is enabled to avoid Nagle + delayed ACK
     /// latency on small messages.
+    ///
+    /// Connection establishment is bounded by [`DEFAULT_ESTABLISHMENT_TIMEOUT`]
+    /// (and [`DEFAULT_TCP_CONNECT_TIMEOUT`] per address); use
+    /// [`builder()`](Self::builder) to adjust or opt out.
     pub fn plaintext() -> Self {
         Self::builder().plaintext()
     }
@@ -376,6 +431,10 @@ impl HttpClient {
     /// **Note:** For gRPC, prefer [`SharedHttp2Connection`] over this —
     /// it has honest `poll_ready` and composes with `tower::balance`. This
     /// method pins you to one connection per host with no way to scale out.
+    ///
+    /// Connection establishment is bounded by [`DEFAULT_ESTABLISHMENT_TIMEOUT`]
+    /// (and [`DEFAULT_TCP_CONNECT_TIMEOUT`] per address); use
+    /// [`builder()`](Self::builder) to adjust or opt out.
     pub fn plaintext_http2_only() -> Self {
         Self::builder().plaintext_http2_only()
     }
@@ -412,6 +471,10 @@ impl HttpClient {
     /// let http = HttpClient::with_tls(tls_config);
     /// let client = GreetServiceClient::new(http, config);
     /// ```
+    ///
+    /// Connection establishment is bounded by [`DEFAULT_ESTABLISHMENT_TIMEOUT`]
+    /// (and [`DEFAULT_TCP_CONNECT_TIMEOUT`] per address); use
+    /// [`builder()`](Self::builder) to adjust or opt out.
     #[cfg(feature = "client-tls")]
     #[cfg_attr(docsrs, doc(cfg(feature = "client-tls")))]
     pub fn with_tls(tls_config: std::sync::Arc<rustls::ClientConfig>) -> Self {
@@ -426,9 +489,27 @@ impl HttpClient {
 /// here, so `HttpClient::plaintext()` is exactly `HttpClient::builder().plaintext()`.
 #[cfg(feature = "client")]
 #[cfg_attr(docsrs, doc(cfg(feature = "client")))]
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
+#[must_use = "call a terminal (plaintext / plaintext_http2_only / with_tls) to build the client"]
 pub struct HttpClientBuilder {
-    connect_timeout: Option<Duration>,
+    tcp_connect_timeout: Option<Duration>,
+    establishment_timeout: Option<Duration>,
+}
+
+#[cfg(feature = "client")]
+impl Default for HttpClientBuilder {
+    /// A fresh builder with [`DEFAULT_ESTABLISHMENT_TIMEOUT`] /
+    /// [`DEFAULT_TCP_CONNECT_TIMEOUT`] applied, so a hung server cannot stall
+    /// connection establishment indefinitely. Use
+    /// [`no_establishment_timeout`](HttpClientBuilder::no_establishment_timeout) /
+    /// [`no_tcp_connect_timeout`](HttpClientBuilder::no_tcp_connect_timeout) to
+    /// opt out.
+    fn default() -> Self {
+        Self {
+            tcp_connect_timeout: Some(DEFAULT_TCP_CONNECT_TIMEOUT),
+            establishment_timeout: Some(DEFAULT_ESTABLISHMENT_TIMEOUT),
+        }
+    }
 }
 
 #[cfg(feature = "client")]
@@ -441,34 +522,98 @@ impl HttpClientBuilder {
     /// covers only the TCP `connect(2)` call (per resolved address — hyper
     /// divides the timeout evenly across the address set). It does **not**
     /// cover DNS resolution or, for [`with_tls`](Self::with_tls), the TLS
-    /// handshake. Use a per-request timeout (e.g.
+    /// handshake — set [`establishment_timeout`](Self::establishment_timeout) too to
+    /// bound those. Use a per-request timeout (e.g.
     /// [`CallOptions::with_timeout`]) to bound DNS+connect+TLS+request as a
     /// whole.
     ///
-    /// Unset (the default) means no explicit bound: TCP connect is governed by
-    /// the kernel's `tcp_syn_retries` (typically ~130s on Linux). Set this when
-    /// the network path can silently drop SYNs and you'd rather fail fast than
-    /// stall on kernel retransmits.
+    /// Defaults to [`DEFAULT_TCP_CONNECT_TIMEOUT`]. To disable, use
+    /// [`no_tcp_connect_timeout`](Self::no_tcp_connect_timeout). Passing
+    /// `Duration::ZERO` causes every per-address connect to fail immediately.
     ///
     /// [hyper-ct]: hyper_util::client::legacy::connect::HttpConnector::set_connect_timeout
-    pub fn connect_timeout(mut self, dur: Duration) -> Self {
-        self.connect_timeout = Some(dur);
+    #[doc(alias = "connect_timeout")]
+    pub fn tcp_connect_timeout(mut self, dur: Duration) -> Self {
+        self.tcp_connect_timeout = http2::finite(dur);
+        self
+    }
+
+    /// Alias for [`tcp_connect_timeout`](Self::tcp_connect_timeout).
+    pub fn connect_timeout(self, dur: Duration) -> Self {
+        self.tcp_connect_timeout(dur)
+    }
+
+    /// Disable the per-address TCP connect bound (the
+    /// [`DEFAULT_TCP_CONNECT_TIMEOUT`] default). The whole-connector
+    /// [`establishment_timeout`](Self::establishment_timeout) still applies.
+    pub fn no_tcp_connect_timeout(mut self) -> Self {
+        self.tcp_connect_timeout = None;
+        self
+    }
+
+    /// Bound the whole connector establishment: DNS resolution, the TCP connect,
+    /// and, for [`with_tls`](Self::with_tls), the TLS handshake.
+    ///
+    /// Unlike [`tcp_connect_timeout`](Self::tcp_connect_timeout) (which bounds only the
+    /// per-address TCP `connect(2)` call), this is a single wall-clock bound on
+    /// everything the connector does to produce a usable stream — so on the TLS
+    /// transport the two bounds overlap on the TCP phase.
+    ///
+    /// # What it does and does not cover
+    ///
+    /// Because `HttpClient` pools connections through hyper's legacy client, the
+    /// HTTP/2 preface runs *inside* the pool and is not separately observable
+    /// here — this bound covers **DNS, TCP and TLS, not the h2 preface**.
+    /// [`Http2Connection`]'s handshake bound additionally covers the h2
+    /// preface. Use a per-request timeout (e.g.
+    /// [`CallOptions::with_timeout`]) for a true end-to-end bound. For a
+    /// transport that bounds the h2 preface too, use [`Http2Connection`].
+    ///
+    /// Exceeding this bound surfaces as a [`ConnectError`] with
+    /// [`ErrorCode::Unavailable`] (the connect is retryable); the message names
+    /// the establishment phase.
+    ///
+    /// Defaults to [`DEFAULT_ESTABLISHMENT_TIMEOUT`]. To disable, use
+    /// [`no_establishment_timeout`](Self::no_establishment_timeout). Passing
+    /// `Duration::ZERO` causes every establishment to fail immediately.
+    pub fn establishment_timeout(mut self, dur: Duration) -> Self {
+        self.establishment_timeout = http2::finite(dur);
+        self
+    }
+
+    /// Disable the wall-clock connector-establishment bound (the
+    /// [`DEFAULT_ESTABLISHMENT_TIMEOUT`] default). With both this and
+    /// [`no_tcp_connect_timeout`](Self::no_tcp_connect_timeout), a hung server
+    /// can stall connection establishment indefinitely — the pre-0.8.0
+    /// behaviour.
+    pub fn no_establishment_timeout(mut self) -> Self {
+        self.establishment_timeout = None;
         self
     }
 
     fn http_connector(&self) -> hyper_util::client::legacy::connect::HttpConnector {
         let mut connector = hyper_util::client::legacy::connect::HttpConnector::new();
         connector.set_nodelay(true);
-        connector.set_connect_timeout(self.connect_timeout);
+        connector.set_connect_timeout(self.tcp_connect_timeout);
         connector
     }
 
+    /// Wrap a connector so `establishment_timeout` (if set) bounds its establishment.
+    fn wrap<C>(&self, connector: C) -> TimeoutConnector<C> {
+        TimeoutConnector {
+            inner: connector,
+            timeout: self.establishment_timeout,
+        }
+    }
+
     /// Finish building as a plaintext client. See [`HttpClient::plaintext`].
+    #[must_use]
     pub fn plaintext(self) -> HttpClient {
         use hyper_util::client::legacy::Client;
         use hyper_util::rt::TokioExecutor;
 
-        let client = Client::builder(TokioExecutor::new()).build(self.http_connector());
+        let connector = self.wrap(self.http_connector());
+        let client = Client::builder(TokioExecutor::new()).build(connector);
         HttpClient {
             inner: HttpClientInner::Plain(client),
         }
@@ -476,13 +621,15 @@ impl HttpClientBuilder {
 
     /// Finish building as an h2c-only plaintext client. See
     /// [`HttpClient::plaintext_http2_only`].
+    #[must_use]
     pub fn plaintext_http2_only(self) -> HttpClient {
         use hyper_util::client::legacy::Client;
         use hyper_util::rt::TokioExecutor;
 
+        let connector = self.wrap(self.http_connector());
         let client = Client::builder(TokioExecutor::new())
             .http2_only(true)
-            .build(self.http_connector());
+            .build(connector);
         HttpClient {
             inner: HttpClientInner::Plain(client),
         }
@@ -491,6 +638,7 @@ impl HttpClientBuilder {
     /// Finish building as a TLS client. See [`HttpClient::with_tls`].
     #[cfg(feature = "client-tls")]
     #[cfg_attr(docsrs, doc(cfg(feature = "client-tls")))]
+    #[must_use]
     pub fn with_tls(self, tls_config: std::sync::Arc<rustls::ClientConfig>) -> HttpClient {
         use hyper_util::client::legacy::Client;
         use hyper_util::rt::TokioExecutor;
@@ -517,7 +665,8 @@ impl HttpClientBuilder {
             .enable_all_versions()
             .wrap_connector(http);
 
-        let client = Client::builder(TokioExecutor::new()).build(https);
+        let connector = self.wrap(https);
+        let client = Client::builder(TokioExecutor::new()).build(connector);
         HttpClient {
             inner: HttpClientInner::Tls(client),
         }
@@ -646,6 +795,13 @@ impl ClientConfig {
     /// Set the codec format (proto or json).
     ///
     /// Read via [`Self::codec_format`].
+    ///
+    /// In a proto-only build (the `json` feature disabled) selecting
+    /// [`CodecFormat::Json`] produces a client whose every RPC returns
+    /// [`Unimplemented`](crate::ErrorCode::Unimplemented) before any
+    /// network I/O — the JSON codec is not compiled in. Prefer the default
+    /// [`CodecFormat::Proto`]; the [`json`](Self::json) shorthand is removed
+    /// from the API entirely in that build.
     #[must_use]
     pub fn with_codec_format(mut self, format: CodecFormat) -> Self {
         self.codec_format = format;
@@ -653,6 +809,11 @@ impl ClientConfig {
     }
 
     /// Use JSON encoding. Shorthand for `with_codec_format(CodecFormat::Json)`.
+    ///
+    /// Only available when the `json` feature is enabled; a proto-only build
+    /// omits it so JSON cannot be selected through this shorthand.
+    #[cfg(feature = "json")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "json")))]
     #[must_use]
     pub fn json(mut self) -> Self {
         self.codec_format = CodecFormat::Json;
@@ -1150,11 +1311,12 @@ fn decode_response_view<RespView>(
 ) -> Result<OwnedView<RespView>, ConnectError>
 where
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     match format {
         CodecFormat::Proto => OwnedView::<RespView>::decode(data)
             .map_err(|e| ConnectError::internal(format!("failed to decode response: {e}"))),
+        #[cfg(feature = "json")]
         CodecFormat::Json => {
             let owned: RespView::Owned = serde_json::from_slice(&data).map_err(|e| {
                 ConnectError::internal(format!("failed to decode JSON response: {e}"))
@@ -1162,6 +1324,10 @@ where
             OwnedView::<RespView>::from_owned(&owned)
                 .map_err(|e| ConnectError::internal(format!("failed to re-encode for view: {e}")))
         }
+        #[cfg(not(feature = "json"))]
+        CodecFormat::Json => Err(ConnectError::unimplemented(
+            crate::codec::JSON_FEATURE_DISABLED,
+        )),
     }
 }
 
@@ -1180,9 +1346,9 @@ pub async fn call_unary<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let options = effective_options(config, options);
 
@@ -1197,12 +1363,7 @@ where
     // Encode the request body
     let body = match config.codec_format {
         CodecFormat::Proto => request.encode_to_bytes(),
-        CodecFormat::Json => {
-            let buf = serde_json::to_vec(&request).map_err(|e| {
-                ConnectError::internal(format!("failed to encode JSON request: {e}"))
-            })?;
-            Bytes::from(buf)
-        }
+        CodecFormat::Json => encode_json(&request)?,
     };
 
     // Apply compression and framing based on protocol.
@@ -1288,7 +1449,7 @@ where
 /// Make an idempotent unary RPC call via HTTP GET (Connect protocol only).
 ///
 /// The request is encoded into URL query parameters per the Connect spec:
-/// `?connect=v1&encoding=<codec>&message=<payload>[&base64=1][&compression=<enc>]`.
+/// `?connect=v1[&base64=1][&compression=<enc>]&encoding=<codec>&message=<payload>`.
 ///
 /// For proto (or any binary codec), the message is URL-safe base64-encoded
 /// without padding and `base64=1` is set. For JSON, the message is
@@ -1320,9 +1481,9 @@ pub async fn call_unary_get<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     // Connect GET is a Connect-protocol-only feature.
     if !matches!(config.protocol, Protocol::Connect) {
@@ -1340,12 +1501,7 @@ where
     // Encode the request body
     let body = match config.codec_format {
         CodecFormat::Proto => request.encode_to_bytes(),
-        CodecFormat::Json => {
-            let buf = serde_json::to_vec(&request).map_err(|e| {
-                ConnectError::internal(format!("failed to encode JSON request: {e}"))
-            })?;
-            Bytes::from(buf)
-        }
+        CodecFormat::Json => encode_json(&request)?,
     };
 
     // Apply compression if configured (compression makes base64 mandatory).
@@ -1384,17 +1540,8 @@ where
         CodecFormat::Json => "json",
     };
 
-    // Assemble query string. Parameter order doesn't matter per spec, but
-    // a deterministic order aids caching. connect-go puts connect/encoding
-    // first, message/base64/compression after.
-    let mut query = format!("connect=v1&encoding={encoding_name}&message={encoded_message}");
-    if use_base64 {
-        query.push_str("&base64=1");
-    }
-    if let Some(enc) = compressed_with {
-        query.push_str("&compression=");
-        query.push_str(enc);
-    }
+    let query =
+        build_connect_get_query(use_base64, compressed_with, encoding_name, &encoded_message);
 
     let full_uri = format!("{base_str}/{service}/{method}?{query}");
     let uri: Uri = full_uri
@@ -1441,6 +1588,44 @@ where
     .await
 }
 
+/// Assemble the Connect Unary-Get query string.
+///
+/// Servers must accept any parameter order; the spec's Query-Get ABNF rule
+/// fixes the order so the variable-length `message` comes last and the
+/// prefix is stable for shared HTTP caches: `connect`, `base64`,
+/// `compression`, `encoding`, `message` ("Clients should order parameters as
+/// shown in the Query-Get rule above to maximize hit rates on shared
+/// caches" — <https://connectrpc.com/docs/protocol#unary-get-request>).
+/// connect-go and the conformance reference-server order check both follow
+/// this rule.
+fn build_connect_get_query(
+    use_base64: bool,
+    compression: Option<&str>,
+    encoding: &str,
+    encoded_message: &str,
+) -> String {
+    let mut query = String::with_capacity(
+        "connect=v1&encoding=&message=".len()
+            + if use_base64 { "&base64=1".len() } else { 0 }
+            + compression.map_or(0, |c| "&compression=".len() + c.len())
+            + encoding.len()
+            + encoded_message.len(),
+    );
+    query.push_str("connect=v1");
+    if use_base64 {
+        query.push_str("&base64=1");
+    }
+    if let Some(enc) = compression {
+        query.push_str("&compression=");
+        query.push_str(enc);
+    }
+    query.push_str("&encoding=");
+    query.push_str(encoding);
+    query.push_str("&message=");
+    query.push_str(encoded_message);
+    query
+}
+
 /// Remap decompression error codes for payloads received from the server.
 ///
 /// The compression providers classify malformed input as `invalid_argument`
@@ -1474,7 +1659,7 @@ where
     B: Body<Data = Bytes> + Send,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let status = response.status();
     if !status.is_success() {
@@ -1646,7 +1831,7 @@ where
     B: Body<Data = Bytes> + Send,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let status = response.status();
     let resp_headers = response.headers().clone();
@@ -1975,7 +2160,7 @@ where
     B: Body<Data = Bytes> + Unpin,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     /// Returns the response headers.
     #[must_use]
@@ -2011,7 +2196,7 @@ where
     ///
     /// A response body that ends without its protocol's termination
     /// metadata is not a clean end and returns `Err` rather than
-    /// `Ok(None)`: `unavailable` for a Connect stream missing its
+    /// `Ok(None)`: `internal` for a Connect stream missing its
     /// END_STREAM envelope; for gRPC/gRPC-Web, `internal` when no
     /// trailers arrived at all, `unknown` when trailers arrived without a
     /// `grpc-status`, and `unknown` for a malformed `grpc-status` value —
@@ -2054,7 +2239,13 @@ where
                 let trailer_len =
                     u32::from_be_bytes([self.buf[1], self.buf[2], self.buf[3], self.buf[4]])
                         as usize;
-                if self.buf.len() >= 5 + trailer_len {
+                // `saturating_add`: `trailer_len` is a server-controlled u32, so
+                // on a 32-bit target (e.g. the supported `wasm32` gRPC-Web
+                // client) `5 + trailer_len` can overflow `usize` and panic in a
+                // debug build. Matches the sibling framing sites, which already
+                // saturate. A saturated sum is never `<= buf.len()`, so an
+                // over-large prefix simply waits for bytes that never arrive.
+                if self.buf.len() >= trailer_len.saturating_add(5) {
                     // Complete trailer frame — parse and classify. An
                     // unparseable frame classifies as `None` (no usable
                     // termination metadata).
@@ -2117,7 +2308,12 @@ where
                     }
                     BodyPoll::Eof => {
                         if matches!(self.protocol, Protocol::Connect) {
-                            return Err(ConnectError::unavailable(
+                            // The HTTP body completed cleanly but the Connect
+                            // envelope sequence is missing its terminus: a
+                            // wire-level error, classified as `internal` the
+                            // same way connect-go and other gRPC stacks treat a
+                            // failed decompression or an unparseable response.
+                            return Err(ConnectError::internal(
                                 "Connect streaming response ended without END_STREAM envelope",
                             )
                             .into());
@@ -2320,16 +2516,7 @@ where
 
         let trailers = end_stream.metadata.map(|metadata| {
             let mut trailers = http::HeaderMap::new();
-            for (name, values) in metadata {
-                for value in values {
-                    if let (Ok(name), Ok(value)) = (
-                        http::header::HeaderName::from_bytes(name.as_bytes()),
-                        http::header::HeaderValue::from_str(&value),
-                    ) {
-                        trailers.append(name, value);
-                    }
-                }
-            }
+            append_metadata_capped(&mut trailers, metadata);
             trailers
         });
 
@@ -2377,9 +2564,9 @@ pub async fn call_server_stream<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let options = effective_options(config, options);
 
@@ -2394,12 +2581,7 @@ where
     // Encode the request body
     let body = match config.codec_format {
         CodecFormat::Proto => request.encode_to_bytes(),
-        CodecFormat::Json => {
-            let buf = serde_json::to_vec(&request).map_err(|e| {
-                ConnectError::internal(format!("failed to encode JSON request: {e}"))
-            })?;
-            Bytes::from(buf)
-        }
+        CodecFormat::Json => encode_json(&request)?,
     };
 
     // Compress and envelope-frame the request body (streaming protocol
@@ -2479,7 +2661,7 @@ where
     B: Body<Data = Bytes> + Send,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let response_headers = response.headers().clone();
     let status = response.status();
@@ -2698,9 +2880,9 @@ impl<B, Req, RespView> BidiStream<B, Req, RespView>
 where
     B: Body<Data = Bytes> + Send + Unpin,
     B::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     /// Send a request message.
     ///
@@ -2727,12 +2909,7 @@ where
         // compression). Same logic as call_server_stream's request encoding.
         let msg_bytes = match self.codec_format {
             CodecFormat::Proto => msg.encode_to_bytes(),
-            CodecFormat::Json => {
-                let buf = serde_json::to_vec(&msg).map_err(|e| {
-                    ConnectError::internal(format!("failed to encode JSON request: {e}"))
-                })?;
-                Bytes::from(buf)
-            }
+            CodecFormat::Json => encode_json(&msg)?,
         };
 
         let mut envelope_buf = BytesMut::new();
@@ -2893,9 +3070,9 @@ pub async fn call_bidi_stream<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let options = effective_options(config, options);
 
@@ -2995,9 +3172,9 @@ pub async fn call_client_stream<T, Req, RespView>(
 where
     T: ClientTransport,
     <T::ResponseBody as Body>::Error: std::fmt::Display,
-    Req: buffa::Message + serde::Serialize,
+    Req: buffa::Message + crate::codec::JsonSerialize,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let options = effective_options(config, options);
 
@@ -3066,12 +3243,7 @@ where
         for request in requests {
             let msg_bytes = match config.codec_format {
                 CodecFormat::Proto => request.encode_to_bytes(),
-                CodecFormat::Json => {
-                    let buf = serde_json::to_vec(&request).map_err(|e| {
-                        ConnectError::internal(format!("failed to encode JSON request: {e}"))
-                    })?;
-                    Bytes::from(buf)
-                }
+                CodecFormat::Json => encode_json(&request)?,
             };
 
             let mut envelope_buf = BytesMut::new();
@@ -3117,7 +3289,7 @@ where
     B: Body<Data = Bytes> + Send,
     B::Error: std::fmt::Display,
     RespView: MessageView<'static> + Send,
-    RespView::Owned: buffa::Message + serde::de::DeserializeOwned,
+    RespView::Owned: buffa::Message + crate::codec::JsonDeserialize,
 {
     let status = response.status();
 
@@ -3214,18 +3386,20 @@ where
 
 /// Scan a collected Connect client-streaming response body.
 ///
-/// The body must contain exactly one data envelope. The END_STREAM envelope,
-/// if present, terminates the scan and supplies the trailers; a body that
-/// ends without one is still accepted (matching the previous behavior).
-/// Returns the (still encoded) message payload and any trailers carried in
-/// the END_STREAM metadata.
+/// The body must contain exactly one data envelope followed by an END_STREAM
+/// envelope, the protocol-level terminus: it supplies the trailers (or a
+/// terminal Connect error) and marks the response complete. A body that
+/// yields the data message and then ends before END_STREAM is truncated, not
+/// successful, and is rejected with `internal` (matching the `ServerStream`
+/// Connect EOF behavior and connect-go's classification of a missing
+/// terminus as a wire-level error). Returns the (still encoded) message
+/// payload and any
+/// trailers carried in the END_STREAM metadata.
 ///
-/// Scanning stops at the END_STREAM envelope — it is the protocol-level end
-/// of the response, so anything after it is ignored rather than decoded. A
-/// second data envelope is rejected before its payload is decompressed, so a
-/// response cannot make the client do per-envelope decompression work (or
-/// hold per-envelope decompressed buffers) beyond the single message the RPC
-/// shape allows.
+/// Scanning stops at END_STREAM, so anything after it is ignored rather than
+/// decoded. A second data envelope is rejected before its payload is
+/// decompressed, so the client never spends decompression work or memory on
+/// more than the single message the RPC allows.
 fn parse_connect_client_stream_envelopes(
     body: Bytes,
     compression: &crate::compression::CompressionRegistry,
@@ -3236,6 +3410,7 @@ fn parse_connect_client_stream_envelopes(
     let mut buf = BytesMut::from(body.as_ref());
     let mut message: Option<Bytes> = None;
     let mut trailers = http::HeaderMap::new();
+    let mut saw_end_stream = false;
 
     while !buf.is_empty() {
         let envelope = match Envelope::decode_with_limit(&mut buf, max_msg_size)? {
@@ -3244,6 +3419,7 @@ fn parse_connect_client_stream_envelopes(
         };
 
         if envelope.is_end_stream() {
+            saw_end_stream = true;
             let end_stream_data = if envelope.is_compressed() {
                 let enc = encoding.ok_or_else(|| {
                     ConnectError::internal("received compressed END_STREAM without encoding header")
@@ -3259,16 +3435,7 @@ fn parse_connect_client_stream_envelopes(
                 serde_json::from_slice(&end_stream_data).unwrap_or_default();
 
             if let Some(metadata) = end_stream.metadata {
-                for (name, values) in metadata {
-                    for value in values {
-                        if let (Ok(name), Ok(value)) = (
-                            http::header::HeaderName::from_bytes(name.as_bytes()),
-                            http::header::HeaderValue::from_str(&value),
-                        ) {
-                            trailers.append(name, value);
-                        }
-                    }
-                }
+                append_metadata_capped(&mut trailers, metadata);
             }
 
             if let Some(err) = end_stream.error {
@@ -3328,6 +3495,15 @@ fn parse_connect_client_stream_envelopes(
     let message = message.ok_or_else(|| {
         ConnectError::unimplemented("client streaming response contains no data messages")
     })?;
+
+    // The data message is present, but the body ended before END_STREAM. That
+    // is a truncated response, not a completed one — match ServerStream's
+    // Connect EOF handling rather than reporting success with no trailers.
+    if !saw_end_stream {
+        return Err(ConnectError::internal(
+            "Connect streaming response ended without END_STREAM envelope",
+        ));
+    }
 
     Ok((message, trailers))
 }
@@ -3708,16 +3884,49 @@ fn parse_grpc_web_trailer_frame_with_compression(
                 http::HeaderValue::from_str(value.trim()),
             )
         {
-            headers.append(name, val);
+            // Use the fallible `try_append`: `HeaderMap` panics in
+            // `append` once the number of stored entries would exceed its
+            // hard ceiling (`MAX_SIZE = 1 << 15`). A hostile server can pack
+            // tens of thousands of short trailer lines into a payload that
+            // stays under `MAX_TRAILER_SIZE` (bytes, not entries), so the
+            // byte cap alone does not prevent the panic. Stop accumulating at
+            // the ceiling rather than crashing the RPC task.
+            if headers.try_append(name, val).is_err() {
+                break;
+            }
         }
     }
     Some(headers)
+}
+
+/// Append Connect end-stream `metadata` into `trailers`, capping at the
+/// `HeaderMap` entry ceiling.
+///
+/// `metadata` is deserialized from a server-supplied JSON end-stream frame, so
+/// its size is attacker-controlled. `HeaderMap::append` panics once the number
+/// of stored entries would exceed its hard ceiling (`MAX_SIZE = 1 << 15`); a
+/// hostile server could send tens of thousands of distinct keys in a few
+/// hundred KB of JSON and crash the RPC task. Use the fallible `try_append`
+/// and stop at the ceiling instead.
+fn append_metadata_capped(trailers: &mut http::HeaderMap, metadata: HashMap<String, Vec<String>>) {
+    'outer: for (name, values) in metadata {
+        for value in values {
+            if let (Ok(name), Ok(value)) = (
+                http::header::HeaderName::from_bytes(name.as_bytes()),
+                http::header::HeaderValue::from_str(&value),
+            ) && trailers.try_append(name, value).is_err()
+            {
+                break 'outer;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[cfg(feature = "json")]
     #[test]
     fn test_client_config() {
         let config = ClientConfig::new("http://localhost:8080".parse().unwrap())
@@ -3728,15 +3937,28 @@ mod tests {
         assert_eq!(config.request_compression, Some("gzip".to_string()));
     }
 
+    #[cfg(not(feature = "json"))]
+    #[test]
+    fn test_client_config_proto_only() {
+        // The `.json()` shorthand is removed in a proto-only build; the default
+        // codec is proto and the rest of the builder is unaffected.
+        let config =
+            ClientConfig::new("http://localhost:8080".parse().unwrap()).compress_requests("gzip");
+
+        assert_eq!(config.codec_format, CodecFormat::Proto);
+        assert_eq!(config.request_compression, Some("gzip".to_string()));
+    }
+
     #[cfg(feature = "client")]
     #[tokio::test]
     async fn http_client_connect_timeout_bounds_tcp_connect() {
         use std::time::Instant;
 
-        // RFC 5737 TEST-NET-1: guaranteed unroutable. SYNs are dropped, so an
-        // unbounded connect would stall on kernel retransmits (~130s on Linux
-        // defaults). With a 100ms connect timeout, hyper aborts the connect
-        // future and surfaces the failure promptly.
+        // RFC 5737 TEST-NET-1: reserved for documentation. Most hosts drop
+        // SYNs to it (so an unbounded connect stalls on kernel retransmits,
+        // ~130s on Linux defaults), but RFC 5737 doesn't mandate that — some
+        // CI hosts actively reject. The assertion that matters is the upper
+        // bound: a 100ms timeout must abort well before the kernel retry floor.
         let target = "http://192.0.2.1:9/";
         let timeout = Duration::from_millis(100);
 
@@ -3748,8 +3970,15 @@ mod tests {
             .unwrap();
 
         let start = Instant::now();
-        let err = http.send(req).await.expect_err("connect must fail");
+        // Outer timeout guards a transparent-proxy host that accepts the
+        // connect (so the bound under test never fires) and then never answers
+        // the HTTP/1.1 request — without this the test would hang.
+        let result = tokio::time::timeout(Duration::from_secs(3), http.send(req)).await;
         let elapsed = start.elapsed();
+        let Ok(Err(err)) = result else {
+            eprintln!("skipping: TEST-NET-1 reachable on this host (proxy?) in {elapsed:?}");
+            return;
+        };
 
         // Generous slack for CI scheduling jitter — but well under the
         // multi-second kernel SYN-retry floor we'd hit without the bound.
@@ -3757,6 +3986,84 @@ mod tests {
             elapsed < Duration::from_secs(2),
             "connect_timeout(100ms) should abort within ~2s, took {elapsed:?}: {err}"
         );
+    }
+
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn http_client_establishment_timeout_bounds_plaintext_connector() {
+        use std::time::Instant;
+
+        // The establishment_timeout wrapper bounds the whole connector. For
+        // plaintext that's just the TCP connect, so an unroutable TEST-NET-1
+        // address must fail fast rather than stall on kernel SYN retransmits.
+        let target = "http://192.0.2.1:9/";
+        let http = HttpClient::builder()
+            .establishment_timeout(Duration::from_millis(100))
+            .plaintext();
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(target)
+            .body(full_body(Bytes::new()))
+            .unwrap();
+
+        let start = Instant::now();
+        // Outer timeout guards a transparent-proxy host that accepts the
+        // connect (so the bound under test never fires) and then never answers
+        // the HTTP/1.1 request — without this the test would hang.
+        let result = tokio::time::timeout(Duration::from_secs(3), http.send(req)).await;
+        let elapsed = start.elapsed();
+        let Ok(Err(err)) = result else {
+            eprintln!("skipping: TEST-NET-1 reachable on this host (proxy?) in {elapsed:?}");
+            return;
+        };
+
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "establishment_timeout(100ms) should abort within ~2s, took {elapsed:?}: {err}"
+        );
+    }
+
+    #[cfg(feature = "client-tls")]
+    #[tokio::test]
+    async fn http_client_establishment_timeout_bounds_stalled_tls() {
+        use std::time::Instant;
+
+        // A listener that accepts the TCP connection but never performs the TLS
+        // handshake. The TCP connect succeeds, so only establishment_timeout (which
+        // covers TCP + TLS for the connector) can release the stalled connect.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Ok((stream, _)) = listener.accept().await {
+                held.push(stream);
+            }
+        });
+
+        let tls_config = std::sync::Arc::new(
+            rustls::ClientConfig::builder()
+                .with_root_certificates(rustls::RootCertStore::empty())
+                .with_no_client_auth(),
+        );
+        let http = HttpClient::builder()
+            .establishment_timeout(Duration::from_millis(150))
+            .with_tls(tls_config);
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("https://{addr}/"))
+            .body(full_body(Bytes::new()))
+            .unwrap();
+
+        let start = Instant::now();
+        let err = http.send(req).await.expect_err("stalled TLS must fail");
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "establishment_timeout(150ms) should fire within ~2s, took {elapsed:?}: {err}"
+        );
+
+        server.abort();
     }
 
     #[test]
@@ -3892,7 +4199,7 @@ mod tests {
             Ok(Some(_)) => panic!("truncated stream unexpectedly yielded another message"),
             Ok(None) => panic!("truncated stream ended cleanly without END_STREAM"),
         };
-        assert_eq!(err.code, ErrorCode::Unavailable);
+        assert_eq!(err.code, ErrorCode::Internal);
         assert!(
             err.to_string().contains("END_STREAM"),
             "unexpected error: {err}"
@@ -3904,7 +4211,7 @@ mod tests {
             .message()
             .await
             .expect_err("truncation error must be sticky");
-        assert_eq!(again.code, ErrorCode::Unavailable);
+        assert_eq!(again.code, ErrorCode::Internal);
     }
 
     /// A Connect streaming response whose body is empty (zero envelopes,
@@ -3935,7 +4242,7 @@ mod tests {
             Ok(Some(_)) => panic!("empty body unexpectedly yielded a message"),
             Ok(None) => panic!("empty body without END_STREAM ended cleanly"),
         };
-        assert_eq!(err.code, ErrorCode::Unavailable);
+        assert_eq!(err.code, ErrorCode::Internal);
         assert!(
             err.to_string().contains("END_STREAM"),
             "unexpected error: {err}"
@@ -3945,7 +4252,7 @@ mod tests {
             .message()
             .await
             .expect_err("truncation error must be sticky");
-        assert_eq!(again.code, ErrorCode::Unavailable);
+        assert_eq!(again.code, ErrorCode::Internal);
     }
 
     /// `Ok(None)` means the RPC succeeded — a Connect END_STREAM envelope
@@ -4708,6 +5015,66 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_grpc_web_trailer_floods_do_not_panic() {
+        // A hostile server can pack far more distinct trailer names than
+        // `HeaderMap` can hold (`MAX_SIZE = 1 << 15 = 32_768`) into a payload
+        // that stays under the 1 MiB byte cap. Each `hN:` line is short, so
+        // 40_000 distinct names is only ~300 KiB. The parser must not panic.
+        let mut payload = String::new();
+        for i in 0..40_000u32 {
+            payload.push_str(&format!("h{i}:\n"));
+        }
+        let payload = payload.into_bytes();
+        assert!(
+            payload.len() < 1024 * 1024,
+            "payload must stay under byte cap"
+        );
+
+        let mut frame = Vec::with_capacity(5 + payload.len());
+        frame.push(0x80);
+        frame.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&payload);
+
+        // Before the fix this panicked with "size overflows MAX_SIZE".
+        let headers = parse_grpc_web_trailer_frame_with_compression(&frame, None)
+            .expect("flood frame is well-formed and should parse");
+        // The map fills up to the type's hard ceiling and stops: it accepts
+        // entries (the loop didn't drop everything) but never exceeds the cap.
+        assert!(headers.keys_len() > 0, "early trailers should be retained");
+        assert!(headers.keys_len() <= 1 << 15);
+    }
+
+    #[test]
+    fn test_append_metadata_capped_copies_entries() {
+        let mut metadata = HashMap::new();
+        metadata.insert("grpc-status".to_string(), vec!["0".to_string()]);
+        metadata.insert(
+            "x-custom".to_string(),
+            vec!["a".to_string(), "b".to_string()],
+        );
+        let mut trailers = http::HeaderMap::new();
+        append_metadata_capped(&mut trailers, metadata);
+        assert_eq!(trailers.get("grpc-status").unwrap(), "0");
+        assert_eq!(trailers.get_all("x-custom").iter().count(), 2);
+    }
+
+    #[test]
+    fn test_append_metadata_capped_does_not_panic_on_flood() {
+        // A Connect end-stream `metadata` map is deserialized from server JSON,
+        // so its key count is attacker-controlled. Feeding more distinct keys
+        // than the `HeaderMap` ceiling (`MAX_SIZE = 1 << 15`) must cap rather
+        // than panic with "size overflows MAX_SIZE".
+        let mut metadata = HashMap::new();
+        for i in 0..40_000u32 {
+            metadata.insert(format!("h{i}"), vec![String::new()]);
+        }
+        let mut trailers = http::HeaderMap::new();
+        append_metadata_capped(&mut trailers, metadata);
+        assert!(trailers.keys_len() > 0, "early entries should be retained");
+        assert!(trailers.keys_len() <= 1 << 15);
+    }
+
+    #[test]
     fn test_parse_grpc_web_trailer_newline_only() {
         // Some implementations use \n instead of \r\n
         let payload = b"grpc-status: 0\n";
@@ -4805,6 +5172,28 @@ mod tests {
 
         let config = config.with_codec_format(CodecFormat::Json);
         assert_eq!(unary_request_content_type(&config), "application/json");
+    }
+
+    #[cfg(not(feature = "json"))]
+    #[test]
+    fn decode_response_view_json_is_unimplemented_without_feature() {
+        use buffa::Message;
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+        // Proto-only client: the response-decode JSON arm is compiled out and
+        // surfaces `Unimplemented` instead of attempting serde. The
+        // request-encode paths are the symmetric `return Err(Unimplemented)`
+        // guards that fire before any transport I/O.
+        let err = decode_response_view::<StringValueView>(
+            Bytes::from_static(b"\"x\""),
+            CodecFormat::Json,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Unimplemented);
+
+        // Proto decoding still works.
+        let bytes = StringValue::from("ok").encode_to_bytes();
+        assert!(decode_response_view::<StringValueView>(bytes, CodecFormat::Proto).is_ok());
     }
 
     #[test]
@@ -5265,6 +5654,62 @@ mod tests {
     // call_unary_get query encoding (Connect GET protocol)
     // ========================================================================
 
+    /// The order the conformance suite checks for: `connect`, `base64`,
+    /// `compression`, `encoding`, `message`. Servers accept any order; the
+    /// recommended order keeps the variable-length `message` last so the
+    /// prefix is stable for shared caches.
+    fn assert_connect_get_param_order(query: &str) {
+        const RANK: &[&str] = &["connect", "base64", "compression", "encoding", "message"];
+        let mut last = 0;
+        for pair in query.split('&') {
+            let key = pair.split_once('=').map_or(pair, |(k, _)| k);
+            let rank = RANK
+                .iter()
+                .position(|k| *k == key)
+                .unwrap_or_else(|| panic!("unknown query parameter {key:?} in {query:?}"));
+            assert!(
+                rank >= last,
+                "parameter {key:?} out of recommended order in {query:?}",
+            );
+            last = rank;
+        }
+    }
+
+    #[test]
+    fn get_query_param_order_proto() {
+        let q = build_connect_get_query(true, None, "proto", "AAAA");
+        assert_eq!(q, "connect=v1&base64=1&encoding=proto&message=AAAA");
+        assert_connect_get_param_order(&q);
+    }
+
+    #[test]
+    fn get_query_param_order_json_uncompressed() {
+        let q = build_connect_get_query(false, None, "json", "%7B%7D");
+        assert_eq!(q, "connect=v1&encoding=json&message=%7B%7D");
+        assert_connect_get_param_order(&q);
+    }
+
+    #[test]
+    fn get_query_param_order_compressed() {
+        let q = build_connect_get_query(true, Some("gzip"), "proto", "H4sI");
+        assert_eq!(
+            q,
+            "connect=v1&base64=1&compression=gzip&encoding=proto&message=H4sI",
+        );
+        assert_connect_get_param_order(&q);
+    }
+
+    #[test]
+    fn get_query_param_order_json_compressed() {
+        // Compressed JSON forces base64 (compressed bytes are binary).
+        let q = build_connect_get_query(true, Some("gzip"), "json", "H4sI");
+        assert_eq!(
+            q,
+            "connect=v1&base64=1&compression=gzip&encoding=json&message=H4sI",
+        );
+        assert_connect_get_param_order(&q);
+    }
+
     #[test]
     fn get_base64_encoding_matches_rfc4648_urlsafe_no_pad() {
         // Verify we use the exact encoding the spec requires: RFC 4648 §5
@@ -5511,5 +5956,83 @@ mod tests {
             err.to_string().contains("no data messages"),
             "unexpected error: {err}"
         );
+    }
+
+    /// A data envelope followed by EOF, with no END_STREAM envelope, is a
+    /// truncated response rather than a completed one: it is rejected with
+    /// `internal` instead of succeeding with empty trailers, matching the
+    /// `ServerStream` Connect EOF behavior.
+    #[test]
+    fn client_stream_response_requires_end_stream_after_message() {
+        let registry = crate::compression::CompressionRegistry::new();
+
+        let body = Envelope::data(Bytes::from_static(b"only")).encode();
+
+        let err = parse_connect_client_stream_envelopes(
+            body,
+            &registry,
+            None,
+            1024,
+            &http::HeaderMap::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Internal);
+        assert_eq!(
+            err.message.as_deref(),
+            Some("Connect streaming response ended without END_STREAM envelope"),
+        );
+    }
+
+    /// A data envelope followed by a truncated END_STREAM envelope (its
+    /// declared payload never arrives) is also a truncated response: the
+    /// partial envelope decodes to "needs more data", so END_STREAM is never
+    /// observed and the response is rejected with `internal`.
+    #[test]
+    fn client_stream_response_requires_complete_end_stream_after_message() {
+        let registry = crate::compression::CompressionRegistry::new();
+
+        let mut body = Envelope::data(Bytes::from_static(b"only"))
+            .encode()
+            .to_vec();
+        let end_stream = Envelope::end_stream(Bytes::from_static(b"{}")).encode();
+        // Append everything but the final byte of the END_STREAM envelope.
+        body.extend_from_slice(&end_stream[..end_stream.len() - 1]);
+
+        let err = parse_connect_client_stream_envelopes(
+            Bytes::from(body),
+            &registry,
+            None,
+            1024,
+            &http::HeaderMap::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Internal);
+        assert_eq!(
+            err.message.as_deref(),
+            Some("Connect streaming response ended without END_STREAM envelope"),
+        );
+    }
+
+    /// A data envelope followed by an empty END_STREAM envelope (`{}`) is a
+    /// complete response: the message is returned with empty trailers.
+    #[test]
+    fn client_stream_response_end_stream_completes_the_response() {
+        let registry = crate::compression::CompressionRegistry::new();
+
+        let mut body = Envelope::data(Bytes::from_static(b"only"))
+            .encode()
+            .to_vec();
+        body.extend_from_slice(&Envelope::end_stream(Bytes::from_static(b"{}")).encode());
+
+        let (message, trailers) = parse_connect_client_stream_envelopes(
+            Bytes::from(body),
+            &registry,
+            None,
+            1024,
+            &http::HeaderMap::new(),
+        )
+        .unwrap();
+        assert_eq!(&message[..], b"only");
+        assert!(trailers.is_empty());
     }
 }

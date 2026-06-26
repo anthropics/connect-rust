@@ -7,12 +7,12 @@
 //!
 //! ```rust,ignore
 //! use connectrpc::{Router, ConnectRpcService};
-//! use hyper::service::service_fn;
+//! use std::sync::Arc;
+//! // `register` is provided by the generated `<Service>Ext` extension trait:
+//! use my_proto::greet::v1::GreetServiceExt;
 //!
-//! let router = Router::new()
-//!     .route("example.v1.GreetService", "Greet", greet_handler);
-//!
-//! let service = router.into_service();
+//! let router = Arc::new(MyGreetService).register(Router::new());
+//! let service = ConnectRpcService::new(router);
 //! // Use with hyper or any tower-compatible framework
 //! ```
 //!
@@ -21,9 +21,9 @@
 //! ```rust,ignore
 //! use axum::{Router, routing::get};
 //! use connectrpc::Router as ConnectRouter;
+//! use std::sync::Arc;
 //!
-//! let connect_router = ConnectRouter::new()
-//!     .route("example.v1.GreetService", "Greet", greet_handler);
+//! let connect_router = Arc::new(MyGreetService).register(ConnectRouter::new());
 //!
 //! let app = Router::new()
 //!     .route("/health", get(health_handler))
@@ -1115,9 +1115,7 @@ fn create_grpc_web_envelope_stream(
 /// # Example
 ///
 /// ```rust,ignore
-/// let router = Router::new()
-///     .route("example.v1.GreetService", "Greet", greet_handler);
-///
+/// let router = Arc::new(MyGreetService).register(Router::new());
 /// let service = ConnectRpcService::new(router);
 /// ```
 ///
@@ -1165,8 +1163,7 @@ impl<D: Dispatcher> ConnectRpcService<D> {
     /// Create a new ConnectRPC service from a dispatcher.
     ///
     /// The dispatcher can be either:
-    /// - a [`Router`] built with `.route()` / `.route_view()` calls (or via
-    ///   generated `FooServiceExt::register`), or
+    /// - a [`Router`] built via generated `FooServiceExt::register`, or
     /// - a code-generated `FooServiceServer<T>` struct for monomorphic
     ///   dispatch with no HashMap lookup or trait-object indirection.
     pub fn new(dispatcher: D) -> Self {
@@ -1447,6 +1444,16 @@ where
         span.record("codec", tracing::field::display(rp.codec_format));
     }
 
+    // Only GET and POST carry RPCs. Reject every other verb uniformly with
+    // 405 Method Not Allowed plus an `Allow` header (connect-go parity),
+    // regardless of whether a Content-Type is present. Without this, a bodyless
+    // OPTIONS/HEAD request (no Content-Type, so protocol detection returns
+    // None) would fall through to the unsupported-media-type path and be
+    // misreported as 415. An unknown path still maps to 404.
+    if req.method() != Method::GET && req.method() != Method::POST {
+        return reject_unsupported_method(&*dispatcher, req, limits, deadline_policy).await;
+    }
+
     // Connect GET requests don't have a Content-Type header, so protocol
     // detection returns None. Route GET requests directly to the unary handler
     // which handles Connect GET query parameter parsing.
@@ -1464,13 +1471,14 @@ where
         .map(|r| r.map(ConnectRpcBody::Full));
     }
 
-    // Check for gRPC/gRPC-Web content type prefix with unsupported codec
-    // (e.g., application/grpc+thrift). We need to return a gRPC-style error
-    // rather than falling through to the Connect unary handler.
-    //
-    // For HTTP/2 requests with completely unknown content types, also return
-    // a gRPC error since gRPC requires HTTP/2 and the client likely expects
-    // gRPC framing. For HTTP/1.1, fall through to the Connect handler.
+    // Content type didn't resolve to a known protocol+codec. A gRPC/gRPC-Web
+    // prefix with an unsupported codec (e.g. application/grpc+thrift, or
+    // application/grpc+json in a proto-only build) returns a gRPC `unimplemented`
+    // error so the client gets gRPC framing it can parse (the compression axis
+    // returns `unimplemented` for an unsupported encoding the same way). Any
+    // other unrecognized content
+    // type returns HTTP 415 Unsupported Media Type with an `Accept-Post` header
+    // advertising the content types this server does accept.
     if request_protocol.is_none() {
         let ct = req
             .headers()
@@ -1501,20 +1509,23 @@ where
         .await;
 
         if ct.starts_with("application/grpc-web") {
-            let err = ConnectError::internal("unsupported content type");
+            let err = ConnectError::unimplemented("unsupported content type");
             let response = grpc_error_response(&err, Protocol::GrpcWeb, CodecFormat::Proto);
             return Ok(response.map(ConnectRpcBody::Streaming));
         } else if ct.starts_with("application/grpc") {
-            let err = ConnectError::internal("unsupported content type");
+            let err = ConnectError::unimplemented("unsupported content type");
             let response = grpc_error_response(&err, Protocol::Grpc, CodecFormat::Proto);
             return Ok(response.map(ConnectRpcBody::Streaming));
         } else {
             // Unknown content type that doesn't match any protocol.
-            // Return HTTP 415 Unsupported Media Type with no body.
-            // All protocol clients (Connect, gRPC, gRPC-Web) can handle
-            // non-200 HTTP status codes by mapping to an appropriate error.
+            // Return HTTP 415 Unsupported Media Type with no body, advertising
+            // the content types we do accept via `Accept-Post` (connect-go
+            // parity). The empty body means clients map the 415 status to an
+            // error code (Connect: unknown) per the protocol's HTTP-status
+            // mapping.
             let response = Response::builder()
                 .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+                .header("accept-post", ACCEPT_POST)
                 .body(Full::new(Bytes::new()))
                 .unwrap();
             return Ok(response.map(ConnectRpcBody::Full));
@@ -1604,6 +1615,85 @@ where
             .await
             .map(|r| r.map(ConnectRpcBody::Full))
         }
+    }
+}
+
+/// `Accept-Post` advertised on a 415 response: the content types this server
+/// accepts. JSON media types appear only when the `json` feature is enabled — a
+/// proto-only build advertises proto-only. gRPC-Web text mode is intentionally
+/// omitted: the server detects but rejects it (`Unimplemented`), so it must not
+/// be advertised as accepted.
+#[cfg(feature = "json")]
+const ACCEPT_POST: &str = "application/connect+json, application/connect+proto, \
+application/grpc, application/grpc+json, application/grpc+proto, \
+application/grpc-web, application/grpc-web+json, application/grpc-web+proto, \
+application/json, application/proto";
+
+/// See the `json`-enabled variant; a proto-only build drops every JSON media
+/// type so it never advertises a codec it cannot serve.
+#[cfg(not(feature = "json"))]
+const ACCEPT_POST: &str = "application/connect+proto, application/grpc, \
+application/grpc+proto, application/grpc-web, application/grpc-web+proto, \
+application/proto";
+
+/// Reject an HTTP method other than GET or POST.
+///
+/// Mirrors connect-go: a known procedure path returns 405 Method Not Allowed
+/// with an `Allow` header listing the methods it accepts (always `POST`; plus
+/// `GET` for idempotent unary methods). An unknown path returns the same
+/// `unimplemented` (HTTP 404) as any other route miss. The request body is
+/// drained first so HTTP/1.1 connections stay reusable.
+async fn reject_unsupported_method<D, B>(
+    dispatcher: &D,
+    req: Request<B>,
+    limits: Limits,
+    deadline_policy: &DeadlinePolicy,
+) -> Result<Response<ConnectRpcBody>, ConnectError>
+where
+    D: Dispatcher,
+    B: Body<Data = Bytes> + Send + 'static,
+    B::Error: std::error::Error + Send + Sync + 'static,
+{
+    let raw_path = req.uri().path();
+    let path = raw_path.strip_prefix('/').unwrap_or(raw_path).to_owned();
+    let allow = dispatcher.lookup(&path).map(|desc| {
+        if desc.kind == MethodKind::Unary && desc.idempotent {
+            "GET, POST"
+        } else {
+            "POST"
+        }
+    });
+
+    // Drain the request body so an early response doesn't break HTTP/1.1
+    // keep-alive (see the streaming body-drop race notes).
+    let deadline = deadline_from_headers(
+        req.headers(),
+        Protocol::Connect,
+        req.uri().path(),
+        deadline_policy,
+    );
+    let (_parts, body) = req.into_parts();
+    let _ = with_request_deadline(
+        deadline,
+        collect_body_limited(body, limits.max_request_body_size),
+    )
+    .await;
+
+    match allow {
+        // Bare 405 with `Allow`: the empty body makes the client map the 405
+        // status to an error code (Connect: unknown) per the HTTP-status table.
+        Some(allow) => {
+            let response = Response::builder()
+                .status(StatusCode::METHOD_NOT_ALLOWED)
+                .header(header::ALLOW, allow)
+                .body(Full::new(Bytes::new()))
+                .unwrap();
+            Ok(response.map(ConnectRpcBody::Full))
+        }
+        None => Err(
+            ConnectError::unimplemented(format!("method not found: {path}"))
+                .with_http_status(StatusCode::NOT_FOUND),
+        ),
     }
 }
 
@@ -1731,6 +1821,8 @@ where
 
         (body, codec_format)
     } else {
+        // Backstop: `handle_request` rejects every non-GET/POST verb upstream
+        // (with 405 + `Allow`), so this arm is unreachable in normal dispatch.
         return Err(ConnectError::method_not_allowed(
             "only GET and POST methods are supported",
         ));
@@ -1872,7 +1964,8 @@ where
         })
     };
 
-    // gRPC requires POST
+    // gRPC requires POST. Backstop: `handle_request` already rejects non-GET/
+    // POST verbs upstream, and GET never routes here, so this is defensive.
     if req.method() != Method::POST {
         let err = ConnectError::internal(format!("invalid method for gRPC: {}", req.method()));
         // Drain the request body to avoid broken pipe on HTTP/1.1.
@@ -2091,7 +2184,8 @@ where
     let mut metadata = RequestMetadata::from_headers(req.headers(), protocol);
     metadata.timeout = deadline_policy.moderate(metadata.timeout, &path);
 
-    // gRPC and gRPC-Web require POST method
+    // gRPC and gRPC-Web require POST method. Backstop: non-GET/POST verbs are
+    // already rejected upstream in `handle_request`, and GET never routes here.
     if matches!(protocol, Protocol::Grpc | Protocol::GrpcWeb) && req.method() != Method::POST {
         let err = ConnectError::internal(format!("invalid method for gRPC: {}", req.method()));
         // Drain the request body to avoid broken pipe on HTTP/1.1.
@@ -3108,13 +3202,14 @@ pub mod axum_integration {
         /// ```rust,ignore
         /// use axum::{Router, routing::get};
         /// use connectrpc::Router as ConnectRouter;
+        /// use std::sync::Arc;
         ///
         /// async fn health() -> &'static str {
         ///     "OK"
         /// }
         ///
-        /// let connect_router = ConnectRouter::new()
-        ///     .route("example.v1.GreetService", "Greet", greet_handler);
+        /// let connect_router =
+        ///     Arc::new(MyGreetService).register(ConnectRouter::new());
         ///
         /// let app = Router::new()
         ///     .route("/health", get(health))
@@ -3134,9 +3229,10 @@ pub mod axum_integration {
         /// ```rust,ignore
         /// use axum::{Router, routing::get};
         /// use connectrpc::Router as ConnectRouter;
+        /// use std::sync::Arc;
         ///
-        /// let connect_router = ConnectRouter::new()
-        ///     .route("example.v1.GreetService", "Greet", greet_handler);
+        /// let connect_router =
+        ///     Arc::new(MyGreetService).register(ConnectRouter::new());
         ///
         /// // Use as fallback for unmatched routes
         /// let app = Router::new()
@@ -4225,6 +4321,10 @@ mod tests {
         assert!(trailer_text.contains("grpc-status: 7"), "{trailer_text:?}");
     }
 
+    // Echoing a JSON request codec into the error response only applies when
+    // the `json` feature is on; a proto-only build declines JSON content types
+    // at negotiation, so these scenarios are unreachable there.
+    #[cfg(feature = "json")]
     #[tokio::test]
     async fn into_http_response_connect_streaming_json_codec() {
         // The codec format from the request Content-Type must round-trip into
@@ -4240,6 +4340,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "json")]
     #[tokio::test]
     async fn into_http_response_grpc_json_codec() {
         let err = ConnectError::permission_denied("nope");
@@ -4253,6 +4354,256 @@ mod tests {
         assert_eq!(
             resp.headers().get(&GRPC_STATUS).unwrap(),
             &crate::ErrorCode::PermissionDenied.grpc_code().to_string()
+        );
+    }
+
+    // The Connect protocol requires HTTP 415 Unsupported Media Type when the
+    // server does not support the requested message codec. A proto-only build
+    // (no `json` feature) declines every JSON content type at content
+    // negotiation, before the request body is touched.
+    #[cfg(not(feature = "json"))]
+    #[tokio::test]
+    async fn proto_only_server_rejects_json_content_types_with_415() {
+        let dispatcher = Arc::new(Router::new());
+
+        for ct in ["application/json", "application/connect+json"] {
+            let req = Request::builder()
+                .method(Method::POST)
+                .uri("/svc/Method")
+                .header(header::CONTENT_TYPE, ct)
+                .body(Full::new(Bytes::new()))
+                .unwrap();
+            let resp = handle_request(
+                Arc::clone(&dispatcher),
+                req,
+                Limits::default(),
+                Arc::new(CompressionRegistry::new()),
+                &CompressionPolicy::default(),
+                &DeadlinePolicy::new(),
+                &[],
+            )
+            .await
+            .expect("415 is returned as an Ok response, not an Err");
+            assert_eq!(
+                resp.status(),
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "{ct} must be rejected with HTTP 415 in a proto-only build"
+            );
+        }
+
+        // A proto request passes content negotiation (it fails later as
+        // route-not-found, not as a 415) — proving only JSON is declined.
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/svc/Method")
+            .header(header::CONTENT_TYPE, "application/proto")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        let status = match handle_request(
+            Arc::clone(&dispatcher),
+            req,
+            Limits::default(),
+            Arc::new(CompressionRegistry::new()),
+            &CompressionPolicy::default(),
+            &DeadlinePolicy::new(),
+            &[],
+        )
+        .await
+        {
+            Ok(resp) => resp.status(),
+            Err(err) => err.http_status(),
+        };
+        assert_ne!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    }
+
+    // A valid `application/grpc` / `application/grpc-web` prefix paired with an
+    // unsupported message codec (e.g. `+thrift`) is rejected with the gRPC
+    // status `unimplemented` (code 12), matching the compression axis. The
+    // gRPC spec leaves this code unspecified and the conformance suite accepts
+    // either `internal` or `unimplemented`; we use `unimplemented` because the
+    // server genuinely does not implement the requested codec.
+    #[tokio::test]
+    async fn unsupported_grpc_codec_returns_unimplemented() {
+        let dispatcher = Arc::new(Router::new());
+
+        // gRPC: the trailers-only error echoes grpc-status in the response
+        // headers.
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/svc/Method")
+            .header(header::CONTENT_TYPE, "application/grpc+thrift")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        let resp = handle_request(
+            Arc::clone(&dispatcher),
+            req,
+            Limits::default(),
+            Arc::new(CompressionRegistry::new()),
+            &CompressionPolicy::default(),
+            &DeadlinePolicy::new(),
+            &[],
+        )
+        .await
+        .expect("a gRPC codec rejection is returned as an Ok response");
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("grpc-status").unwrap(),
+            "12",
+            "unsupported gRPC codec must map to unimplemented (12)"
+        );
+
+        // gRPC-Web: grpc-status is carried in the trailer frame in the body.
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/svc/Method")
+            .header(header::CONTENT_TYPE, "application/grpc-web+thrift")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        let resp = handle_request(
+            Arc::clone(&dispatcher),
+            req,
+            Limits::default(),
+            Arc::new(CompressionRegistry::new()),
+            &CompressionPolicy::default(),
+            &DeadlinePolicy::new(),
+            &[],
+        )
+        .await
+        .expect("a gRPC-Web codec rejection is returned as an Ok response");
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp
+            .into_body()
+            .collect()
+            .await
+            .expect("collecting the gRPC-Web error body must not fail")
+            .to_bytes();
+        let body_text = String::from_utf8_lossy(&body);
+        assert!(
+            body_text.contains("grpc-status: 12\r\n"),
+            "unsupported gRPC-Web codec must map to unimplemented (12); body was {body_text:?}"
+        );
+    }
+
+    // Mirrors connect-go: an unsupported HTTP verb on a known procedure returns
+    // 405 with an `Allow` header (POST, plus GET for idempotent unary methods);
+    // an unknown path returns 404. Also covers the bug where a bodyless
+    // OPTIONS/HEAD (no Content-Type) was previously misreported as 415.
+    #[tokio::test]
+    async fn unsupported_http_verb_returns_405_with_allow() {
+        let dispatcher = Arc::new(
+            Router::new()
+                .route(
+                    "svc",
+                    "Unary",
+                    crate::handler_fn(|_ctx: RequestContext, _req: buffa_types::Empty| async {
+                        crate::Response::ok(buffa_types::Empty::default())
+                    }),
+                )
+                .route_idempotent(
+                    "svc",
+                    "Get",
+                    crate::handler_fn(|_ctx: RequestContext, _req: buffa_types::Empty| async {
+                        crate::Response::ok(buffa_types::Empty::default())
+                    }),
+                ),
+        );
+
+        async fn call(
+            dispatcher: &Arc<Router>,
+            req: Request<Full<Bytes>>,
+        ) -> Result<Response<ConnectRpcBody>, ConnectError> {
+            handle_request(
+                Arc::clone(dispatcher),
+                req,
+                Limits::default(),
+                Arc::new(CompressionRegistry::new()),
+                &CompressionPolicy::default(),
+                &DeadlinePolicy::new(),
+                &[],
+            )
+            .await
+        }
+
+        // Non-idempotent unary procedure: Allow lists POST only. Includes a
+        // bodyless OPTIONS/HEAD with no Content-Type (the original 415 bug).
+        for (verb, with_ct) in [
+            (Method::DELETE, true),
+            (Method::PUT, true),
+            (Method::OPTIONS, false),
+            (Method::HEAD, false),
+        ] {
+            let mut builder = Request::builder().method(verb.clone()).uri("/svc/Unary");
+            if with_ct {
+                builder = builder.header(header::CONTENT_TYPE, "application/proto");
+            }
+            let req = builder.body(Full::new(Bytes::new())).unwrap();
+            let resp = call(&dispatcher, req)
+                .await
+                .expect("405 is returned as an Ok response");
+            assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED, "{verb}");
+            assert_eq!(resp.headers().get(header::ALLOW).unwrap(), "POST", "{verb}");
+        }
+
+        // Idempotent unary procedure: Allow also lists GET.
+        let req = Request::builder()
+            .method(Method::DELETE)
+            .uri("/svc/Get")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        let resp = call(&dispatcher, req).await.expect("405");
+        assert_eq!(resp.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(resp.headers().get(header::ALLOW).unwrap(), "GET, POST");
+
+        // Unknown path with a bad verb maps to 404 route-not-found.
+        let req = Request::builder()
+            .method(Method::DELETE)
+            .uri("/svc/Missing")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        let status = match call(&dispatcher, req).await {
+            Ok(resp) => resp.status(),
+            Err(err) => err.http_status(),
+        };
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    // A 415 advertises the content types the server accepts via `Accept-Post`
+    // (connect-go parity); a proto-only build never lists a JSON media type.
+    #[tokio::test]
+    async fn unknown_content_type_returns_415_with_accept_post() {
+        let dispatcher = Arc::new(Router::new());
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/svc/Method")
+            .header(header::CONTENT_TYPE, "application/foo")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        let resp = handle_request(
+            Arc::clone(&dispatcher),
+            req,
+            Limits::default(),
+            Arc::new(CompressionRegistry::new()),
+            &CompressionPolicy::default(),
+            &DeadlinePolicy::new(),
+            &[],
+        )
+        .await
+        .expect("415 is returned as an Ok response");
+        assert_eq!(resp.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+
+        let accept_post = resp
+            .headers()
+            .get("accept-post")
+            .expect("415 advertises Accept-Post")
+            .to_str()
+            .unwrap();
+        assert!(accept_post.contains("application/proto"), "{accept_post}");
+        #[cfg(feature = "json")]
+        assert!(accept_post.contains("application/json"), "{accept_post}");
+        #[cfg(not(feature = "json"))]
+        assert!(
+            !accept_post.contains("json"),
+            "proto-only must not advertise json: {accept_post}"
         );
     }
 

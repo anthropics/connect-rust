@@ -308,6 +308,9 @@ pub trait WellKnownTypesService: Send + Sync + 'static {
 /// Extension trait for registering a service implementation with a Router.
 ///
 /// This trait is automatically implemented for all types that implement the service trait.
+/// Prefer [`Router::add_service`](::connectrpc::Router::add_service) for
+/// top-down registration; `register` remains available for compatibility
+/// and cases where the service-first call shape is more convenient.
 ///
 /// # Example
 ///
@@ -449,6 +452,17 @@ impl<S: WellKnownTypesService> WellKnownTypesServiceExt for S {
                 },
             )
             .with_spec(WELL_KNOWN_TYPES_SERVICE_HEARTBEAT_SPEC)
+    }
+}
+/// Type-inference marker used by [`Router::add_service`](::connectrpc::Router::add_service).
+#[doc(hidden)]
+pub struct WellKnownTypesServiceRegisterMarker;
+impl<
+    S: WellKnownTypesService,
+> ::connectrpc::ServiceRegister<WellKnownTypesServiceRegisterMarker>
+for ::std::sync::Arc<S> {
+    fn register_service(self, router: ::connectrpc::Router) -> ::connectrpc::Router {
+        <S as WellKnownTypesServiceExt>::register(self, router)
     }
 }
 /// Monomorphic dispatcher for `WellKnownTypesService`.
