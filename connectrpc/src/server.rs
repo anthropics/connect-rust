@@ -197,44 +197,6 @@ const NANOS_PER_SEC: u128 = 1_000_000_000;
 /// [`Server::with_http2_keepalive_timeout`].
 pub const DEFAULT_HTTP2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
 
-/// HTTP/2 server keepalive PING configuration, threaded from the builder
-/// methods into the per-connection hyper setup.
-///
-/// Keepalive is disabled unless an `interval` is set; `timeout` is only
-/// consulted by hyper once an interval is active.
-#[derive(Clone, Copy, Debug)]
-struct Http2KeepAlive {
-    interval: Option<Duration>,
-    timeout: Duration,
-}
-
-impl Default for Http2KeepAlive {
-    fn default() -> Self {
-        Self {
-            interval: None,
-            timeout: DEFAULT_HTTP2_KEEPALIVE_TIMEOUT,
-        }
-    }
-}
-
-impl Http2KeepAlive {
-    /// Apply the configured keepalive settings to the hyper auto builder.
-    ///
-    /// A no-op when no interval is set, so hyper's default (keepalive
-    /// disabled) is preserved unless the user opts in. When enabled, a timer is
-    /// installed on the builder — hyper's HTTP/2 keepalive requires one and
-    /// panics the connection task without it.
-    fn apply(self, builder: &mut AutoBuilder<TokioExecutor>) {
-        if let Some(interval) = self.interval {
-            builder
-                .http2()
-                .timer(TokioTimer::new())
-                .keep_alive_interval(interval)
-                .keep_alive_timeout(self.timeout);
-        }
-    }
-}
-
 /// Default for HTTP/2 adaptive (BDP-based) flow-control window sizing.
 ///
 /// Enabled by default so connections over high bandwidth-delay-product links
@@ -250,19 +212,24 @@ impl Http2KeepAlive {
 /// adaptive sizing off).
 pub const DEFAULT_HTTP2_ADAPTIVE_WINDOW: bool = true;
 
-/// HTTP/2 flow-control window configuration applied to every accepted
-/// connection's hyper builder.
+/// HTTP/2 protocol configuration applied to every accepted connection's
+/// hyper builder via [`configure_http2`].
 ///
 /// `adaptive_window` and the explicit window sizes are mutually exclusive in
 /// hyper: enabling adaptive sizing overrides any explicit window size. The
 /// public setters keep them consistent by clearing the adaptive flag whenever
 /// an explicit size is supplied.
+///
+/// Keepalive PING is disabled unless `keepalive_interval` is set;
+/// `keepalive_timeout` is only consulted by hyper once an interval is active.
 #[derive(Clone, Copy, Debug)]
 struct Http2Config {
     adaptive_window: bool,
     initial_stream_window_size: Option<u32>,
     initial_connection_window_size: Option<u32>,
     max_concurrent_streams: Option<u32>,
+    keepalive_interval: Option<Duration>,
+    keepalive_timeout: Duration,
 }
 
 impl Default for Http2Config {
@@ -272,6 +239,8 @@ impl Default for Http2Config {
             initial_stream_window_size: None,
             initial_connection_window_size: None,
             max_concurrent_streams: None,
+            keepalive_interval: None,
+            keepalive_timeout: DEFAULT_HTTP2_KEEPALIVE_TIMEOUT,
         }
     }
 }
@@ -302,7 +271,6 @@ impl Http2Config {
 pub struct Server {
     service: ConnectRpcService,
     http1_keep_alive: bool,
-    http2_keepalive: Http2KeepAlive,
     #[cfg(feature = "server-tls")]
     tls_config: Option<Arc<rustls::ServerConfig>>,
     #[cfg(feature = "server-tls")]
@@ -319,7 +287,6 @@ impl Server {
         Self {
             service: ConnectRpcService::new(router),
             http1_keep_alive: true,
-            http2_keepalive: Http2KeepAlive::default(),
             #[cfg(feature = "server-tls")]
             tls_config: None,
             #[cfg(feature = "server-tls")]
@@ -336,7 +303,6 @@ impl Server {
         Self {
             service,
             http1_keep_alive: true,
-            http2_keepalive: Http2KeepAlive::default(),
             #[cfg(feature = "server-tls")]
             tls_config: None,
             #[cfg(feature = "server-tls")]
@@ -603,7 +569,7 @@ impl Server {
             !interval.is_zero(),
             "with_http2_keepalive_interval requires a non-zero duration",
         );
-        self.http2_keepalive.interval = Some(interval);
+        self.http2.keepalive_interval = Some(interval);
         self
     }
 
@@ -616,7 +582,7 @@ impl Server {
     /// is also set.
     #[must_use]
     pub fn with_http2_keepalive_timeout(mut self, timeout: Duration) -> Self {
-        self.http2_keepalive.timeout = timeout;
+        self.http2.keepalive_timeout = timeout;
         self
     }
 
@@ -668,7 +634,6 @@ impl Server {
             self.service,
             tls_acceptor,
             self.http1_keep_alive,
-            self.http2_keepalive,
             #[cfg(feature = "server-tls")]
             self.tls_handshake_timeout,
             None,
@@ -700,7 +665,6 @@ impl Server {
         BoundServer {
             listener,
             http1_keep_alive: true,
-            http2_keepalive: Http2KeepAlive::default(),
             #[cfg(feature = "server-tls")]
             tls_config: None,
             #[cfg(feature = "server-tls")]
@@ -721,7 +685,6 @@ impl Server {
         Ok(BoundServer {
             listener,
             http1_keep_alive: true,
-            http2_keepalive: Http2KeepAlive::default(),
             #[cfg(feature = "server-tls")]
             tls_config: None,
             #[cfg(feature = "server-tls")]
@@ -738,7 +701,6 @@ impl Server {
 pub struct BoundServer {
     listener: TcpListener,
     http1_keep_alive: bool,
-    http2_keepalive: Http2KeepAlive,
     #[cfg(feature = "server-tls")]
     tls_config: Option<Arc<rustls::ServerConfig>>,
     #[cfg(feature = "server-tls")]
@@ -987,7 +949,7 @@ impl BoundServer {
             !interval.is_zero(),
             "with_http2_keepalive_interval requires a non-zero duration",
         );
-        self.http2_keepalive.interval = Some(interval);
+        self.http2.keepalive_interval = Some(interval);
         self
     }
 
@@ -1000,7 +962,7 @@ impl BoundServer {
     /// is set — setting it without an interval has no effect.
     #[must_use]
     pub fn with_http2_keepalive_timeout(mut self, timeout: Duration) -> Self {
-        self.http2_keepalive.timeout = timeout;
+        self.http2.keepalive_timeout = timeout;
         self
     }
 
@@ -1083,7 +1045,6 @@ impl BoundServer {
             service,
             tls_acceptor,
             self.http1_keep_alive,
-            self.http2_keepalive,
             #[cfg(feature = "server-tls")]
             self.tls_handshake_timeout,
             None,
@@ -1120,7 +1081,6 @@ impl BoundServer {
             service,
             tls_acceptor,
             self.http1_keep_alive,
-            self.http2_keepalive,
             #[cfg(feature = "server-tls")]
             self.tls_handshake_timeout,
             Some(Box::pin(signal)),
@@ -1229,7 +1189,6 @@ async fn serve_accepted_stream<D, S>(
     peer: PeerInfo,
     service: Arc<WrappedService<D>>,
     http1_keep_alive: bool,
-    http2_keepalive: Http2KeepAlive,
     global_shutdown: watch::Receiver<bool>,
     connection_age: Option<ConnectionAgeConfig>,
     http2: Http2Config,
@@ -1272,7 +1231,6 @@ async fn serve_accepted_stream<D, S>(
     let mut builder = AutoBuilder::new(TokioExecutor::new());
     builder.http1().keep_alive(http1_keep_alive);
     configure_http2(&mut builder, http2);
-    http2_keepalive.apply(&mut builder);
 
     let conn = builder.serve_connection(TokioIo::new(io), svc).into_owned();
     serve_connection_with_lifecycle(
@@ -1332,6 +1290,15 @@ fn configure_http2(builder: &mut AutoBuilder<TokioExecutor>, config: Http2Config
     }
     if let Some(max) = config.max_concurrent_streams {
         http2.max_concurrent_streams(max);
+    }
+    // Keepalive is opt-in: when no interval is set, leave hyper's default
+    // (disabled) untouched. When enabled, a timer must be installed — hyper's
+    // HTTP/2 keepalive requires one and panics the connection task without it.
+    if let Some(interval) = config.keepalive_interval {
+        http2
+            .timer(TokioTimer::new())
+            .keep_alive_interval(interval)
+            .keep_alive_timeout(config.keepalive_timeout);
     }
 }
 
@@ -1561,7 +1528,6 @@ async fn serve_with_listener<D: Dispatcher>(
     service: ConnectRpcService<D>,
     tls_acceptor: MaybeTlsAcceptor,
     http1_keep_alive: bool,
-    http2_keepalive: Http2KeepAlive,
     #[cfg(feature = "server-tls")] tls_handshake_timeout: std::time::Duration,
     shutdown: ShutdownSignal,
     connection_age: Option<ConnectionAgeConfig>,
@@ -1570,8 +1536,8 @@ async fn serve_with_listener<D: Dispatcher>(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Mirror the connection-age diagnostic: a timeout without an interval is a
     // configuration mistake (keepalive stays disabled), so surface it.
-    if http2_keepalive.interval.is_none()
-        && http2_keepalive.timeout != DEFAULT_HTTP2_KEEPALIVE_TIMEOUT
+    if http2.keepalive_interval.is_none()
+        && http2.keepalive_timeout != DEFAULT_HTTP2_KEEPALIVE_TIMEOUT
     {
         tracing::debug!(
             "http2_keepalive_timeout is set but http2_keepalive_interval is not; \
@@ -1670,7 +1636,6 @@ async fn serve_with_listener<D: Dispatcher>(
                             peer,
                             service,
                             http1_keep_alive,
-                            http2_keepalive,
                             global_shutdown,
                             connection_age,
                             http2,
@@ -1706,7 +1671,6 @@ async fn serve_with_listener<D: Dispatcher>(
                 peer,
                 service,
                 http1_keep_alive,
-                http2_keepalive,
                 global_shutdown,
                 connection_age,
                 http2,
@@ -2425,9 +2389,9 @@ mod tests {
         // BoundServer: disabled by default, default timeout.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = Server::from_listener(listener);
-        assert_eq!(bound.http2_keepalive.interval, None);
+        assert_eq!(bound.http2.keepalive_interval, None);
         assert_eq!(
-            bound.http2_keepalive.timeout,
+            bound.http2.keepalive_timeout,
             DEFAULT_HTTP2_KEEPALIVE_TIMEOUT
         );
 
@@ -2436,25 +2400,25 @@ mod tests {
             .with_http2_keepalive_interval(Duration::from_secs(30))
             .with_http2_keepalive_timeout(Duration::from_secs(5));
         assert_eq!(
-            bound.http2_keepalive.interval,
+            bound.http2.keepalive_interval,
             Some(Duration::from_secs(30))
         );
-        assert_eq!(bound.http2_keepalive.timeout, Duration::from_secs(5));
+        assert_eq!(bound.http2.keepalive_timeout, Duration::from_secs(5));
 
         // Setting only the timeout leaves keepalive disabled (no interval).
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound =
             Server::from_listener(listener).with_http2_keepalive_timeout(Duration::from_secs(1));
-        assert_eq!(bound.http2_keepalive.interval, None);
-        assert_eq!(bound.http2_keepalive.timeout, Duration::from_secs(1));
+        assert_eq!(bound.http2.keepalive_interval, None);
+        assert_eq!(bound.http2.keepalive_timeout, Duration::from_secs(1));
     }
 
     #[test]
     fn server_http2_keepalive_builder_threads_through() {
         let server = Server::new(Router::new());
-        assert_eq!(server.http2_keepalive.interval, None);
+        assert_eq!(server.http2.keepalive_interval, None);
         assert_eq!(
-            server.http2_keepalive.timeout,
+            server.http2.keepalive_timeout,
             DEFAULT_HTTP2_KEEPALIVE_TIMEOUT
         );
 
@@ -2462,10 +2426,10 @@ mod tests {
             .with_http2_keepalive_interval(Duration::from_millis(500))
             .with_http2_keepalive_timeout(Duration::from_millis(250));
         assert_eq!(
-            server.http2_keepalive.interval,
+            server.http2.keepalive_interval,
             Some(Duration::from_millis(500))
         );
-        assert_eq!(server.http2_keepalive.timeout, Duration::from_millis(250));
+        assert_eq!(server.http2.keepalive_timeout, Duration::from_millis(250));
     }
 
     #[test]
@@ -2474,15 +2438,16 @@ mod tests {
         let _ = Server::new(Router::new()).with_http2_keepalive_interval(Duration::ZERO);
     }
 
-    /// `Http2KeepAlive::apply` is a no-op when no interval is set, so hyper's
-    /// default (keepalive disabled) is preserved unless the user opts in.
+    /// `configure_http2` leaves keepalive untouched when no interval is set, so
+    /// hyper's default (keepalive disabled) is preserved unless the user opts
+    /// in. There is no public getter on the builder, so this guards the opt-in
+    /// contract at the call boundary by exercising the default path without
+    /// panicking.
     #[test]
-    fn http2_keepalive_apply_is_noop_when_disabled() {
+    fn configure_http2_default_leaves_keepalive_disabled() {
+        assert!(Http2Config::default().keepalive_interval.is_none());
         let mut builder = AutoBuilder::new(TokioExecutor::new());
-        // The default config has no interval; applying it must not panic and
-        // leaves the builder usable. There is no public getter on the builder,
-        // so this guards the opt-in contract at the call boundary.
-        Http2KeepAlive::default().apply(&mut builder);
+        configure_http2(&mut builder, Http2Config::default());
     }
 
     /// A configured keepalive interval must reach hyper's HTTP/2 builder: once
