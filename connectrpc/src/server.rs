@@ -63,6 +63,18 @@
 //! when unset. Raise it for high-fan-in internal services, or lower it as a
 //! cheap hardening measure against less-trusted clients.
 //!
+//! # HTTP/2 Keepalive
+//!
+//! Use [`Server::with_http2_keepalive_interval`] (or the [`BoundServer`]
+//! equivalent) to make the server send HTTP/2 keepalive PING frames and
+//! reclaim dead or half-open peers. Disabled by default. Once an interval is
+//! set, an unacknowledged PING after
+//! [`with_http2_keepalive_timeout`](BoundServer::with_http2_keepalive_timeout)
+//! (20 seconds by default) closes the connection. This detects long-lived
+//! server-streaming or bidirectional connections that have gone silent (NAT
+//! timeout, client crash, network partition) instead of leaving them
+//! half-open until the OS TCP timeout.
+//!
 //! For transport and HTTP/2 knobs that [`Server`] does not expose, drive
 //! [`ConnectRpcService`] directly from a hyper accept loop. The crate guide's
 //! "Advanced transport configuration" section shows the `hyper_util` pattern.
@@ -88,6 +100,7 @@ use http::header;
 use http_body_util::Full;
 use hyper_util::rt::TokioExecutor;
 use hyper_util::rt::TokioIo;
+use hyper_util::rt::TokioTimer;
 use hyper_util::server::conn::auto::Builder as AutoBuilder;
 use hyper_util::server::graceful::GracefulConnection;
 use tokio::net::TcpListener;
@@ -174,6 +187,16 @@ const MAX_CONNECTION_AGE_JITTER_BASIS_POINTS: u128 = 10_000;
 const MAX_CONNECTION_AGE_JITTER_SPREAD_BASIS_POINTS: u128 = 1_000;
 const NANOS_PER_SEC: u128 = 1_000_000_000;
 
+/// Default timeout for an HTTP/2 keepalive PING acknowledgement.
+///
+/// Once an HTTP/2 keepalive interval is set via
+/// [`Server::with_http2_keepalive_interval`] (or the [`BoundServer`]
+/// equivalent), the server waits this long for the peer to acknowledge a PING
+/// before treating the connection as dead and closing it. Matches the
+/// 20-second default used by grpc-go, grpc-java, and tonic. Override with
+/// [`Server::with_http2_keepalive_timeout`].
+pub const DEFAULT_HTTP2_KEEPALIVE_TIMEOUT: Duration = Duration::from_secs(20);
+
 /// Default for HTTP/2 adaptive (BDP-based) flow-control window sizing.
 ///
 /// Enabled by default so connections over high bandwidth-delay-product links
@@ -189,19 +212,24 @@ const NANOS_PER_SEC: u128 = 1_000_000_000;
 /// adaptive sizing off).
 pub const DEFAULT_HTTP2_ADAPTIVE_WINDOW: bool = true;
 
-/// HTTP/2 flow-control window configuration applied to every accepted
-/// connection's hyper builder.
+/// HTTP/2 protocol configuration applied to every accepted connection's
+/// hyper builder via [`configure_http2`].
 ///
 /// `adaptive_window` and the explicit window sizes are mutually exclusive in
 /// hyper: enabling adaptive sizing overrides any explicit window size. The
 /// public setters keep them consistent by clearing the adaptive flag whenever
 /// an explicit size is supplied.
+///
+/// Keepalive PING is disabled unless `keepalive_interval` is set;
+/// `keepalive_timeout` is only consulted by hyper once an interval is active.
 #[derive(Clone, Copy, Debug)]
 struct Http2Config {
     adaptive_window: bool,
     initial_stream_window_size: Option<u32>,
     initial_connection_window_size: Option<u32>,
     max_concurrent_streams: Option<u32>,
+    keepalive_interval: Option<Duration>,
+    keepalive_timeout: Duration,
 }
 
 impl Default for Http2Config {
@@ -211,6 +239,8 @@ impl Default for Http2Config {
             initial_stream_window_size: None,
             initial_connection_window_size: None,
             max_concurrent_streams: None,
+            keepalive_interval: None,
+            keepalive_timeout: DEFAULT_HTTP2_KEEPALIVE_TIMEOUT,
         }
     }
 }
@@ -521,6 +551,38 @@ impl Server {
     #[must_use]
     pub fn with_max_requests_per_connection(mut self, max: NonZeroU64) -> Self {
         self.max_requests_per_connection = Some(max);
+        self
+    }
+
+    /// Set the interval between HTTP/2 keepalive PING frames.
+    ///
+    /// The one-step counterpart of
+    /// [`BoundServer::with_http2_keepalive_interval`]; see it for full
+    /// behaviour. Disabled by default.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `interval` is zero.
+    #[must_use]
+    pub fn with_http2_keepalive_interval(mut self, interval: Duration) -> Self {
+        assert!(
+            !interval.is_zero(),
+            "with_http2_keepalive_interval requires a non-zero duration",
+        );
+        self.http2.keepalive_interval = Some(interval);
+        self
+    }
+
+    /// Set how long to wait for an HTTP/2 keepalive PING acknowledgement.
+    ///
+    /// The one-step counterpart of
+    /// [`BoundServer::with_http2_keepalive_timeout`]. Defaults to
+    /// [`DEFAULT_HTTP2_KEEPALIVE_TIMEOUT`] (20 seconds) and has no effect
+    /// unless [`with_http2_keepalive_interval`](Self::with_http2_keepalive_interval)
+    /// is also set.
+    #[must_use]
+    pub fn with_http2_keepalive_timeout(mut self, timeout: Duration) -> Self {
+        self.http2.keepalive_timeout = timeout;
         self
     }
 
@@ -860,6 +922,50 @@ impl BoundServer {
         self
     }
 
+    /// Set the interval between HTTP/2 keepalive PING frames sent on an
+    /// otherwise idle connection.
+    ///
+    /// Disabled by default. When set, the server sends a PING after the
+    /// connection has been idle for `interval` and, if the peer fails to
+    /// acknowledge it within
+    /// [`with_http2_keepalive_timeout`](Self::with_http2_keepalive_timeout),
+    /// closes the connection. This detects dead or half-open peers (NAT
+    /// timeout, client crash, network partition) on long-lived
+    /// server-streaming or bidirectional connections that would otherwise sit
+    /// half-open until the OS TCP timeout, holding a task and file descriptor.
+    ///
+    /// Affects HTTP/2 connections only; HTTP/1.1 is unaffected. Note the
+    /// spelling difference from the HTTP/1.1 toggle
+    /// [`with_http1_keep_alive`](Self::with_http1_keep_alive) (`keep_alive`):
+    /// these HTTP/2 knobs use `keepalive` as a single word.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `interval` is zero — a zero interval would request an
+    /// unbounded PING flood rather than periodic keepalives.
+    #[must_use]
+    pub fn with_http2_keepalive_interval(mut self, interval: Duration) -> Self {
+        assert!(
+            !interval.is_zero(),
+            "with_http2_keepalive_interval requires a non-zero duration",
+        );
+        self.http2.keepalive_interval = Some(interval);
+        self
+    }
+
+    /// Set how long to wait for an HTTP/2 keepalive PING acknowledgement
+    /// before closing the connection.
+    ///
+    /// Defaults to [`DEFAULT_HTTP2_KEEPALIVE_TIMEOUT`] (20 seconds). This only
+    /// takes effect once
+    /// [`with_http2_keepalive_interval`](Self::with_http2_keepalive_interval)
+    /// is set — setting it without an interval has no effect.
+    #[must_use]
+    pub fn with_http2_keepalive_timeout(mut self, timeout: Duration) -> Self {
+        self.http2.keepalive_timeout = timeout;
+        self
+    }
+
     /// Start serving requests with the given router.
     ///
     /// Runs until the process is killed. For graceful shutdown use
@@ -1075,6 +1181,8 @@ struct RequestRetirementConfig {
 /// `peer` is inserted into every request's extensions so handlers can read
 /// the remote address (and TLS client cert chain, if any) via
 /// `ctx.peer_addr()` / `ctx.peer_certs()`.
+// Each accepted-connection knob is forwarded verbatim from the accept loop;
+// see the matching allow on `serve_with_listener`.
 #[allow(clippy::too_many_arguments)]
 async fn serve_accepted_stream<D, S>(
     io: S,
@@ -1182,6 +1290,15 @@ fn configure_http2(builder: &mut AutoBuilder<TokioExecutor>, config: Http2Config
     }
     if let Some(max) = config.max_concurrent_streams {
         http2.max_concurrent_streams(max);
+    }
+    // Keepalive is opt-in: when no interval is set, leave hyper's default
+    // (disabled) untouched. When enabled, a timer must be installed — hyper's
+    // HTTP/2 keepalive requires one and panics the connection task without it.
+    if let Some(interval) = config.keepalive_interval {
+        http2
+            .timer(TokioTimer::new())
+            .keep_alive_interval(interval)
+            .keep_alive_timeout(config.keepalive_timeout);
     }
 }
 
@@ -1417,6 +1534,17 @@ async fn serve_with_listener<D: Dispatcher>(
     http2: Http2Config,
     request_retirement: Option<RequestRetirementConfig>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Mirror the connection-age diagnostic: a timeout without an interval is a
+    // configuration mistake (keepalive stays disabled), so surface it.
+    if http2.keepalive_interval.is_none()
+        && http2.keepalive_timeout != DEFAULT_HTTP2_KEEPALIVE_TIMEOUT
+    {
+        tracing::debug!(
+            "http2_keepalive_timeout is set but http2_keepalive_interval is not; \
+             HTTP/2 keepalive stays disabled and the timeout has no effect",
+        );
+    }
+
     // Wrap the service with panic handling to convert panics to 500 responses
     let service: WrappedService<D> = ServiceBuilder::new()
         .layer(CatchPanicLayer::custom(panic_handler as fn(_) -> _))
@@ -2254,6 +2382,138 @@ mod tests {
             .expect("join error");
         assert!(result.is_ok(), "serve returned error: {result:?}");
         h2_task.await.expect("h2 connection task panicked").ok();
+    }
+
+    #[tokio::test]
+    async fn http2_keepalive_builder_defaults_and_overrides() {
+        // BoundServer: disabled by default, default timeout.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = Server::from_listener(listener);
+        assert_eq!(bound.http2.keepalive_interval, None);
+        assert_eq!(
+            bound.http2.keepalive_timeout,
+            DEFAULT_HTTP2_KEEPALIVE_TIMEOUT
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = Server::from_listener(listener)
+            .with_http2_keepalive_interval(Duration::from_secs(30))
+            .with_http2_keepalive_timeout(Duration::from_secs(5));
+        assert_eq!(
+            bound.http2.keepalive_interval,
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(bound.http2.keepalive_timeout, Duration::from_secs(5));
+
+        // Setting only the timeout leaves keepalive disabled (no interval).
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound =
+            Server::from_listener(listener).with_http2_keepalive_timeout(Duration::from_secs(1));
+        assert_eq!(bound.http2.keepalive_interval, None);
+        assert_eq!(bound.http2.keepalive_timeout, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn server_http2_keepalive_builder_threads_through() {
+        let server = Server::new(Router::new());
+        assert_eq!(server.http2.keepalive_interval, None);
+        assert_eq!(
+            server.http2.keepalive_timeout,
+            DEFAULT_HTTP2_KEEPALIVE_TIMEOUT
+        );
+
+        let server = Server::new(Router::new())
+            .with_http2_keepalive_interval(Duration::from_millis(500))
+            .with_http2_keepalive_timeout(Duration::from_millis(250));
+        assert_eq!(
+            server.http2.keepalive_interval,
+            Some(Duration::from_millis(500))
+        );
+        assert_eq!(server.http2.keepalive_timeout, Duration::from_millis(250));
+    }
+
+    #[test]
+    #[should_panic(expected = "non-zero duration")]
+    fn with_http2_keepalive_interval_rejects_zero() {
+        let _ = Server::new(Router::new()).with_http2_keepalive_interval(Duration::ZERO);
+    }
+
+    /// `configure_http2` leaves keepalive untouched when no interval is set, so
+    /// hyper's default (keepalive disabled) is preserved unless the user opts
+    /// in. There is no public getter on the builder, so this guards the opt-in
+    /// contract at the call boundary by exercising the default path without
+    /// panicking.
+    #[test]
+    fn configure_http2_default_leaves_keepalive_disabled() {
+        assert!(Http2Config::default().keepalive_interval.is_none());
+        let mut builder = AutoBuilder::new(TokioExecutor::new());
+        configure_http2(&mut builder, Http2Config::default());
+    }
+
+    /// A configured keepalive interval must reach hyper's HTTP/2 builder: once
+    /// a peer with an active stream stops acknowledging PING frames, the server
+    /// closes the connection after the keepalive timeout rather than leaving it
+    /// half-open indefinitely.
+    #[tokio::test]
+    async fn http2_keepalive_closes_unresponsive_peer() {
+        // The blocked handler keeps a stream active on the server; holding
+        // `_release_tx` keeps it blocked for the whole test.
+        let (router, entered_rx, _release_tx) = slow_router();
+        let bound = Server::bind("127.0.0.1:0")
+            .await
+            .unwrap()
+            .with_http2_keepalive_interval(Duration::from_millis(100))
+            .with_http2_keepalive_timeout(Duration::from_millis(100));
+        let addr = bound.local_addr().unwrap();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let serve = tokio::spawn(async move {
+            bound
+                .serve_with_graceful_shutdown(router, async {
+                    shutdown_rx.await.ok();
+                })
+                .await
+        });
+
+        let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let (mut send_request, mut h2_conn) = h2::client::handshake(tcp).await.unwrap();
+        let req = http::Request::builder()
+            .method(http::Method::POST)
+            .uri(format!("http://{addr}/svc/Slow"))
+            .header(header::CONTENT_TYPE, "application/proto")
+            .body(())
+            .unwrap();
+        // Keep the response future alive so the stream stays open server-side.
+        let (_resp, _) = send_request.send_request(req, true).unwrap();
+
+        // Drive the connection only until the handler starts — this flushes the
+        // request and opens an active server-side stream. After this point the
+        // client never polls the connection again, so it cannot acknowledge the
+        // server's keepalive PINGs, simulating a dead or half-open peer.
+        tokio::select! {
+            result = &mut h2_conn => panic!("connection closed before handler ran: {result:?}"),
+            entered = entered_rx => entered.expect("handler never entered"),
+        }
+
+        // Stay frozen for longer than interval + timeout. The server PINGs,
+        // gets no ack, and abruptly closes the connection.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // Resuming the driver, the connection future must resolve: the server
+        // has closed the connection. Without the keepalive being plumbed
+        // through, the blocked handler and frozen client would leave it open
+        // forever and this timeout would elapse.
+        let closed = tokio::time::timeout(Duration::from_secs(5), &mut h2_conn).await;
+        assert!(
+            closed.is_ok(),
+            "server did not close the unresponsive connection; keepalive PINGs were not plumbed through",
+        );
+
+        shutdown_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(5), serve)
+            .await
+            .expect("server did not shut down")
+            .expect("join error");
+        assert!(result.is_ok(), "serve returned error: {result:?}");
     }
 
     #[tokio::test]
