@@ -2594,8 +2594,10 @@ where
             Err(e) => return e.into(),
         };
 
-        let end_stream: ClientEndStreamResponse =
-            serde_json::from_slice(&end_stream_data).unwrap_or_default();
+        let end_stream = match parse_connect_end_stream(&end_stream_data) {
+            Ok(end_stream) => end_stream,
+            Err(e) => return e.into(),
+        };
 
         let trailers = end_stream.metadata.map(|metadata| {
             let mut trailers = http::HeaderMap::new();
@@ -3514,8 +3516,10 @@ fn parse_connect_client_stream_envelopes(
                 envelope.data
             };
 
-            let end_stream: ClientEndStreamResponse =
-                serde_json::from_slice(&end_stream_data).unwrap_or_default();
+            let end_stream = parse_connect_end_stream(&end_stream_data).map_err(|mut err| {
+                err.set_response_headers(resp_headers.clone());
+                err
+            })?;
 
             if let Some(metadata) = end_stream.metadata {
                 append_metadata_capped(&mut trailers, metadata);
@@ -3592,10 +3596,14 @@ fn parse_connect_client_stream_envelopes(
 }
 
 /// EndStreamResponse as received by the client.
-#[derive(serde::Deserialize, Default)]
+#[derive(serde::Deserialize)]
 struct ClientEndStreamResponse {
     error: Option<ClientEndStreamError>,
     metadata: Option<HashMap<String, Vec<String>>>,
+}
+
+fn parse_connect_end_stream(data: &[u8]) -> Result<ClientEndStreamResponse, ConnectError> {
+    serde_json::from_slice(data).map_err(|_| ConnectError::internal("invalid Connect END_STREAM"))
 }
 
 /// Error in the EndStreamResponse.
@@ -4356,6 +4364,52 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("42")
         );
+    }
+
+    /// A malformed Connect END_STREAM envelope is a wire error, not a clean
+    /// end: once the data message has been yielded, the next poll must return
+    /// `internal` instead of `Ok(None)`.
+    #[tokio::test]
+    async fn connect_malformed_end_stream_errors() {
+        use buffa::Message;
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+
+        let mut body = BytesMut::new();
+        body.extend_from_slice(
+            &Envelope::data(StringValue::from("hello").encode_to_bytes()).encode(),
+        );
+        body.extend_from_slice(&Envelope::end_stream(Bytes::from_static(b"{")).encode());
+        let mut stream: ServerStream<_, StringValueView<'static>> = ServerStream {
+            headers: http::HeaderMap::new(),
+            body: Full::new(body.freeze()),
+            buf: BytesMut::new(),
+            encoding: None,
+            compression: CompressionRegistry::new(),
+            codec_format: CodecFormat::Proto,
+            protocol: Protocol::Connect,
+            max_message_size: Some(1024),
+            deadline: None,
+            end: None,
+            saw_body_data: false,
+            _phantom: PhantomData,
+        };
+
+        let msg = stream
+            .message()
+            .await
+            .expect("data envelope should decode")
+            .expect("stream should yield the data message first");
+        assert_eq!(msg.reborrow().value, "hello");
+
+        let err = stream
+            .message()
+            .await
+            .expect_err("malformed END_STREAM must surface as Err, not Ok(None)");
+        assert_eq!(err.code, ErrorCode::Internal);
+        assert_eq!(err.message.as_deref(), Some("invalid Connect END_STREAM"));
+        assert!(stream.trailers().is_none());
+        assert_eq!(stream.error().map(|e| e.code), Some(ErrorCode::Internal));
     }
 
     /// Same contract for gRPC: an error in HTTP/2 trailers is a failed RPC
@@ -5931,6 +5985,34 @@ mod tests {
             "m",
             "END_STREAM metadata must be attached to the error as trailers"
         );
+    }
+
+    /// A malformed END_STREAM envelope after the response message is a
+    /// terminal protocol error, not a successful completion.
+    #[test]
+    fn client_stream_response_malformed_end_stream_errors() {
+        let registry = crate::compression::CompressionRegistry::new();
+
+        let mut body = Envelope::data(Bytes::from_static(b"only"))
+            .encode()
+            .to_vec();
+        body.extend_from_slice(&Envelope::end_stream(Bytes::from_static(b"{")).encode());
+
+        let mut resp_headers = http::HeaderMap::new();
+        resp_headers.insert("x-from-headers", http::HeaderValue::from_static("yes"));
+
+        let err = parse_connect_client_stream_envelopes(
+            Bytes::from(body),
+            &registry,
+            None,
+            1024,
+            &resp_headers,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::Internal);
+        assert_eq!(err.message.as_deref(), Some("invalid Connect END_STREAM"));
+        assert_eq!(err.response_headers().get("x-from-headers").unwrap(), "yes");
+        assert!(err.trailers().is_empty());
     }
 
     /// A body with no data envelope (END_STREAM only) is rejected.
