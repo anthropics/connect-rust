@@ -1970,18 +1970,7 @@ where
         return Err(err);
     }
 
-    // Validate response content-type starts with application/grpc
-    if let Some(ct) = resp_headers.get(http::header::CONTENT_TYPE) {
-        let ct_str = ct.to_str().unwrap_or("");
-        if !ct_str.starts_with("application/grpc") {
-            let mut err = ConnectError::new(
-                ErrorCode::Unknown,
-                format!("unexpected content-type: {ct_str}"),
-            );
-            err.set_response_headers(resp_headers);
-            return Err(err);
-        }
-    }
+    validate_grpc_response_content_type(&resp_headers, config)?;
 
     // Check for unsupported compression before reading the body
     let response_encoding = resp_headers
@@ -2173,6 +2162,65 @@ where
         body: message,
         trailers: grpc_trailers,
     })
+}
+
+/// Validate the `content-type` of a gRPC / gRPC-Web response against the
+/// client's configured protocol and codec, mirroring connect-go's
+/// `grpcValidateResponseContentType`.
+///
+/// Parameters (`; charset=...`) are stripped before comparison. The bare
+/// family types `application/grpc` / `application/grpc-web` are accepted for
+/// any codec, because the bare type means "proto by default" and proxies that
+/// synthesize trailers-only error responses (such as Envoy local replies)
+/// send it regardless of the request's subtype. A missing `content-type`
+/// header is also accepted, preserving this client's previous leniency. A
+/// same-family subtype that doesn't match the configured codec is rejected as
+/// `internal` (a broken server or intermediary); anything else is `unknown`
+/// (not a gRPC response at all), matching connect-go's classification.
+fn validate_grpc_response_content_type(
+    resp_headers: &http::HeaderMap,
+    config: &ClientConfig,
+) -> Result<(), ConnectError> {
+    debug_assert!(
+        matches!(config.protocol, Protocol::Grpc | Protocol::GrpcWeb),
+        "gRPC response content-type validation is only for gRPC/gRPC-Web"
+    );
+
+    let Some(resp_content_type) = resp_headers.get(http::header::CONTENT_TYPE) else {
+        return Ok(());
+    };
+
+    let ct = resp_content_type.to_str().unwrap_or("");
+    let ct_normalized = ct
+        .split_once(';')
+        .map_or(ct, |(media_type, _params)| media_type)
+        .trim();
+    let expected = config
+        .protocol
+        .response_content_type(config.codec_format, false);
+    let (bare, family_prefix) = match config.protocol {
+        Protocol::Grpc => ("application/grpc", "application/grpc+"),
+        Protocol::GrpcWeb => ("application/grpc-web", "application/grpc-web+"),
+        // Unreachable per the debug_assert above; treat as valid rather than
+        // misclassify a Connect response in release builds.
+        Protocol::Connect => return Ok(()),
+    };
+
+    if ct_normalized == expected || ct_normalized == bare {
+        return Ok(());
+    }
+
+    let code = if ct_normalized.starts_with(family_prefix) {
+        ErrorCode::Internal
+    } else {
+        ErrorCode::Unknown
+    };
+    let mut err = ConnectError::new(
+        code,
+        format!("unexpected content-type: {ct} (expected {expected})"),
+    );
+    err.set_response_headers(resp_headers.clone());
+    Err(err)
 }
 
 /// Terminal record for a client stream: why it ended and what trailing
@@ -5479,6 +5527,180 @@ mod tests {
         assert_eq!(
             response.trailers().get("grpc-status").unwrap(),
             http::HeaderValue::from_static("0")
+        );
+    }
+
+    #[tokio::test]
+    async fn grpc_unary_accepts_bare_application_grpc_with_parameters() {
+        use buffa::Message;
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+        use http_body::Frame;
+        use http_body_util::StreamBody;
+
+        let data = Envelope::data(StringValue::from("hi").encode_to_bytes()).encode();
+        let mut trailers = http::HeaderMap::new();
+        trailers.insert("grpc-status", "0".parse().unwrap());
+        let frames: Vec<Result<Frame<Bytes>, std::convert::Infallible>> =
+            vec![Ok(Frame::data(data)), Ok(Frame::trailers(trailers))];
+
+        let response = Response::builder()
+            .header(
+                http::header::CONTENT_TYPE,
+                "application/grpc; charset=utf-8",
+            )
+            .body(StreamBody::new(futures::stream::iter(frames)))
+            .unwrap();
+        let config =
+            ClientConfig::new("http://localhost".parse().unwrap()).with_protocol(Protocol::Grpc);
+
+        let response = parse_grpc_unary_response::<_, StringValueView<'static>>(
+            response,
+            &config,
+            &CallOptions::default(),
+            None,
+        )
+        .await
+        .expect("bare application/grpc must be accepted as proto");
+        assert_eq!(response.view().value, "hi");
+        assert_eq!(response.trailers().get("grpc-status").unwrap(), "0");
+    }
+
+    #[tokio::test]
+    async fn grpc_unary_rejects_grpc_web_content_type() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+
+        let response = Response::builder()
+            .header(http::header::CONTENT_TYPE, "application/grpc-web+proto")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        let config =
+            ClientConfig::new("http://localhost".parse().unwrap()).with_protocol(Protocol::Grpc);
+
+        let err = parse_grpc_unary_response::<_, StringValueView<'static>>(
+            response,
+            &config,
+            &CallOptions::default(),
+            None,
+        )
+        .await
+        .expect_err("gRPC client must reject gRPC-Web content type");
+        // Cross-family mismatches are `unknown` (not a gRPC response at all),
+        // matching connect-go; only same-family codec mismatches are
+        // `internal`.
+        assert_eq!(err.code, ErrorCode::Unknown);
+        assert_eq!(
+            err.message.as_deref(),
+            Some(
+                "unexpected content-type: application/grpc-web+proto (expected application/grpc+proto)"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn grpc_unary_rejects_mismatched_codec_content_type() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+
+        let response = Response::builder()
+            .header(http::header::CONTENT_TYPE, "application/grpc+json")
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+        let config =
+            ClientConfig::new("http://localhost".parse().unwrap()).with_protocol(Protocol::Grpc);
+
+        let err = parse_grpc_unary_response::<_, StringValueView<'static>>(
+            response,
+            &config,
+            &CallOptions::default(),
+            None,
+        )
+        .await
+        .expect_err("gRPC client must reject mismatched response codec");
+        assert_eq!(err.code, ErrorCode::Internal);
+        assert_eq!(
+            err.message.as_deref(),
+            Some(
+                "unexpected content-type: application/grpc+json (expected application/grpc+proto)"
+            )
+        );
+    }
+
+    #[test]
+    fn grpc_response_content_type_rejects_non_grpc_as_unknown() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(http::header::CONTENT_TYPE, "text/html".parse().unwrap());
+        let config =
+            ClientConfig::new("http://localhost".parse().unwrap()).with_protocol(Protocol::Grpc);
+
+        let err = validate_grpc_response_content_type(&headers, &config)
+            .expect_err("non-gRPC content type must be rejected");
+        assert_eq!(err.code, ErrorCode::Unknown);
+        assert_eq!(
+            err.message.as_deref(),
+            Some("unexpected content-type: text/html (expected application/grpc+proto)")
+        );
+        assert!(
+            err.response_headers()
+                .contains_key(http::header::CONTENT_TYPE)
+        );
+    }
+
+    #[test]
+    fn grpc_response_content_type_accepts_missing_header() {
+        let config =
+            ClientConfig::new("http://localhost".parse().unwrap()).with_protocol(Protocol::Grpc);
+        validate_grpc_response_content_type(&http::HeaderMap::new(), &config)
+            .expect("missing content-type must remain accepted");
+    }
+
+    #[test]
+    fn grpc_response_content_type_accepts_bare_for_json_codec() {
+        // Proxies that synthesize trailers-only error replies (e.g. Envoy)
+        // send bare `application/grpc` regardless of the request subtype, so
+        // the bare type must be accepted for every codec, as in connect-go.
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            "application/grpc".parse().unwrap(),
+        );
+        let config = ClientConfig::new("http://localhost".parse().unwrap())
+            .with_protocol(Protocol::Grpc)
+            .with_codec_format(CodecFormat::Json);
+        validate_grpc_response_content_type(&headers, &config)
+            .expect("bare application/grpc must be accepted for a json-codec client");
+    }
+
+    #[test]
+    fn grpc_web_response_content_type_accepts_bare() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            "application/grpc-web".parse().unwrap(),
+        );
+        let config =
+            ClientConfig::new("http://localhost".parse().unwrap()).with_protocol(Protocol::GrpcWeb);
+        validate_grpc_response_content_type(&headers, &config)
+            .expect("bare application/grpc-web must be accepted as proto");
+    }
+
+    #[test]
+    fn grpc_web_response_content_type_rejects_grpc_as_unknown() {
+        let mut headers = http::HeaderMap::new();
+        headers.insert(
+            http::header::CONTENT_TYPE,
+            "application/grpc+proto".parse().unwrap(),
+        );
+        let config =
+            ClientConfig::new("http://localhost".parse().unwrap()).with_protocol(Protocol::GrpcWeb);
+
+        let err = validate_grpc_response_content_type(&headers, &config)
+            .expect_err("gRPC-Web client must reject plain gRPC content type");
+        assert_eq!(err.code, ErrorCode::Unknown);
+        assert_eq!(
+            err.message.as_deref(),
+            Some(
+                "unexpected content-type: application/grpc+proto (expected application/grpc-web+proto)"
+            )
         );
     }
 
