@@ -12,6 +12,13 @@ increment the patch version.
 
 ### Added
 
+- **Configurable codegen client feature gate name** ([#181], [#194]).
+  `gate_client_feature=<name>` lets `protoc-gen-connect-rust` emit generated
+  client items behind `#[cfg(feature = "<name>")]` instead of the default
+  `client`; `connectrpc-build` exposes the same through
+  `Config::client_feature_name`. The existing bare `gate_client_feature`
+  option and `Config::gate_client_feature(true)` behavior continue to use
+  `client`.
 - **`Http2ConnectionBuilder` with establishment-timeout and HTTP/2 keep-alive
   knobs** ([#137], [#197]). `Http2Connection::builder()` is now the single
   configuration surface for every transport flavour (plaintext, TLS,
@@ -159,6 +166,8 @@ increment the patch version.
 [#172]: https://github.com/anthropics/connect-rust/pull/172
 [#178]: https://github.com/anthropics/connect-rust/issues/178
 [#180]: https://github.com/anthropics/connect-rust/issues/180
+[#181]: https://github.com/anthropics/connect-rust/issues/181
+[#194]: https://github.com/anthropics/connect-rust/pull/194
 [#197]: https://github.com/anthropics/connect-rust/pull/197
 [connectrpc/conformance#1104]: https://github.com/connectrpc/conformance/pull/1104
 
