@@ -148,6 +148,41 @@ pub fn full_body(b: Bytes) -> ClientBody {
     Full::new(b).map_err(|never| match never {}).boxed()
 }
 
+/// Walk an error's `source()` chain looking for a [`ConnectError`].
+///
+/// Boxed trait objects cannot appear as links in the chain: `Box<dyn Error>`
+/// does not itself implement `Error` (the blanket impl requires a sized
+/// type), so every link is a concrete error type and a plain `downcast_ref`
+/// at each link is exhaustive.
+fn find_connect_error_in_chain(
+    mut err: &(dyn std::error::Error + 'static),
+) -> Option<ConnectError> {
+    loop {
+        if let Some(connect_err) = err.downcast_ref::<ConnectError>() {
+            return Some(connect_err.clone());
+        }
+        err = err.source()?;
+    }
+}
+
+/// Map a [`ClientTransport::send`] failure into the error surfaced to the
+/// caller.
+///
+/// Policy: a [`ConnectError`] found anywhere in the transport error's source
+/// chain is returned verbatim (preserving its code, message, details, and
+/// attached metadata; any outer wrappers' `Display` context is dropped).
+/// Both built-in transports already produce classified `ConnectError`s
+/// directly, so for them `context` never appears in the surfaced error.
+/// Errors with no `ConnectError` in their chain are wrapped as `unavailable`
+/// with the `context` prefix.
+fn map_transport_send_error<E>(err: E, context: &str) -> ConnectError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
+    find_connect_error_in_chain(&err)
+        .unwrap_or_else(|| ConnectError::unavailable(format!("{context}: {err}")))
+}
+
 /// Extra slack added to client-side response buffer caps beyond the message
 /// size itself, to accommodate gRPC-Web trailer frames (which arrive as a
 /// separate 0x80-flagged body frame, not a standard envelope). 64 KiB is
@@ -189,6 +224,14 @@ pub trait ClientTransport: Clone + Send + Sync + 'static {
     /// The response body type.
     type ResponseBody: Body<Data = Bytes> + Send + 'static;
     /// The error type.
+    ///
+    /// If a [`ConnectError`] appears anywhere in this error's `source()`
+    /// chain (or is the error itself), the client call paths surface it to
+    /// the caller verbatim — code, message, details, and attached metadata —
+    /// discarding any outer wrappers' `Display` context. A transport can use
+    /// this to control the surfaced error classification, for example
+    /// returning `deadline_exceeded` from a timeout middleware. Errors with
+    /// no `ConnectError` in their chain are wrapped as `unavailable`.
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Send an HTTP request and receive a response.
@@ -1517,7 +1560,7 @@ where
         let response = transport
             .send(http_request)
             .await
-            .map_err(|e| ConnectError::unavailable(format!("request failed: {e}")))?;
+            .map_err(|e| map_transport_send_error(e, "request failed"))?;
 
         match config.protocol {
             Protocol::Connect => parse_connect_unary_response(response, config, &options).await,
@@ -1663,7 +1706,7 @@ where
         let response = transport
             .send(http_request)
             .await
-            .map_err(|e| ConnectError::unavailable(format!("GET request failed: {e}")))?;
+            .map_err(|e| map_transport_send_error(e, "GET request failed"))?;
 
         // Response format is identical to POST unary Connect.
         parse_connect_unary_response(response, config, &options).await
@@ -2699,7 +2742,7 @@ where
         let response = transport
             .send(http_request)
             .await
-            .map_err(|e| ConnectError::unavailable(format!("request failed: {e}")))?;
+            .map_err(|e| map_transport_send_error(e, "request failed"))?;
 
         make_server_stream(
             response,
@@ -3204,7 +3247,7 @@ where
     let response_task = tokio::spawn(async move {
         response_fut
             .await
-            .map_err(|e| ConnectError::unavailable(format!("request failed: {e}")))
+            .map_err(|e| map_transport_send_error(e, "request failed"))
     });
 
     Ok(BidiStream {
@@ -3305,7 +3348,7 @@ where
     let _ = crate::spawn_detached(async move {
         let result = response_fut
             .await
-            .map_err(|e| ConnectError::unavailable(format!("request failed: {e}")));
+            .map_err(|e| map_transport_send_error(e, "request failed"));
         let _ = resp_tx.send(result);
     });
 
@@ -4798,6 +4841,150 @@ mod tests {
             .await
             .expect_err("malformed-status error must be sticky");
         assert_eq!(again.code, ErrorCode::Unknown);
+    }
+
+    #[cfg(feature = "client")]
+    fn plaintext_client_with_https_base() -> (HttpClient, ClientConfig) {
+        let client = HttpClient::plaintext();
+        let config = ClientConfig::new("https://localhost:8080".parse().unwrap());
+        (client, config)
+    }
+
+    #[test]
+    fn transport_send_error_mapper_preserves_connect_error_in_source_chain() {
+        #[derive(Debug)]
+        struct WrappedTransportError(ConnectError);
+
+        impl std::fmt::Display for WrappedTransportError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "wrapped transport failure")
+            }
+        }
+
+        impl std::error::Error for WrappedTransportError {
+            fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                Some(&self.0)
+            }
+        }
+
+        let mapped = map_transport_send_error(
+            WrappedTransportError(ConnectError::invalid_argument("bad client config")),
+            "request failed",
+        );
+        assert_eq!(mapped.code, ErrorCode::InvalidArgument);
+        assert_eq!(mapped.message.as_deref(), Some("bad client config"));
+    }
+
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn call_unary_preserves_transport_connect_error() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+
+        let (client, config) = plaintext_client_with_https_base();
+        let err = call_unary::<_, StringValue, StringValueView<'static>>(
+            &client,
+            &config,
+            "test.Service",
+            "Unary",
+            StringValue::from("hello"),
+            CallOptions::default(),
+        )
+        .await
+        .expect_err("transport config error must surface from unary call");
+        assert_eq!(err.code, ErrorCode::InvalidArgument);
+        assert!(err.message.as_deref().unwrap().contains("with_tls"));
+    }
+
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn call_unary_get_preserves_transport_connect_error() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+
+        let (client, config) = plaintext_client_with_https_base();
+        let err = call_unary_get::<_, StringValue, StringValueView<'static>>(
+            &client,
+            &config,
+            "test.Service",
+            "UnaryGet",
+            StringValue::from("hello"),
+            CallOptions::default(),
+        )
+        .await
+        .expect_err("transport config error must surface from unary GET");
+        assert_eq!(err.code, ErrorCode::InvalidArgument);
+        assert!(err.message.as_deref().unwrap().contains("with_tls"));
+    }
+
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn call_server_stream_preserves_transport_connect_error() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+
+        let (client, config) = plaintext_client_with_https_base();
+        let err = call_server_stream::<_, StringValue, StringValueView<'static>>(
+            &client,
+            &config,
+            "test.Service",
+            "ServerStream",
+            StringValue::from("hello"),
+            CallOptions::default(),
+        )
+        .await
+        .expect_err("transport config error must surface from server stream");
+        assert_eq!(err.code, ErrorCode::InvalidArgument);
+        assert!(err.message.as_deref().unwrap().contains("with_tls"));
+    }
+
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn call_bidi_stream_preserves_transport_connect_error() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+
+        let (client, config) = plaintext_client_with_https_base();
+        let mut stream = call_bidi_stream::<_, StringValue, StringValueView<'static>>(
+            &client,
+            &config,
+            "test.Service",
+            "Bidi",
+            CallOptions::default(),
+        )
+        .await
+        .expect("constructing bidi stream should succeed until the first receive");
+        let err = stream
+            .message()
+            .await
+            .expect_err("transport config error must surface from bidi receive");
+        assert_eq!(err.code, ErrorCode::InvalidArgument);
+        assert!(err.message.as_deref().unwrap().contains("with_tls"));
+        assert_eq!(
+            stream.error().map(|e| e.code),
+            Some(ErrorCode::InvalidArgument)
+        );
+    }
+
+    #[cfg(feature = "client")]
+    #[tokio::test]
+    async fn call_client_stream_preserves_transport_connect_error() {
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+
+        let (client, config) = plaintext_client_with_https_base();
+        let err = call_client_stream::<_, StringValue, StringValueView<'static>>(
+            &client,
+            &config,
+            "test.Service",
+            "ClientStream",
+            [StringValue::from("hello")],
+            CallOptions::default(),
+        )
+        .await
+        .expect_err("transport config error must surface from client stream");
+        assert_eq!(err.code, ErrorCode::InvalidArgument);
+        assert!(err.message.as_deref().unwrap().contains("with_tls"));
     }
 
     #[cfg(feature = "client")]
