@@ -148,6 +148,12 @@ pub fn full_body(b: Bytes) -> ClientBody {
     Full::new(b).map_err(|never| match never {}).boxed()
 }
 
+/// Walk an error's `source()` chain looking for a [`ConnectError`].
+///
+/// Boxed trait objects cannot appear as links in the chain: `Box<dyn Error>`
+/// does not itself implement `Error` (the blanket impl requires a sized
+/// type), so every link is a concrete error type and a plain `downcast_ref`
+/// at each link is exhaustive.
 fn find_connect_error_in_chain(
     mut err: &(dyn std::error::Error + 'static),
 ) -> Option<ConnectError> {
@@ -159,12 +165,22 @@ fn find_connect_error_in_chain(
     }
 }
 
-fn map_transport_send_error<E>(err: E, message: &str) -> ConnectError
+/// Map a [`ClientTransport::send`] failure into the error surfaced to the
+/// caller.
+///
+/// Policy: a [`ConnectError`] found anywhere in the transport error's source
+/// chain is returned verbatim (preserving its code, message, details, and
+/// attached metadata; any outer wrappers' `Display` context is dropped).
+/// Both built-in transports already produce classified `ConnectError`s
+/// directly, so for them `context` never appears in the surfaced error.
+/// Errors with no `ConnectError` in their chain are wrapped as `unavailable`
+/// with the `context` prefix.
+fn map_transport_send_error<E>(err: E, context: &str) -> ConnectError
 where
     E: std::error::Error + Send + Sync + 'static,
 {
     find_connect_error_in_chain(&err)
-        .unwrap_or_else(|| ConnectError::unavailable(format!("{message}: {err}")))
+        .unwrap_or_else(|| ConnectError::unavailable(format!("{context}: {err}")))
 }
 
 /// Extra slack added to client-side response buffer caps beyond the message
@@ -208,6 +224,14 @@ pub trait ClientTransport: Clone + Send + Sync + 'static {
     /// The response body type.
     type ResponseBody: Body<Data = Bytes> + Send + 'static;
     /// The error type.
+    ///
+    /// If a [`ConnectError`] appears anywhere in this error's `source()`
+    /// chain (or is the error itself), the client call paths surface it to
+    /// the caller verbatim — code, message, details, and attached metadata —
+    /// discarding any outer wrappers' `Display` context. A transport can use
+    /// this to control the surfaced error classification, for example
+    /// returning `deadline_exceeded` from a timeout middleware. Errors with
+    /// no `ConnectError` in their chain are wrapped as `unavailable`.
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Send an HTTP request and receive a response.

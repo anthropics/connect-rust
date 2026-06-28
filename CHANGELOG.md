@@ -92,6 +92,19 @@ increment the patch version.
 
 ### Changed
 
+- **Client transport errors keep their original classification** ([#199]).
+  The client call paths previously wrapped every transport `send` failure as
+  `unavailable` with a `request failed:` prefix, including errors that were
+  already classified `ConnectError`s — so a local configuration mistake such
+  as pointing `HttpClient::plaintext()` at an `https://` URL looked like a
+  retryable outage. A `ConnectError` found anywhere in the transport error's
+  source chain is now surfaced verbatim (code, message, details, and attached
+  metadata; the `request failed:` prefix is gone for the built-in
+  transports). Transport errors with no `ConnectError` in their chain are
+  wrapped as `unavailable`, unchanged. Retry classifiers keyed on
+  `unavailable` keep matching genuine transport outages, and now correctly
+  stop retrying non-retryable local errors; anything matching on the
+  `request failed:` message prefix should match on the error code instead.
 - **Client connection establishment is bounded by default** ([#137], [#197]).
   `Http2Connection` and `HttpClient` now bound connection establishment to
   `DEFAULT_ESTABLISHMENT_TIMEOUT` (20s, matching grpc-go's `MinConnectTimeout`)
@@ -177,6 +190,7 @@ increment the patch version.
 [#192]: https://github.com/anthropics/connect-rust/pull/192
 [#194]: https://github.com/anthropics/connect-rust/pull/194
 [#197]: https://github.com/anthropics/connect-rust/pull/197
+[#199]: https://github.com/anthropics/connect-rust/pull/199
 [connectrpc/conformance#1104]: https://github.com/connectrpc/conformance/pull/1104
 
 ## [0.7.0] - 2026-06-10
