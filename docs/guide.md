@@ -1045,7 +1045,69 @@ Server::new(connect_router)
 The standalone `Server` handles HTTP/1.1, HTTP/2 with prior knowledge,
 and graceful shutdown. It's a single dispatcher with no per-route
 configuration, so add things like health endpoints either as RPC
-methods or by switching to the axum path.
+methods or by mounting the Connect service in axum.
+
+For connection and HTTP/2 settings that `Server` does not expose, drop
+down to raw hyper instead.
+
+### Advanced transport configuration
+
+The built-in `Server` exposes the common connection knobs, but it does
+not try to mirror every hyper option. For long-tail transport tuning —
+flow-control windows, HPACK table size, frame size, or exact keepalive
+behavior — drive the Connect service from your own hyper accept loop.
+
+Add `hyper-util` as a direct dependency with the `server-auto`,
+`service`, and `tokio` features enabled. Then wrap `ConnectRpcService`
+with `TowerToHyperService` before handing each connection to hyper's
+auto builder:
+
+```rust,ignore
+use connectrpc::{ConnectRpcService, Router};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder as AutoBuilder,
+    service::TowerToHyperService,
+};
+
+let connect_router = Router::new().add_service(greeter_service);
+let connect_service = ConnectRpcService::new(connect_router);
+
+let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
+let mut builder = AutoBuilder::new(TokioExecutor::new());
+builder
+    .http2()
+    .max_concurrent_streams(1_000)
+    .max_frame_size(1 << 20)
+    .adaptive_window(true);
+
+loop {
+    let (stream, _peer_addr) = listener.accept().await?;
+    let conn = builder
+        .serve_connection(
+            TokioIo::new(stream),
+            TowerToHyperService::new(connect_service.clone()),
+        )
+        .into_owned();
+
+    tokio::spawn(async move {
+        if let Err(err) = conn.await {
+            eprintln!("connection ended with error: {err}");
+        }
+    });
+}
+```
+
+This is the escape hatch for connection- and protocol-level settings.
+Axum remains the better fit for routing, health checks, ordinary HTTP
+endpoints, and request-level Tower middleware such as auth, timeouts,
+or rate limiting.
+
+Unlike the built-in `Server` and `connectrpc::axum::serve_tls`, a raw
+hyper loop does not automatically insert `PeerAddr` or `PeerCerts` into
+request extensions. If handlers call `ctx.peer_addr()` or
+`ctx.peer_certs()`, insert those extensions in your own Tower layer or
+service wrapper before the request reaches `ConnectRpcService`.
 
 ### TLS
 
@@ -1325,6 +1387,24 @@ let http = HttpClient::with_tls(tls_config);
 A `plaintext()` client refuses `https://` URIs and a `with_tls()`
 client refuses `http://` URIs - this catches misconfiguration loudly
 rather than silently downgrading.
+
+### Connection-establishment bounds and keep-alive
+
+Both `HttpClient` and `Http2Connection` bound connection establishment by default: a 20-second wall-clock budget on the whole DNS + TCP + TLS chain (`DEFAULT_ESTABLISHMENT_TIMEOUT`) with an additional 5-second per-address TCP bound (`DEFAULT_TCP_CONNECT_TIMEOUT`). Exceeding either surfaces as `ErrorCode::Unavailable`, so a server that accepts the TCP connection but stalls the TLS handshake cannot park `poll_ready` indefinitely. To adjust or opt out, use the `builder()` entry point on either transport:
+
+```rust
+use std::time::Duration;
+use connectrpc::client::Http2Connection;
+
+let conn = Http2Connection::builder()
+    .establishment_timeout(Duration::from_secs(10))
+    .keep_alive_interval(Duration::from_secs(30))
+    .keep_alive_while_idle(true)
+    .connect_tls(uri, tls_config)
+    .await?;
+```
+
+`Http2ConnectionBuilder` also proxies hyper's HTTP/2 keep-alive and flow-control knobs (`keep_alive_interval`, `keep_alive_timeout`, `keep_alive_while_idle`, `initial_stream_window_size`, `initial_connection_window_size`, `adaptive_window`), with a `TokioTimer` pre-wired so the keep-alive setters work without further plumbing. The `h2_settings(|b| ...)` escape hatch exposes the underlying hyper builder for knobs not surfaced directly. To restore the unbounded pre-0.8.0 behaviour, chain `.no_establishment_timeout().no_tcp_connect_timeout()`.
 
 ### ClientConfig
 
