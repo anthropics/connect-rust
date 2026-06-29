@@ -17,6 +17,7 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::format_ident;
 use quote::quote;
 
+use buffa_codegen::generated::descriptor::DescriptorProto;
 use buffa_codegen::generated::descriptor::FileDescriptorProto;
 use buffa_codegen::generated::descriptor::MethodDescriptorProto;
 use buffa_codegen::generated::descriptor::ServiceDescriptorProto;
@@ -76,6 +77,54 @@ pub struct Options {
     /// Cargo feature name used when [`Options::gate_client_feature`] is
     /// enabled (default: `"client"`).
     pub client_feature_name: String,
+
+    /// Which messages get generated `::connectrpc::Encodable` view impl
+    /// pairs (default: [`EncodableImpls::Outputs`], plugin opt
+    /// `encodable_impls=<all_messages|outputs>`).
+    ///
+    /// [`EncodableImpls::AllMessages`] emits the pair for **every message
+    /// defined in each targeted proto** and emits companion files even
+    /// for protos that declare no services. Use it in the generation run
+    /// of a crate that owns message types consumed by *other* crates'
+    /// services (a shared proto crate in a multi-crate split). Rust's
+    /// orphan rules require the `impl Encodable<M> for MView<'_>` blocks
+    /// to live in the crate that defines the view type, so a downstream
+    /// service crate cannot emit them itself — its stubs skip foreign
+    /// (`::`-rooted `extern_path`) types and handlers fall back to owned
+    /// returns or `PreEncoded::from_view`. With the impls in the owning
+    /// crate, those handlers can return views of the shared types
+    /// directly (proto codec only — like every view body, they answer
+    /// JSON-codec requests with `Unimplemented`).
+    ///
+    /// The emitting crate must depend on `connectrpc`, and the companion
+    /// files emitted for service-less packages must be mounted into the
+    /// module tree like any other plugin output — an unmounted companion
+    /// surfaces as a missing `Encodable` impl in the *consuming* crate.
+    /// Messages mapped away via
+    /// [`extern_paths`](CodeGenConfig::extern_paths) are skipped, but
+    /// only `::`-rooted targets are recognized as foreign — a
+    /// `crate::`-rooted re-export of another crate's types would still
+    /// get (orphan) impls. Synthetic map-entry messages never get impls.
+    ///
+    /// Enabling this in a service crate's own run is harmless (impls
+    /// dedup within one run), but do not enable it in two generation runs
+    /// that feed one crate and cover the same protos — each run emits its
+    /// own copy of the impls (E0119).
+    pub encodable_impls: EncodableImpls,
+}
+
+/// Which messages get generated `::connectrpc::Encodable` view impl
+/// pairs. See [`Options::encodable_impls`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum EncodableImpls {
+    /// Emit the impl pair only for the RPC output types of the targeted
+    /// protos' services (the default).
+    #[default]
+    Outputs,
+    /// Emit the impl pair for every message defined in each targeted
+    /// proto, including protos that declare no services.
+    AllMessages,
 }
 
 impl Default for Options {
@@ -86,6 +135,7 @@ impl Default for Options {
             buffa,
             gate_client_feature: false,
             client_feature_name: "client".into(),
+            encodable_impls: EncodableImpls::default(),
         }
     }
 }
@@ -135,12 +185,15 @@ fn is_valid_feature_name(name: &str) -> bool {
 }
 
 /// Emit one [`GeneratedFile`] per proto file in `file_to_generate` that
-/// declares at least one `service`. Files with no services produce no output.
+/// declares at least one `service`. Files with no services produce no
+/// output, unless [`Options::encodable_impls`] is [`EncodableImpls::AllMessages`] — then
+/// a file whose messages yield at least one `Encodable` impl pair gets a
+/// companion file too.
 fn emit_service_files(
     proto_file: &[FileDescriptorProto],
     file_to_generate: &[String],
     resolver: &TypeResolver<'_>,
-    gate_client_feature: bool,
+    options: &Options,
     client_feature_name: &str,
 ) -> Result<Vec<GeneratedFile>> {
     let mut out = Vec::new();
@@ -153,8 +206,9 @@ fn emit_service_files(
     //   because the stitcher mounts sibling files into one module.
     let mut batch = BatchState {
         colliding_aliases: collect_alias_collisions(proto_file, file_to_generate),
-        gate_client_feature,
+        gate_client_feature: options.gate_client_feature,
         client_feature_name: client_feature_name.to_string(),
+        all_message_encodable_impls: options.encodable_impls == EncodableImpls::AllMessages,
         ..BatchState::default()
     };
     for file_name in file_to_generate {
@@ -163,9 +217,23 @@ fn emit_service_files(
             .find(|f| f.name.as_deref() == Some(file_name.as_str()));
 
         if let Some(file) = file_desc
-            && !file.service.is_empty()
+            && (!file.service.is_empty()
+                || (batch.all_message_encodable_impls && !file.message_type.is_empty()))
         {
             let service_tokens = generate_connect_services(file, resolver, &mut batch)?;
+            if service_tokens.is_empty() {
+                // `all_messages` mode, but every message in this proto was
+                // either already emitted from another file (dedup) or
+                // extern-mapped to a foreign crate: nothing to write. A
+                // service-declaring proto always yields tokens (the trait
+                // alone guarantees it) — assert that invariant so a future
+                // regression can't silently drop a whole companion here.
+                debug_assert!(
+                    file.service.is_empty(),
+                    "service-declaring proto {file_name} produced no service tokens"
+                );
+                continue;
+            }
             let service_code = format_token_stream(&service_tokens)?;
             // Companion files are connect-rust's contribution alongside
             // buffa's per-proto outputs. The `.__connect.rs` suffix avoids
@@ -195,7 +263,10 @@ fn emit_service_files(
 /// ViewOneof, Ext, plus one PackageMod stitcher per package), with one
 /// [`GeneratedFileKind::Companion`] file per service-declaring proto
 /// (`<stem>.__connect.rs`) wired into the matching package stitcher via
-/// [`buffa_codegen::apply_companions`]. Callers write every file to disk
+/// [`buffa_codegen::apply_companions`]. Under
+/// [`EncodableImpls::AllMessages`], protos without services also get a
+/// companion (Encodable impls only) when at least one of their messages
+/// yields an impl pair. Callers write every file to disk
 /// and wire only the [`GeneratedFileKind::PackageMod`] entries into their
 /// module tree (the stitchers `include!` the rest).
 ///
@@ -229,7 +300,7 @@ pub fn generate_files(
         proto_file,
         file_to_generate,
         &resolver,
-        options.gate_client_feature,
+        options,
         client_feature_name,
     )?;
 
@@ -319,8 +390,10 @@ fn inline_companions_into_package_mods(
 /// Generate **only** ConnectRPC service bindings from proto descriptors.
 ///
 /// Returns one `<stem>.__connect.rs` `GeneratedFile` per proto file in
-/// `file_to_generate` that declares at least one `service`, plus one
-/// `<pkg>.mod.rs` stitcher per package. No message types.
+/// `file_to_generate` that declares at least one `service` — plus, under
+/// [`EncodableImpls::AllMessages`], per proto whose messages yield at
+/// least one `Encodable` impl pair — and one `<pkg>.mod.rs` stitcher per
+/// package with output. No message types.
 ///
 /// Service files carry [`GeneratedFileKind::Companion`] for symmetry with
 /// [`generate_files`], even though this path never calls
@@ -364,7 +437,7 @@ pub fn generate_services(
         proto_file,
         file_to_generate,
         &resolver,
-        options.gate_client_feature,
+        options,
         client_feature_name,
     )?;
 
@@ -431,7 +504,9 @@ pub fn generate_services(
 /// # Output
 ///
 /// Per proto with at least one `service`: a `<stem>.__connect.rs` content
-/// file with the service stubs. Per package with at least one such proto:
+/// file with the service stubs. Under `encodable_impls=all_messages`,
+/// also per proto whose messages yield at least one `Encodable` impl
+/// pair. Per package with at least one such proto:
 /// a `<pkg>.mod.rs` stitcher that `include!`s the content files. The
 /// stitcher filename intentionally matches `protoc-gen-buffa`'s, so run
 /// this plugin into a separate output directory and use
@@ -508,6 +583,24 @@ pub fn generate_services(
 ///   struct and its `impl` block with `#[cfg(feature = "client")]`.
 /// - `gate_client_feature=<name>` — same gate, but use `<name>` as the
 ///   Cargo feature instead of `client`.
+/// - `encodable_impls=all_messages` — emit the `::connectrpc::Encodable`
+///   view impl pair for every message defined in each targeted proto, not
+///   only for RPC output types, and emit a companion file even for protos
+///   that declare no services. Use this in the generation run of a crate
+///   that owns message types consumed by *other* crates' services (a
+///   shared proto crate in a multi-crate split): Rust's orphan rules
+///   require these impls to live in the crate that defines the view
+///   types, so downstream service crates skip them and their handlers
+///   would otherwise have to return owned messages or
+///   `PreEncoded::from_view`. (View bodies serve the proto codec only —
+///   JSON-codec requests get `Unimplemented`, as for any view body.)
+///   The emitting crate must depend on `connectrpc`, and the companion
+///   files for service-less packages must be mounted like any other
+///   plugin output — an unmounted companion surfaces as a missing
+///   `Encodable` impl in the *consuming* crate. Messages mapped to a
+///   foreign crate via `extern_path` are still skipped.
+///   `encodable_impls=outputs` is the explicit default. See
+///   [`Options::encodable_impls`].
 ///
 /// # Client-side cfg gate
 ///
@@ -574,6 +667,15 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                 }
                 options.gate_client_feature = true;
                 options.client_feature_name = feature.to_string();
+            } else if let Some(value) = opt.strip_prefix("encodable_impls=") {
+                match value.trim() {
+                    "all_messages" => options.encodable_impls = EncodableImpls::AllMessages,
+                    "outputs" => options.encodable_impls = EncodableImpls::Outputs,
+                    other => anyhow::bail!(
+                        "invalid encodable_impls value {other:?}, expected \
+                         `all_messages` or `outputs`"
+                    ),
+                }
             } else {
                 match opt {
                     "file_per_package" => options.buffa.file_per_package = true,
@@ -585,6 +687,7 @@ pub fn generate(request: &CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                         return Err(anyhow::anyhow!(
                             "unknown plugin option: {opt:?}. Supported: \
                              buffa_module=<rust_path>, extern_path=<proto>=<rust>, \
+                             encodable_impls=<all_messages|outputs>, \
                              file_per_package, strict_utf8_mapping, no_json, \
                              no_register_fn, gate_client_feature, \
                              gate_client_feature=<name>"
@@ -822,6 +925,10 @@ struct BatchState {
     gate_client_feature: bool,
     /// Mirrors [`Options::client_feature_name`].
     client_feature_name: String,
+    /// Mirrors [`Options::encodable_impls`] == `AllMessages`. Threaded here so
+    /// it propagates through the per-file emission loop without changing
+    /// every helper's signature.
+    all_message_encodable_impls: bool,
 }
 
 impl BatchState {
@@ -852,6 +959,9 @@ fn generate_connect_services(
     // `StreamMessage` to be usable.
     tokens.extend(generate_owned_view_aliases(file, resolver, batch)?);
     tokens.extend(generate_encodable_view_impls(file, resolver, batch)?);
+    if batch.all_message_encodable_impls {
+        tokens.extend(generate_all_message_encodable_impls(file, resolver, batch)?);
+    }
 
     for service in &file.service {
         tokens.extend(generate_service(file, service, resolver, batch)?);
@@ -1071,34 +1181,103 @@ fn generate_encodable_view_impls(
     for service in &file.service {
         for m in &service.method {
             let fqn = m.output_type.as_deref().unwrap_or("");
-            if !batch.encodable_seen.insert(fqn.to_string()) {
-                continue;
+            if let Some(impls) = encodable_impl_pair(fqn, package, resolver, batch)? {
+                out.extend(impls);
             }
-            let path = resolver.resolve_path(fqn, package)?;
-            // Skip foreign types (extern_path → `::crate_name::...`): the
-            // impl would be an orphan in the user's crate.
-            if path.starts_with("::") {
-                continue;
-            }
-            let owned = resolver.rust_type(fqn, package)?;
-            let view = resolver.rust_view_type(fqn, package)?;
-            out.extend(quote! {
-                impl ::connectrpc::Encodable<#owned> for #view<'_> {
-                    fn encode(&self, codec: ::connectrpc::CodecFormat)
-                        -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError>
-                    {
-                        ::connectrpc::__codegen::encode_view_body(self, codec)
-                    }
-                }
-                impl ::connectrpc::Encodable<#owned> for ::buffa::view::OwnedView<#view<'static>> {
-                    fn encode(&self, codec: ::connectrpc::CodecFormat)
-                        -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError>
-                    {
-                        ::connectrpc::__codegen::encode_view_body(self.reborrow(), codec)
-                    }
-                }
-            });
         }
+    }
+    Ok(out)
+}
+
+/// Emit the `Encodable<M>` impl pair (plain view + `OwnedView`) for one
+/// message FQN, or `None` when the pair was already emitted in this batch
+/// or the type resolves to a foreign (`::`-rooted `extern_path`) crate —
+/// there the impl would be an orphan.
+fn encodable_impl_pair(
+    fqn: &str,
+    package: &str,
+    resolver: &TypeResolver<'_>,
+    batch: &mut BatchState,
+) -> Result<Option<TokenStream>> {
+    if !batch.encodable_seen.insert(fqn.to_string()) {
+        return Ok(None);
+    }
+    let path = resolver.resolve_path(fqn, package)?;
+    // Skip foreign types (extern_path → `::crate_name::...`): the
+    // impl would be an orphan in the user's crate.
+    if path.starts_with("::") {
+        return Ok(None);
+    }
+    let owned = resolver.rust_type(fqn, package)?;
+    let view = resolver.rust_view_type(fqn, package)?;
+    Ok(Some(quote! {
+        impl ::connectrpc::Encodable<#owned> for #view<'_> {
+            fn encode(&self, codec: ::connectrpc::CodecFormat)
+                -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError>
+            {
+                ::connectrpc::__codegen::encode_view_body(self, codec)
+            }
+        }
+        impl ::connectrpc::Encodable<#owned> for ::buffa::view::OwnedView<#view<'static>> {
+            fn encode(&self, codec: ::connectrpc::CodecFormat)
+                -> ::std::result::Result<::buffa::bytes::Bytes, ::connectrpc::ConnectError>
+            {
+                ::connectrpc::__codegen::encode_view_body(self.reborrow(), codec)
+            }
+        }
+    }))
+}
+
+/// Emit `Encodable<M>` view impl pairs for **every message defined in
+/// `file`** (recursing into nested messages, skipping synthetic map
+/// entries), deduped through `batch.encodable_seen` against the
+/// service-output-driven emission in [`generate_encodable_view_impls`].
+///
+/// Driven by [`EncodableImpls::AllMessages`]: in a multi-crate
+/// layout this runs in the crate that owns the messages, so other crates'
+/// service stubs (which must skip these foreign types — orphan rules) can
+/// still hand views of them to the response path.
+fn generate_all_message_encodable_impls(
+    file: &FileDescriptorProto,
+    resolver: &TypeResolver<'_>,
+    batch: &mut BatchState,
+) -> Result<TokenStream> {
+    fn recurse(
+        msg: &DescriptorProto,
+        fqn_prefix: &str,
+        package: &str,
+        resolver: &TypeResolver<'_>,
+        batch: &mut BatchState,
+        out: &mut TokenStream,
+    ) -> Result<()> {
+        // Synthetic map-entry messages have no generated Rust type.
+        if msg
+            .options
+            .as_option()
+            .is_some_and(|o| o.map_entry.unwrap_or(false))
+        {
+            return Ok(());
+        }
+        let name = msg.name.as_deref().unwrap_or("");
+        let fqn = format!("{fqn_prefix}.{name}");
+        if let Some(impls) = encodable_impl_pair(&fqn, package, resolver, batch)? {
+            out.extend(impls);
+        }
+        for nested in &msg.nested_type {
+            recurse(nested, &fqn, package, resolver, batch, out)?;
+        }
+        Ok(())
+    }
+
+    let package = file.package.as_deref().unwrap_or("");
+    let fqn_prefix = if package.is_empty() {
+        String::new()
+    } else {
+        format!(".{package}")
+    };
+    let mut out = TokenStream::new();
+    for msg in &file.message_type {
+        recurse(msg, &fqn_prefix, package, resolver, batch, &mut out)?;
     }
     Ok(out)
 }
@@ -4058,6 +4237,362 @@ mod tests {
         assert!(
             err.to_string().contains("not a valid Cargo feature name"),
             "error should name the grammar problem: {err}"
+        );
+    }
+
+    /// Split-path options with `EncodableImpls::AllMessages` and the
+    /// `.` → `crate::proto` catch-all, mirroring a types-crate generation
+    /// run; `extra_extern` prepends higher-priority package mappings.
+    fn all_messages_options(extra_extern: &[(&str, &str)]) -> Options {
+        let mut options = Options::default();
+        options.encodable_impls = EncodableImpls::AllMessages;
+        for (proto, rust) in extra_extern {
+            options
+                .buffa
+                .extern_paths
+                .push(((*proto).into(), (*rust).into()));
+        }
+        options
+            .buffa
+            .extern_paths
+            .push((".".into(), "crate::proto".into()));
+        options
+    }
+
+    #[test]
+    fn all_messages_emits_impls_for_serviceless_proto() {
+        let file = FileDescriptorProto {
+            name: Some("common.proto".into()),
+            package: Some("common.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Shared".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let generated = generate_services(
+            std::slice::from_ref(&file),
+            &["common.proto".into()],
+            &all_messages_options(&[]),
+        )
+        .unwrap();
+
+        let companion = generated
+            .iter()
+            .find(|f| f.name == "common.__connect.rs")
+            .expect("service-less proto must get a companion under all_messages");
+        assert_eq!(
+            companion
+                .content
+                .matches("impl ::connectrpc::Encodable<")
+                .count(),
+            2,
+            "one view + one OwnedView impl: {}",
+            companion.content
+        );
+        assert!(
+            companion.content.contains("SharedView"),
+            "impls must target the view type: {}",
+            companion.content
+        );
+        // The package stitcher must wire the companion in.
+        let stitcher = generated
+            .iter()
+            .find(|f| f.kind == GeneratedFileKind::PackageMod)
+            .expect("package stitcher for the companion");
+        assert!(
+            stitcher
+                .content
+                .contains("include!(\"common.__connect.rs\")"),
+            "stitcher must include the companion: {}",
+            stitcher.content
+        );
+    }
+
+    #[test]
+    fn all_messages_skips_extern_mapped_proto_entirely() {
+        // The whole package is mapped to a foreign crate: every impl would
+        // be an orphan there, so no impls — and no empty companion file.
+        let file = FileDescriptorProto {
+            name: Some("common.proto".into()),
+            package: Some("common.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Shared".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let generated = generate_services(
+            std::slice::from_ref(&file),
+            &["common.proto".into()],
+            &all_messages_options(&[(".common.v1", "::common_protos::proto::common::v1")]),
+        )
+        .unwrap();
+        assert!(
+            generated.is_empty(),
+            "foreign-mapped proto must produce no files: {:?}",
+            generated.iter().map(|f| &f.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn all_messages_dedups_with_service_output_impls() {
+        // PingResp is both an RPC output (outputs-driven emission) and a
+        // file-local message (all-messages emission): exactly one impl
+        // pair must survive, plus PingReq's pair from all-messages.
+        let file = minimal_file(
+            Some("example.v1"),
+            ".example.v1.PingReq",
+            ".example.v1.PingResp",
+            &["PingReq", "PingResp"],
+        );
+        let generated = generate_services(
+            std::slice::from_ref(&file),
+            &["ping.proto".into()],
+            &all_messages_options(&[]),
+        )
+        .unwrap();
+        let companion = generated
+            .iter()
+            .find(|f| f.name == "ping.__connect.rs")
+            .expect("service companion");
+        // Count impl bodies (one `encode_view_body` call each) rather than
+        // `impl ::connectrpc::Encodable<` — that string also appears in the
+        // trait method's return-position bound.
+        assert_eq!(
+            companion.content.matches("encode_view_body").count(),
+            4,
+            "exactly one impl pair per message (PingReq + PingResp), \
+             no E0119 duplicates: {}",
+            companion.content
+        );
+        assert!(companion.content.contains("PingReqView"));
+        assert!(companion.content.contains("PingRespView"));
+    }
+
+    #[test]
+    fn all_messages_recurses_nested_and_skips_map_entries() {
+        use buffa_codegen::generated::descriptor::MessageOptions;
+        let file = FileDescriptorProto {
+            name: Some("nested.proto".into()),
+            package: Some("example.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Outer".into()),
+                nested_type: vec![
+                    DescriptorProto {
+                        name: Some("Inner".into()),
+                        ..Default::default()
+                    },
+                    DescriptorProto {
+                        name: Some("LabelsEntry".into()),
+                        options: buffa::MessageField::some(MessageOptions {
+                            map_entry: Some(true),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let generated = generate_services(
+            std::slice::from_ref(&file),
+            &["nested.proto".into()],
+            &all_messages_options(&[]),
+        )
+        .unwrap();
+        let companion = generated
+            .iter()
+            .find(|f| f.name == "nested.__connect.rs")
+            .expect("companion with nested-message impls");
+        assert_eq!(
+            companion
+                .content
+                .matches("impl ::connectrpc::Encodable<")
+                .count(),
+            4,
+            "impl pairs for Outer and Outer.Inner only: {}",
+            companion.content
+        );
+        assert!(
+            companion.content.contains("InnerView"),
+            "nested message must get impls: {}",
+            companion.content
+        );
+        assert!(
+            !companion.content.contains("LabelsEntry"),
+            "synthetic map entries must not get impls: {}",
+            companion.content
+        );
+    }
+
+    #[test]
+    fn all_messages_file_per_package_collapses_serviceless_output() {
+        // Split path + file_per_package: a service-less proto's impls must
+        // land in the single `<dotted.pkg>.rs` PackageMod, with no
+        // companion or stitcher siblings.
+        let file = FileDescriptorProto {
+            name: Some("common.proto".into()),
+            package: Some("common.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Shared".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut options = all_messages_options(&[]);
+        options.buffa.file_per_package = true;
+        let generated = generate_services(
+            std::slice::from_ref(&file),
+            &["common.proto".into()],
+            &options,
+        )
+        .unwrap();
+        assert_eq!(generated.len(), 1, "exactly one PackageMod file");
+        let pkg_mod = &generated[0];
+        assert_eq!(pkg_mod.kind, GeneratedFileKind::PackageMod);
+        assert_eq!(pkg_mod.name, "common.v1.rs");
+        assert_eq!(
+            pkg_mod.content.matches("encode_view_body").count(),
+            2,
+            "impl pair inlined into the package file: {}",
+            pkg_mod.content
+        );
+    }
+
+    #[test]
+    fn generate_files_all_messages_file_per_package_inlines_serviceless_impls() {
+        // Unified path + file_per_package: the service-less proto's impls
+        // must be inlined into buffa's `<dotted.pkg>.rs` PackageMod (this
+        // is the first flow that reaches the inlining helper with a
+        // package that has no services).
+        let file = FileDescriptorProto {
+            name: Some("common.proto".into()),
+            package: Some("common.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Shared".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut options = Options::default();
+        options.encodable_impls = EncodableImpls::AllMessages;
+        options.buffa.file_per_package = true;
+        let generated = generate_files(
+            std::slice::from_ref(&file),
+            &["common.proto".into()],
+            &options,
+        )
+        .unwrap();
+        assert!(
+            !generated
+                .iter()
+                .any(|f| f.kind == GeneratedFileKind::Companion),
+            "file_per_package must not leave sibling Companion files"
+        );
+        let pkg_mod = generated
+            .iter()
+            .find(|f| f.kind == GeneratedFileKind::PackageMod && f.package == "common.v1")
+            .expect("PackageMod for common.v1");
+        assert_eq!(
+            pkg_mod.content.matches("encode_view_body").count(),
+            2,
+            "impl pair inlined into the package file: {}",
+            pkg_mod.content
+        );
+    }
+
+    #[test]
+    fn plugin_accepts_encodable_impls_option() {
+        let file = FileDescriptorProto {
+            name: Some("common.proto".into()),
+            package: Some("common.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Shared".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let request = CodeGeneratorRequest {
+            parameter: Some("buffa_module=crate::proto,encodable_impls=all_messages".into()),
+            file_to_generate: vec!["common.proto".into()],
+            proto_file: vec![file],
+            ..Default::default()
+        };
+        let response = generate(&request).expect("encodable_impls=all_messages is recognized");
+        let companion = response
+            .file
+            .iter()
+            .find(|f| f.name.as_deref() == Some("common.__connect.rs"))
+            .expect("plugin should emit impls for a service-less proto");
+        assert!(
+            companion
+                .content
+                .as_deref()
+                .unwrap_or_default()
+                .contains("impl ::connectrpc::Encodable<"),
+        );
+    }
+
+    #[test]
+    fn plugin_rejects_invalid_encodable_impls_value() {
+        let request = CodeGeneratorRequest {
+            parameter: Some("buffa_module=crate::proto,encodable_impls=bogus".into()),
+            file_to_generate: vec![],
+            proto_file: vec![],
+            ..Default::default()
+        };
+        let err = generate(&request).expect_err("bogus encodable_impls value must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("invalid encodable_impls value"),
+            "error should describe the bad value: {msg}"
+        );
+    }
+
+    #[test]
+    fn generate_files_all_messages_wires_serviceless_companion() {
+        // Unified path: the message-only proto's companion must be wired
+        // into its package stitcher like any service companion.
+        let file = FileDescriptorProto {
+            name: Some("common.proto".into()),
+            package: Some("common.v1".into()),
+            message_type: vec![DescriptorProto {
+                name: Some("Shared".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let mut options = Options::default();
+        options.encodable_impls = EncodableImpls::AllMessages;
+        let generated = generate_files(
+            std::slice::from_ref(&file),
+            &["common.proto".into()],
+            &options,
+        )
+        .unwrap();
+        let companion = generated
+            .iter()
+            .find(|f| f.kind == GeneratedFileKind::Companion)
+            .expect("companion for service-less proto in unified mode");
+        assert_eq!(
+            companion
+                .content
+                .matches("impl ::connectrpc::Encodable<")
+                .count(),
+            2
+        );
+        let stitcher = generated
+            .iter()
+            .find(|f| f.kind == GeneratedFileKind::PackageMod && f.package == "common.v1")
+            .expect("package stitcher");
+        assert!(
+            stitcher
+                .content
+                .contains(&format!("include!(\"{}\")", companion.name)),
+            "stitcher must include the companion: {}",
+            stitcher.content
         );
     }
 
