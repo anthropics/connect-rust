@@ -4244,8 +4244,10 @@ mod tests {
     /// `.` → `crate::proto` catch-all, mirroring a types-crate generation
     /// run; `extra_extern` prepends higher-priority package mappings.
     fn all_messages_options(extra_extern: &[(&str, &str)]) -> Options {
-        let mut options = Options::default();
-        options.encodable_impls = EncodableImpls::AllMessages;
+        let mut options = Options {
+            encodable_impls: EncodableImpls::AllMessages,
+            ..Options::default()
+        };
         for (proto, rust) in extra_extern {
             options
                 .buffa
@@ -4476,8 +4478,10 @@ mod tests {
             }],
             ..Default::default()
         };
-        let mut options = Options::default();
-        options.encodable_impls = EncodableImpls::AllMessages;
+        let mut options = Options {
+            encodable_impls: EncodableImpls::AllMessages,
+            ..Options::default()
+        };
         options.buffa.file_per_package = true;
         let generated = generate_files(
             std::slice::from_ref(&file),
@@ -4564,8 +4568,10 @@ mod tests {
             }],
             ..Default::default()
         };
-        let mut options = Options::default();
-        options.encodable_impls = EncodableImpls::AllMessages;
+        let options = Options {
+            encodable_impls: EncodableImpls::AllMessages,
+            ..Options::default()
+        };
         let generated = generate_files(
             std::slice::from_ref(&file),
             &["common.proto".into()],
