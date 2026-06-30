@@ -468,7 +468,8 @@ retained request bytes (the request itself is borrowed and cannot
 outlive the call, so it is re-decoded - a Bytes refcount bump plus a
 decode walk, with no per-field copy). Codegen emits
 `OwnedFooView` aliases and `impl Encodable<Foo> for OwnedFooView` per
-RPC type. (When two RPC types in the same package would alias to the
+RPC type (or, with `encodable_impls=all_messages`, the impls for every
+message in the generated crate - the aliases stay RPC-scoped). (When two RPC types in the same package would alias to the
 same `OwnedFooView` name — e.g. a local `MyMessage` plus an imported
 `api.v1.foo.bar.MyMessage` — the alias is suppressed for both; spell
 the inlined `OwnedView<…View<'static>>` form for those types.) `connectrpc::MaybeBorrowed` covers the conditional case:
@@ -500,8 +501,13 @@ The `'a` on the trait method also lets the body borrow from `&self`
 codec - JSON clients receive `unimplemented`; see
 [`MaybeBorrowed`'s codec note](https://docs.rs/connectrpc/latest/connectrpc/enum.MaybeBorrowed.html#codec-compatibility).
 View-body impls are not emitted for output types mapped via
-`extern_path` (the impl would be an orphan); return owned for WKT or
-extern outputs.
+`extern_path` (the impl would be an orphan in the consuming crate) -
+the impls must live in the crate that owns the type. If you generate
+that crate yourself, regenerate it with `encodable_impls=all_messages`
+(see the `protoc-gen-connect-rust` option docs) and views of its types
+become returnable from any crate. For types you don't generate (e.g.
+well-known types from `buffa-types`), return the owned message or use
+`PreEncoded::from_view`.
 
 ### Returning errors
 

@@ -43,6 +43,7 @@ use buffa_codegen::generated::descriptor::FileDescriptorSet;
 use connectrpc_codegen::codegen::{self, Options};
 
 pub use connectrpc_codegen::codegen::CodeGenConfig;
+pub use connectrpc_codegen::codegen::EncodableImpls;
 
 /// How to acquire a `FileDescriptorSet` from `.proto` files.
 #[derive(Debug, Clone, Default)]
@@ -204,6 +205,30 @@ impl Config {
     #[must_use]
     pub fn gate_client_feature(mut self, enabled: bool) -> Self {
         self.options.gate_client_feature = enabled;
+        self
+    }
+
+    /// Select which messages get `::connectrpc::Encodable` view impls
+    /// (default: [`EncodableImpls::Outputs`] — RPC output types only).
+    ///
+    /// Pass [`EncodableImpls::AllMessages`] when this crate's message
+    /// types are consumed by *other* crates' services (a shared proto
+    /// crate in a multi-crate split). Rust's orphan rules require the
+    /// `impl Encodable<M> for MView<'_>` blocks to live in the crate that
+    /// defines the view types, so a downstream service crate cannot emit
+    /// them itself — without this, its handlers must return owned messages
+    /// or `PreEncoded::from_view` for these types instead of views.
+    ///
+    /// Note that `connectrpc-build` drives the **unified** generation path,
+    /// which ignores `extern_paths` — the consuming service crates of the
+    /// split must be generated through the `protoc-gen-connect-rust` buf
+    /// plugin with `extern_path=<pkg>=::this_crate::...` so their stubs
+    /// reference this crate's types. Mirrors the plugin's
+    /// `encodable_impls=all_messages` option; see
+    /// [`connectrpc_codegen::codegen::Options::encodable_impls`].
+    #[must_use]
+    pub fn encodable_impls(mut self, mode: EncodableImpls) -> Self {
+        self.options.encodable_impls = mode;
         self
     }
 
@@ -726,6 +751,7 @@ mod tests {
             .emit_register_fn(false)
             .gate_client_feature(true)
             .client_feature_name("grpc-client")
+            .encodable_impls(EncodableImpls::AllMessages)
             .include_file("_inc.rs");
         assert_eq!(cfg.files.len(), 2);
         assert_eq!(cfg.includes.len(), 1);
@@ -734,6 +760,7 @@ mod tests {
         assert!(!cfg.options.buffa.emit_register_fn);
         assert!(cfg.options.gate_client_feature);
         assert_eq!(cfg.options.client_feature_name, "grpc-client");
+        assert_eq!(cfg.options.encodable_impls, EncodableImpls::AllMessages);
         assert_eq!(cfg.include_file.as_deref(), Some("_inc.rs"));
     }
 
@@ -758,6 +785,10 @@ mod tests {
         // have to declare a `client` Cargo feature unless they opt in.
         assert!(!cfg.options.gate_client_feature);
         assert_eq!(cfg.options.client_feature_name, "client");
+        // `encodable_impls` defaults to Outputs — impls are emitted for
+        // RPC output types only unless the crate opts in as a shared
+        // proto crate.
+        assert_eq!(cfg.options.encodable_impls, EncodableImpls::Outputs);
         assert!(cfg.emit_rerun_directives);
         assert!(matches!(cfg.descriptor_source, DescriptorSource::Protoc));
     }

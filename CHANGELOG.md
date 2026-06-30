@@ -12,6 +12,17 @@ increment the patch version.
 
 ### Added
 
+- **`encodable_impls=all_messages` codegen option** ([#145], [#205]).
+  `protoc-gen-connect-rust` can now emit the `::connectrpc::Encodable` view
+  impl pair for every message defined in the targeted protos (not only RPC
+  output types), including companion files for protos that declare no
+  services. This is the building block for multi-crate generated-code
+  layouts: Rust's orphan rules require the impls to live in the crate that
+  owns the message types, so generating a shared proto crate with this
+  option lets other crates' handlers return views of those types directly
+  instead of falling back to owned messages or `PreEncoded::from_view`.
+  `connectrpc-build` exposes the same through
+  `Config::encodable_impls(EncodableImpls::AllMessages)`.
 - **Configurable codegen client feature gate name** ([#181], [#194]).
   `gate_client_feature=<name>` lets `protoc-gen-connect-rust` emit generated
   client items behind `#[cfg(feature = "<name>")]` instead of the default
@@ -193,6 +204,8 @@ increment the patch version.
   returns `Err(internal)` (see [#168]); complete responses are unchanged.
 
 [#137]: https://github.com/anthropics/connect-rust/issues/137
+[#145]: https://github.com/anthropics/connect-rust/issues/145
+[#205]: https://github.com/anthropics/connect-rust/pull/205
 [#151]: https://github.com/anthropics/connect-rust/issues/151
 [#163]: https://github.com/anthropics/connect-rust/pull/163
 [#164]: https://github.com/anthropics/connect-rust/pull/164
