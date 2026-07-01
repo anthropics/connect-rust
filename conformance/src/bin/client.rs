@@ -550,8 +550,7 @@ async fn do_unary_call(
                 let request = UnaryRequest::decode_from_slice(proto_bytes)
                     .map_err(|e| ConnectError::internal(format!("decode request: {e}")))?;
                 let resp = do_call!(UnaryRequest, UnaryResponseView<'static>, request);
-                let (headers, message, trailers) = resp.into_parts();
-                let message = message.to_owned_message();
+                let (headers, message, trailers) = resp.into_owned_parts();
                 let payload = if message.payload.is_set() {
                     message.payload.as_option().unwrap().clone()
                 } else {
@@ -568,8 +567,7 @@ async fn do_unary_call(
                     IdempotentUnaryResponseView<'static>,
                     request
                 );
-                let (headers, message, trailers) = resp.into_parts();
-                let message = message.to_owned_message();
+                let (headers, message, trailers) = resp.into_owned_parts();
                 let payload = if message.payload.is_set() {
                     message.payload.as_option().unwrap().clone()
                 } else {
@@ -582,8 +580,7 @@ async fn do_unary_call(
                 use connectrpc_conformance::UnaryRequest;
                 let request = UnaryRequest::decode_from_slice(proto_bytes).unwrap_or_default();
                 let resp = do_call!(UnaryRequest, UnaryResponseView<'static>, request);
-                let (headers, message, trailers) = resp.into_parts();
-                let message = message.to_owned_message();
+                let (headers, message, trailers) = resp.into_owned_parts();
                 let payload = if message.payload.is_set() {
                     message.payload.as_option().unwrap().clone()
                 } else {
@@ -1045,8 +1042,7 @@ async fn do_client_stream_call(
             &transport, &config, service, method, requests, options,
         )
         .await?;
-        let (headers, message, trailers) = resp.into_parts();
-        let message = message.to_owned_message();
+        let (headers, message, trailers) = resp.into_owned_parts();
         let payload = if message.payload.is_set() {
             message.payload.as_option().unwrap().clone()
         } else {

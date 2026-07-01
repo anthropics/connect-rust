@@ -497,6 +497,13 @@ pub type ServiceResult<B> = Result<Response<B>, ConnectError>;
 /// handlers that aggregate inbound messages.
 pub type ServiceStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> + Send>>;
 
+/// The inbound request stream a client/bidi-streaming handler receives:
+/// [`ServiceStream`] of [`StreamMessage`](crate::StreamMessage) items.
+///
+/// Pure sugar for the composed type — generated handler traits spell their
+/// parameters with this alias so signatures stay readable.
+pub type InboundStream<M> = ServiceStream<crate::StreamMessage<M>>;
+
 // ---------------------------------------------------------------------------
 // Encodable<M>
 // ---------------------------------------------------------------------------
@@ -581,12 +588,12 @@ pub fn encode_view_body<'a, V: ViewEncode<'a>>(
 /// arms — each encodes independently.
 ///
 /// ```rust,ignore
-/// async fn redact(&self, _ctx: RequestContext, req: OwnedRecordView)
+/// async fn redact(&self, _ctx: RequestContext, req: ServiceRequest<'_, Record>)
 ///     -> ServiceResult<MaybeBorrowed<Record, OwnedRecordView>>
 /// {
 ///     if req.email.is_empty() && req.ssn.is_empty() {
-///         // pass-through: re-encode straight from the request bytes
-///         return Response::ok(MaybeBorrowed::Borrowed(req));
+///         // pass-through: rebuild a 'static view from the request bytes
+///         return Response::ok(MaybeBorrowed::Borrowed(req.to_owned_view()));
 ///     }
 ///     let mut owned = req.to_owned_message();
 ///     owned.email.clear();

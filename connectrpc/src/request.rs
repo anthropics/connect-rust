@@ -52,12 +52,26 @@ pub struct ServiceRequest<'a, Req: HasMessageView> {
 impl<'a, Req: HasMessageView> ServiceRequest<'a, Req> {
     /// Assemble a request from a decoded view and the buffer it borrows from.
     ///
-    /// Called by the generated dispatch glue; not normally used directly.
-    /// `view` should have been decoded from `body`: that is what makes
-    /// [`to_owned_message`](Self::to_owned_message)'s zero-copy `bytes`-field
-    /// path apply. If the buffers don't match, conversion still succeeds —
+    /// Called by the generated dispatch glue; also the supported way to
+    /// construct a request for unit-testing a handler:
+    ///
+    /// ```rust,ignore
+    /// use buffa::Message;               // encode_to_vec
+    /// use buffa::view::HasMessageView;  // GreetRequest::decode_view
+    ///
+    /// let body = Bytes::from(GreetRequest { name: "ada".into(), ..Default::default() }.encode_to_vec());
+    /// let view = GreetRequest::decode_view(&body)?;
+    /// let req = ServiceRequest::<GreetRequest>::from_parts(&view, &body);
+    /// let resp = service.greet(RequestContext::new(HeaderMap::new()), req).await?;
+    /// ```
+    ///
+    /// `view` must have been produced by buffa's wire decoder — that is the
+    /// precondition behind [`to_owned_message`](Self::to_owned_message)'s
+    /// infallibility (a hand-assembled view, e.g. one whose unknown fields
+    /// were pushed via buffa's `push_raw`, can make it panic). Decoding from
+    /// `body` specifically is what makes the zero-copy `bytes`-field path
+    /// apply; if the buffers don't match, conversion still succeeds —
     /// `bytes` fields are copied instead of sliced.
-    #[doc(hidden)]
     pub fn from_parts(view: &'a Req::View<'a>, body: &'a Bytes) -> Self {
         Self { view, body }
     }
@@ -76,9 +90,22 @@ impl<'a, Req: HasMessageView> ServiceRequest<'a, Req> {
     /// `bytes` fields are sliced zero-copy out of the retained body where
     /// possible; string and repeated fields are allocated. Use this for data
     /// that must outlive the handler call.
+    ///
+    /// Infallible for dispatcher-built requests: buffa (≥ 0.8.1) charges
+    /// every unknown-field record against the decode-time allowance, so any
+    /// view the dispatcher decoded successfully re-materializes within that
+    /// same allowance, and known fields were already validated at decode.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the view was not produced by buffa's wire decoder (see
+    /// [`from_parts`](Self::from_parts)); unreachable through the generated
+    /// dispatch glue.
     #[must_use]
     pub fn to_owned_message(&self) -> Req {
-        self.view.to_owned_from_source(Some(self.body))
+        self.view
+            .to_owned_from_source(Some(self.body))
+            .expect("wire-decoded view always converts (buffa >= 0.8.1)")
     }
 
     /// The request body as protobuf wire bytes.
@@ -143,7 +170,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use buffa::Message;
     use buffa_types::google::protobuf::__buffa::view::StringValueView;
@@ -197,5 +224,56 @@ mod tests {
         let copy = req;
         assert_eq!(copy.value, req.value);
         assert_eq!(format!("{req:?}"), format!("{copy:?}"));
+    }
+
+    /// A `StringValue` payload followed by `records` contiguous unknown
+    /// wire records (field 15, varint 0 — two bytes each), which the view
+    /// decoder coalesces into a single span. The infallible conversion
+    /// contract rests on decode-time and replay-time accounting agreeing
+    /// for exactly this shape.
+    pub(crate) fn body_with_unknown_records(records: usize) -> Bytes {
+        let mut bytes = StringValue {
+            value: "known".into(),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        bytes.extend([0x78, 0x00].repeat(records));
+        Bytes::from(bytes)
+    }
+
+    /// One more unknown record than the default allowance — must be
+    /// rejected at the decode boundary, never at owned conversion.
+    pub(crate) fn unknown_field_overflow_body() -> Bytes {
+        body_with_unknown_records(buffa::DEFAULT_UNKNOWN_FIELD_LIMIT + 1)
+    }
+
+    #[test]
+    fn unknown_field_overflow_is_rejected_at_decode() {
+        let body = unknown_field_overflow_body();
+        assert!(matches!(
+            StringValueView::decode_view(&body),
+            Err(buffa::DecodeError::UnknownFieldLimitExceeded)
+        ));
+    }
+
+    #[test]
+    fn unknown_fields_at_exact_allowance_convert_infallibly() {
+        // Boundary pin for the infallible signature: a payload accepted at
+        // the decode limit must also convert. Uses a small explicit limit so
+        // the boundary is exercised exactly without a multi-megabyte body.
+        use buffa::view::HasMessageView;
+        let opts = buffa::DecodeOptions::new().with_unknown_field_limit(4);
+        let body = body_with_unknown_records(4);
+        let view =
+            StringValue::decode_view_with_options(&body, &opts).expect("exactly at the allowance");
+        let req = ServiceRequest::<StringValue>::from_parts(&view, &body);
+        assert_eq!(req.to_owned_message().value, "known");
+
+        // One more record and the decode boundary rejects it instead.
+        let over = body_with_unknown_records(5);
+        assert!(matches!(
+            StringValue::decode_view_with_options(&over, &opts),
+            Err(buffa::DecodeError::UnknownFieldLimitExceeded)
+        ));
     }
 }

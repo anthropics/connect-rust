@@ -258,7 +258,7 @@ mod tests {
 
         while let Some(msg) = stream.message().await.unwrap() {
             let elapsed = start.elapsed();
-            received.push((msg.reborrow().sequence, elapsed));
+            received.push((msg.view().sequence, elapsed));
         }
 
         assert_eq!(received.len(), num_messages as usize);
@@ -696,7 +696,7 @@ mod tests {
 
         let mut got = Vec::new();
         while let Some(msg) = stream.message().await.unwrap() {
-            got.push((msg.reborrow().sequence, msg.reborrow().data.to_string()));
+            got.push((msg.view().sequence, msg.view().data.to_string()));
         }
         assert_eq!(
             got,
@@ -902,8 +902,8 @@ mod tests {
             let mut received = 0;
             while let Some(resp) = stream.message().await.unwrap() {
                 assert_eq!(
-                    resp.reborrow().data,
-                    format!("half-duplex-{}", resp.reborrow().sequence)
+                    resp.view().data,
+                    format!("half-duplex-{}", resp.view().sequence)
                 );
                 received += 1;
             }
@@ -1230,7 +1230,8 @@ mod tests {
     /// present (codegen dispatch is the only path where both are).
     #[tokio::test]
     async fn interceptor_wraps_unary_call() {
-        use connectrpc::{Interceptor, Next, UnaryRequest, UnaryResponse};
+        use connectrpc::interceptor::{UnaryRequest, UnaryResponse};
+        use connectrpc::{Interceptor, Next};
 
         /// Reads `path()` and `Spec`, echoes the path and request `data`
         /// field through response headers, and increments the response
@@ -1300,7 +1301,8 @@ mod tests {
     /// bypassed shape is a vulnerability, not a gap.
     #[tokio::test]
     async fn interceptor_wraps_streaming_calls() {
-        use connectrpc::{Interceptor, NextStream, PayloadStream, StreamRequest, StreamResponse};
+        use connectrpc::interceptor::{StreamRequest, StreamResponse};
+        use connectrpc::{Interceptor, NextStream, PayloadStream};
         use std::sync::Mutex;
 
         /// Records the path of every streaming RPC it sees and stamps a
@@ -1418,7 +1420,8 @@ mod tests {
     /// failure.
     #[tokio::test]
     async fn streaming_interceptor_short_circuit_reaches_client() {
-        use connectrpc::{Interceptor, NextStream, PayloadStream, StreamRequest, StreamResponse};
+        use connectrpc::interceptor::{StreamRequest, StreamResponse};
+        use connectrpc::{Interceptor, NextStream, PayloadStream};
 
         struct DenyAll;
         #[connectrpc::async_trait]

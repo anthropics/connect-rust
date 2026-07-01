@@ -37,18 +37,27 @@ with the [README quick start](../README.md#quick-start) and the
 | `connectrpc-health` | The standard `grpc.health.v1.Health` service for liveness / readiness probes ([Health checking](#health-checking)) |
 | `connectrpc-reflection` | The standard gRPC server reflection service (`grpc.reflection.v1` + `v1alpha`) for `grpcurl` / `buf curl` / Postman / `grpcui` ([Server reflection](#server-reflection)) |
 
-Add the runtime to your `Cargo.toml`:
+Generated code references a small set of crates from your namespace, so
+a working `Cargo.toml` needs more than the runtime itself — this is the
+complete dependency block for a typical (JSON-capable) service:
 
 ```toml
 [dependencies]
-connectrpc = "0.7"
+connectrpc = "0.8"
+buffa = { version = "0.8.1", features = ["json"] }
+buffa-types = { version = "0.8", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+connectrpc-build = "0.8"
 ```
 
-The runtime depends on [`buffa`](https://github.com/anthropics/buffa)
-for protobuf message types. Generated code requires a small set of
-direct dependencies; see
+The `buffa`/`serde` entries come from buffa's generated message types.
+For proto-only builds (no JSON), drop the `json` features and
+`serde`/`serde_json` — see
 [Generated Code Dependencies](../README.md#generated-code-dependencies)
-in the README for the exact list.
+in the README.
 
 ### MSRV
 
@@ -76,16 +85,16 @@ Common combinations:
 
 ```toml
 # Just the server, behind axum
-connectrpc = { version = "0.7", features = ["axum"] }
+connectrpc = { version = "0.8", features = ["axum"] }
 
 # Server + client, both with TLS
-connectrpc = { version = "0.7", features = ["axum", "client", "tls"] }
+connectrpc = { version = "0.8", features = ["axum", "client", "tls"] }
 
 # Built-in server (no axum)
-connectrpc = { version = "0.7", features = ["server"] }
+connectrpc = { version = "0.8", features = ["server"] }
 
 # Minimal (wasm-friendly: no networking, no native compression)
-connectrpc = { version = "0.7", default-features = false }
+connectrpc = { version = "0.8", default-features = false }
 ```
 
 ### Proto-only (no-JSON) builds
@@ -111,7 +120,7 @@ It takes two coordinated settings:
    # `default-features = false` is the only way to drop `json`, so it also drops
    # the default compression features (`gzip`/`zstd`/`streaming`) — re-list the
    # ones you still want.
-   connectrpc = { version = "0.7", default-features = false, features = ["server", "gzip", "zstd", "streaming"] }
+   connectrpc = { version = "0.8", default-features = false, features = ["server", "gzip", "zstd", "streaming"] }
    ```
 
 With `json` off, the `Message + serde` requirement is replaced by the
@@ -170,7 +179,7 @@ Generate code with `connectrpc-build` in `build.rs`:
 
 ```toml
 [build-dependencies]
-connectrpc-build = "0.7"
+connectrpc-build = "0.8"
 ```
 
 ```rust
@@ -358,7 +367,10 @@ allocating - `req.name` is a `&str` directly into the request bytes,
 and the borrow may be held across `.await` points. The request is
 borrowed from the dispatcher-owned body, so the response (and anything
 moved into `tokio::spawn`) cannot borrow from it - call
-`.to_owned_message()` to get the owned struct when you need one.
+`.to_owned_message()` to get the owned struct when you need one. The
+conversion is infallible: buffa charges every unknown-field record
+against the decode-time allowance (since 0.8.1), so a request that
+decoded successfully always re-materializes.
 
 ### `RequestContext` and `Response`
 
@@ -565,6 +577,60 @@ use `Router::try_merge` / `Router::try_merge_in_place`, which return a
 The router is what you mount on axum (`router.into_axum_router()`)
 or pass to the built-in `Server`.
 
+### Testing handlers
+
+Handlers are plain async methods, so unit tests call them directly -
+no server, no sockets. Construct the inputs the same way the dispatcher
+does:
+
+```rust
+use buffa::Message;               // encode_to_vec / decode_from_slice
+use buffa::view::HasMessageView;  // GreetRequest::decode_view
+
+#[tokio::test]
+async fn greet_uses_the_name() {
+    let svc = GreetServiceImpl::default();
+
+    // Unary: encode the request, decode a view over it, wrap the pair.
+    let body = Bytes::from(GreetRequest {
+        name: "ada".into(),
+        ..Default::default()
+    }.encode_to_vec());
+    let view = GreetRequest::decode_view(&body).unwrap();
+    let req = ServiceRequest::<GreetRequest>::from_parts(&view, &body);
+
+    let resp = svc.greet(RequestContext::new(HeaderMap::new()), req)
+        .await
+        .unwrap();
+
+    // The trait's response body is an opaque `impl Encodable<GreetResponse>`;
+    // encode it (exactly what the dispatcher does) and decode to assert on
+    // fields. Headers and trailers are directly accessible on `resp`. The
+    // UFCS call avoids ambiguity with `buffa::Message::encode`, which is
+    // also in scope.
+    use connectrpc::Encodable;
+    let bytes = Encodable::encode(&resp.body, CodecFormat::Proto).unwrap();
+    let reply = GreetResponse::decode_from_slice(&bytes).unwrap();
+    assert_eq!(reply.greeting, "Hello, ada!");
+}
+```
+
+Streaming inputs are one call each: `StreamMessage::from_message(&msg)`
+builds an item, and `futures::stream::iter([...])` boxed into an
+`InboundStream` builds the request stream:
+
+```rust
+let items = [Ok(StreamMessage::from_message(&SumRequest {
+    value: Some(3), ..Default::default()
+}))];
+let requests: InboundStream<SumRequest> =
+    Box::pin(futures::stream::iter(items));
+let resp = svc.sum(RequestContext::new(HeaderMap::new()), requests).await?;
+```
+
+`RequestContext::new` takes the request headers; its `with_*` builders
+cover peer identity and other per-call inputs.
+
 ## Streaming RPCs
 
 ConnectRPC supports all four RPC types. Define them in your `.proto`
@@ -608,16 +674,17 @@ async fn range(
 
 ### Client streaming
 
-The handler receives a stream of `StreamMessage<Req>` items and
-returns a single response. Each item owns its decoded buffer, is
-`Send + 'static` (so it can be buffered or moved into spawned tasks),
-and exposes zero-copy accessor methods per field:
+The handler receives an `InboundStream<Req>` — a `ServiceStream` of
+`StreamMessage<Req>` items — and returns a single response. Each item
+owns its decoded buffer, is `Send + 'static` (so it can be buffered or
+moved into spawned tasks), and exposes zero-copy accessor methods per
+field:
 
 ```rust
 async fn sum(
     &self,
     _ctx: RequestContext,
-    mut requests: ServiceStream<StreamMessage<SumRequest>>,
+    mut requests: InboundStream<SumRequest>,
 ) -> ServiceResult<SumResponse> {
     let mut total: i64 = 0;
     while let Some(req) = requests.next().await {
@@ -643,7 +710,7 @@ emit messages independently:
 async fn running_sum(
     &self,
     _ctx: RequestContext,
-    requests: ServiceStream<StreamMessage<RunningSumRequest>>,
+    requests: InboundStream<RunningSumRequest>,
 ) -> ServiceResult<ServiceStream<RunningSumResponse>> {
     // Map the request stream to a response stream however you like.
     let response_stream = futures::stream::unfold(/* ... */);
@@ -666,23 +733,23 @@ handle with `.send(req).await?` and `.message().await?` plus
 `.close_send()`:
 
 ```rust
-// Server streaming. Each item is an `OwnedView` of the response view
-// (not the deref-ready view that unary `.view()` returns), so field
-// access goes through `.reborrow()` - zero-copy, same as Pattern 2 in
-// [Reading the response](#reading-the-response).
+// Server streaming. Each item is a `StreamMessage` - the same wrapper
+// server handlers receive for inbound streams. Read fields zero-copy
+// via `.view()` (or the generated accessor methods), and convert with
+// `.to_owned_message()` when you need the owned struct.
 let mut stream = client.range(req).await?;
 while let Some(msg) = stream.message().await? {
-    println!("{}", msg.reborrow().value.unwrap_or_default());
+    println!("{}", msg.view().value.unwrap_or_default());
 }
 
 // Client streaming - takes a Vec
 let resp = client.sum(vec![req1, req2, req3]).await?;
 
-// Bidi - received items are `OwnedView`s too, read via `.reborrow()`
+// Bidi - received items are `StreamMessage`s too
 let mut bidi = client.running_sum().await?;
 bidi.send(req).await?;
 if let Some(reply) = bidi.message().await? {
-    println!("{}", reply.reborrow().total.unwrap_or_default());
+    println!("{}", reply.view().total.unwrap_or_default());
 }
 bidi.close_send();
 ```
@@ -849,7 +916,8 @@ extensions, and a lazily decoded message body — everything an auth
 boundary, span builder, validator, or rate limiter actually wants.
 
 ```rust,ignore
-use connectrpc::{ConnectError, Interceptor, Next, UnaryRequest, UnaryResponse};
+use connectrpc::interceptor::{UnaryRequest, UnaryResponse};
+use connectrpc::{ConnectError, Interceptor, Next};
 
 struct Logging;
 
@@ -965,7 +1033,8 @@ establishment — before any messages flow — and receives an inbound
 metadata.
 
 ```rust,ignore
-use connectrpc::{Interceptor, NextStream, PayloadStream, StreamRequest, StreamResponse};
+use connectrpc::interceptor::{StreamRequest, StreamResponse};
+use connectrpc::{Interceptor, NextStream, PayloadStream};
 
 #[connectrpc::async_trait]
 impl Interceptor for AuthInterceptor {
@@ -1174,8 +1243,8 @@ route for `httpGet:` probes; add the gRPC service for `grpc:` probes.
 
 ```toml
 [dependencies]
-connectrpc = { version = "0.7", features = ["server"] }
-connectrpc-health = "0.7"
+connectrpc = { version = "0.8", features = ["server"] }
+connectrpc-health = "0.8"
 ```
 
 ```rust,no_run
@@ -1215,8 +1284,8 @@ Server-only deployments turn it off:
 
 ```toml
 [dependencies]
-connectrpc = { version = "0.7", features = ["server"] }
-connectrpc-health = { version = "0.7", default-features = false }
+connectrpc = { version = "0.8", features = ["server"] }
+connectrpc-health = { version = "0.8", default-features = false }
 ```
 
 That drops `connectrpc/client` (the HTTP/2 transport stack) from the
@@ -1244,8 +1313,8 @@ gRPC, gRPC-Web, and the Connect protocol alike.
 
 ```toml
 [dependencies]
-connectrpc = { version = "0.7", features = ["server"] }
-connectrpc-reflection = "0.7"
+connectrpc = { version = "0.8", features = ["server"] }
+connectrpc-reflection = "0.8"
 ```
 
 Emit a descriptor set from your build script (see
@@ -1472,6 +1541,10 @@ let greeting: &str = msg.reborrow().greeting;
 // Pattern 3: .into_owned() for the prost-style owned struct.
 // Allocates and copies all string/bytes fields.
 let owned: GreetResponse = client.greet(req).await?.into_owned();
+
+// Pattern 4: .into_owned_parts() when you need the owned struct AND
+// the response metadata - the metadata-preserving form of Pattern 3.
+let (headers, owned, trailers) = client.greet(req).await?.into_owned_parts();
 ```
 
 ### Custom transports

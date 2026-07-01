@@ -4,7 +4,10 @@
 //! [`ServiceRequest`](crate::ServiceRequest) they cannot borrow from a buffer
 //! owned by the dispatch glue — each item must own its bytes. `StreamMessage`
 //! is that owner: one received message on a streaming RPC, holding its
-//! decoded zero-copy view together with the buffer it borrows from.
+//! decoded zero-copy view together with the buffer it borrows from. It is
+//! the item type on both sides of the wire: server handlers receive inbound
+//! request streams as `StreamMessage`s, and client stream handles yield
+//! response messages as `StreamMessage`s from `.message().await`.
 
 use buffa::view::{OwnedView, ViewReborrow};
 use bytes::Bytes;
@@ -45,12 +48,51 @@ pub struct StreamMessage<M: HasMessageView> {
 impl<M: HasMessageView> StreamMessage<M> {
     /// Wrap an already-decoded [`OwnedView`].
     ///
-    /// Called by the generated dispatch glue; not normally used directly.
+    /// Called by the generated dispatch glue and the client stream handles;
+    /// not normally used directly.
     #[doc(hidden)]
     pub fn from_owned_view(inner: OwnedView<M::View<'static>>) -> Self {
         Self {
             inner: M::ViewHandle::from(inner),
         }
+    }
+
+    /// Build a `StreamMessage` from an owned message — the supported way to
+    /// construct handler inputs in unit tests.
+    ///
+    /// Encodes `message` to wire bytes and decodes it back into the retained
+    /// zero-copy view, as the dispatcher does for a received item — but
+    /// without the wire-facing recursion and unknown-field limits, since the
+    /// input is trusted local data:
+    ///
+    /// ```rust,ignore
+    /// let item = StreamMessage::from_message(&EchoRequest {
+    ///     data: "hello".into(),
+    ///     ..Default::default()
+    /// });
+    /// let response = service.echo_stream(ctx, stream_of([item])).await?;
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the encoded message exceeds the protobuf 2 GiB size limit
+    /// — nothing larger is decodable protobuf on any path.
+    #[must_use]
+    pub fn from_message(message: &M) -> Self {
+        let bytes = Bytes::from(buffa::Message::encode_to_vec(message));
+        // The input is trusted local data, so decode without the wire-facing
+        // recursion and unknown-field limits: a just-encoded message can
+        // legitimately exceed either (both are enforced only at decode), and
+        // failing on it here would betray the constructor's purpose. The
+        // protobuf 2 GiB size limit stays — nothing larger is decodable
+        // protobuf on any path.
+        let opts = buffa::DecodeOptions::new()
+            .with_recursion_limit(u32::MAX)
+            .with_unknown_field_limit(usize::MAX);
+        Self::from_owned_view(
+            OwnedView::decode_with_options(bytes, &opts)
+                .expect("a just-encoded message always decodes"),
+        )
     }
 
     /// The zero-copy view of this message, borrowed from the retained buffer.
@@ -66,9 +108,18 @@ impl<M: HasMessageView> StreamMessage<M> {
     ///
     /// `bytes` fields are sliced zero-copy out of the retained buffer where
     /// possible; string and repeated fields are allocated.
+    ///
+    /// Infallible: an [`OwnedView`] can only be built by buffa's wire
+    /// decoder, and buffa (≥ 0.8.1) charges every unknown-field record
+    /// against the decode-time allowance, so a view that decoded
+    /// successfully re-materializes within that same allowance, and known
+    /// fields were already validated at decode.
     #[must_use]
     pub fn to_owned_message(&self) -> M {
-        self.inner.as_ref().to_owned_message()
+        self.inner
+            .as_ref()
+            .to_owned_message()
+            .expect("wire-decoded view always converts (buffa >= 0.8.1)")
     }
 
     /// The message's protobuf wire bytes.
@@ -135,6 +186,9 @@ where
     fn encode(&self, codec: CodecFormat) -> Result<Bytes, ConnectError> {
         match codec {
             CodecFormat::Proto => Ok(self.inner.as_ref().bytes().clone()),
+            // Runs during response encoding, so it leans on the same
+            // decode-time invariant as to_owned_message: the wrapped view
+            // came from OwnedView::decode, which bounds unknown fields.
             CodecFormat::Json => encode_json(&self.to_owned_message()),
         }
     }
@@ -187,6 +241,10 @@ mod tests {
         let json = msg.encode(CodecFormat::Json).expect("json encode");
         let owned_json = serde_json::to_vec(&msg.to_owned_message()).unwrap();
         assert_eq!(json.as_ref(), owned_json.as_slice());
+        // Guard against serializing the `Result` wrapper instead of the
+        // message: StringValue's proto-JSON form is the bare value, so a
+        // wrapper would show up as `{"Ok":"forward me"}`.
+        assert_eq!(json.as_ref(), br#""forward me""#);
     }
 
     #[cfg(not(feature = "json"))]

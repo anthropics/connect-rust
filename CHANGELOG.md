@@ -103,6 +103,70 @@ increment the patch version.
 
 ### Changed
 
+- **buffa 0.8 adoption** ([#209]). The `buffa` runtime crate's floor
+  moves from 0.7 to 0.8.1 (`buffa-types`, `buffa-codegen`, and
+  `buffa-descriptor` move to 0.8 — the extra 0.8.1 patch is a
+  runtime-only accounting fix, so 0.8.0-generated code qualifies).
+  `ServiceRequest::to_owned_message`,
+  `StreamMessage::to_owned_message`, and the client response's
+  `into_owned` keep their infallible signatures: buffa 0.8 made owned
+  conversion fallible (re-materializing preserved unknown fields could
+  exceed the unknown-field allowance for a view that decoded fine), but
+  buffa 0.8.1 charges every unknown-field record against the decode-time
+  allowance, so a payload that would overflow is rejected at the decode
+  boundary (`invalid_argument`, like any other malformed request) and a
+  successfully decoded view always converts. Two further 0.8 changes are
+  absorbed without API impact: generated map fields are now
+  `buffa::Map<K, V>` instead of `std::collections::HashMap` (hand-written
+  code constructing owned map fields needs the type swap), and the
+  `fast-utf8` decode path that buffa 0.8 ships as a default feature is
+  explicitly enabled, since `connectrpc` builds buffa with
+  `default-features = false`. All checked-in generated code is
+  regenerated against buffa 0.8.1.
+- **Client stream items are now `StreamMessage`** ([#209]).
+  `ServerStream::message()` and `BidiStream::message()` yield
+  `StreamMessage<Resp>` — the same wrapper server handlers receive for
+  inbound streams — instead of a raw `buffa::OwnedView`. Field access
+  moves from `msg.reborrow().field` to `msg.view().field` (or the
+  generated accessor methods), and owned conversion is the same
+  infallible `.to_owned_message()` as everywhere else on the API, so no
+  client-side conversion can fail. `UnaryResponse::into_owned_parts()`
+  is added for the headers-plus-owned-message-plus-trailers case that
+  previously required `into_parts()` followed by a manual conversion.
+  Further migration notes for code that used the item as an `OwnedView`:
+  items no longer implement `PartialEq` or serde `Serialize` (compare or
+  serialize through `msg.view()` / `msg.to_owned_message()`), the
+  consuming `into_bytes()` spelling becomes `msg.bytes().clone()` (same
+  cost — a `Bytes` refcount bump), and hand-written generic wrappers
+  over the stream handles need the new
+  `RespView::Owned: HasMessageView<View<'static> = RespView>` bound at
+  their `.message()` call sites (buffa-generated types always satisfy
+  it).
+- **Crate-root name cleanup and ergonomics fixes** from a pre-release
+  API review ([#209]):
+  - `connectrpc::UnaryResponse` at the crate root is now the client
+    response type (what generated client methods return), alongside new
+    root exports `ServerStream` and `BidiStream`. The wire-level
+    interceptor aliases previously holding those root names —
+    `UnaryRequest`, `UnaryResponse`, `StreamRequest`, `StreamResponse` —
+    are module-scoped only: import them from
+    `connectrpc::interceptor::*`.
+  - `ErrorDetail` is exported at the crate root, and
+    `ErrorDetail::from_message` builds a detail from a protobuf message,
+    handling the protocol's base64 encoding. A hand-populated
+    `ErrorDetail::value` that is not valid base64 now logs a `tracing`
+    warning when it is omitted from a gRPC status instead of vanishing
+    silently.
+  - `connectrpc` re-exports `http_body`, and generated client bounds
+    reference it through the re-export — consumers of generated code no
+    longer need a direct `http-body` dependency.
+  - `StreamMessage::from_message` and the un-hidden
+    `ServiceRequest::from_parts` are the supported way to construct
+    handler inputs in unit tests; the guide gains a "Testing handlers"
+    section.
+  - `InboundStream<M>` (= `ServiceStream<StreamMessage<M>>`) names the
+    inbound stream type in generated client-streaming/bidi handler
+    signatures.
 - **Client transport errors keep their original classification** ([#199]).
   The client call paths previously wrapped every transport `send` failure as
   `unavailable` with a `request failed:` prefix, including errors that were
@@ -251,6 +315,7 @@ increment the patch version.
 [#199]: https://github.com/anthropics/connect-rust/pull/199
 [#200]: https://github.com/anthropics/connect-rust/pull/200
 [#201]: https://github.com/anthropics/connect-rust/pull/201
+[#209]: https://github.com/connectrpc/connect-rust/issues/209
 [connectrpc/conformance#1104]: https://github.com/connectrpc/conformance/pull/1104
 
 ## [0.7.0] - 2026-06-10

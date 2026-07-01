@@ -135,7 +135,7 @@ async fn server_stream_range() {
         .unwrap();
     let mut got = Vec::new();
     while let Some(msg) = stream.message().await.unwrap() {
-        got.push(msg.reborrow().value.unwrap());
+        got.push(msg.view().value.unwrap());
     }
     assert_eq!(got, vec![10, 11, 12, 13, 14]);
 }
@@ -169,7 +169,7 @@ async fn bidi_stream_running_sum() {
         .await
         .unwrap();
         let msg = bidi.message().await.unwrap().unwrap();
-        got.push(msg.reborrow().total.unwrap());
+        got.push(msg.view().total.unwrap());
     }
     bidi.close_send();
     assert_eq!(got, vec![2, 6, 12, 20]);

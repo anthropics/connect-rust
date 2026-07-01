@@ -182,7 +182,8 @@ pub const WELL_KNOWN_TYPES_SERVICE_HEARTBEAT_SPEC: ::connectrpc::Spec = ::connec
 /// first.
 ///
 /// **Client-streaming and bidi requests** arrive as
-/// `ServiceStream<`[`StreamMessage<Req>`](::connectrpc::StreamMessage)`>`.
+/// [`InboundStream<Req>`](::connectrpc::InboundStream) — a
+/// `ServiceStream` of [`StreamMessage`](::connectrpc::StreamMessage)s.
 /// Each item owns its decoded buffer and is `Send + 'static`, so items
 /// can be buffered or moved into spawned tasks; read fields zero-copy
 /// through the generated accessor methods (`item.name()`) or `.view()`,
@@ -191,7 +192,7 @@ pub const WELL_KNOWN_TYPES_SERVICE_HEARTBEAT_SPEC: ::connectrpc::Spec = ::connec
 ///
 /// Request types resolved through `extern_path` (e.g. well-known types
 /// from another crate) use the same wrappers; the crate that owns the
-/// type must be generated with buffa ≥ 0.7.0 and views enabled so the
+/// type must be generated with buffa ≥ 0.8.0 and views enabled so the
 /// backing `HasMessageView` impl exists.
 ///
 /// The `impl Encodable<Out>` return bound accepts the owned `Out`, the
@@ -737,9 +738,10 @@ for WellKnownTypesServiceServer<T> {
 ///
 /// [`into_view()`](::connectrpc::client::UnaryResponse::into_view) keeps the
 /// zero-copy decoded body (an `OwnedView`) without copying; field access on it
-/// goes through `.reborrow()`. Streaming responses yield one `OwnedView` per
-/// received message from `.message().await` — bind `msg.reborrow()` for field
-/// access, or convert with `.to_owned_message()`.
+/// goes through `.reborrow()`. Streaming responses yield one
+/// [`StreamMessage`](::connectrpc::StreamMessage) per received message from
+/// `.message().await` — read fields zero-copy through the generated accessor
+/// methods (`msg.name()`) or `.view()`, or convert with `.to_owned_message()`.
 #[derive(Clone)]
 pub struct WellKnownTypesServiceClient<T> {
     transport: T,
@@ -748,7 +750,7 @@ pub struct WellKnownTypesServiceClient<T> {
 impl<T> WellKnownTypesServiceClient<T>
 where
     T: ::connectrpc::client::ClientTransport,
-    <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
+    <T::ResponseBody as ::connectrpc::http_body::Body>::Error: ::std::fmt::Display,
 {
     /// Create a new client with the given transport and configuration.
     pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
