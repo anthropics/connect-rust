@@ -260,13 +260,7 @@ mod tests {
         stream.close_send();
 
         // 1: ListServices names both mounted reflection-visible services.
-        let resp = stream
-            .message()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_owned_message()
-            .unwrap();
+        let resp = stream.message().await.unwrap().unwrap().to_owned_message();
         assert_eq!(resp.valid_host, "test-host");
         assert!(matches!(
             resp.original_request
@@ -290,13 +284,7 @@ mod tests {
         }
 
         // 2: the symbol resolves to the original file bytes.
-        let resp = stream
-            .message()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_owned_message()
-            .unwrap();
+        let resp = stream.message().await.unwrap().unwrap().to_owned_message();
         match resp.message_response.unwrap() {
             MessageResponse::FileDescriptorResponse(fd) => {
                 assert_eq!(fd.file_descriptor_proto.len(), 1);
@@ -308,13 +296,7 @@ mod tests {
         }
 
         // 3: misses surface in-band as NOT_FOUND, keeping the stream alive.
-        let resp = stream
-            .message()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_owned_message()
-            .unwrap();
+        let resp = stream.message().await.unwrap().unwrap().to_owned_message();
         match resp.message_response.unwrap() {
             MessageResponse::ErrorResponse(err) => {
                 assert_eq!(err.error_code, 5);
@@ -375,13 +357,7 @@ mod tests {
             .unwrap();
         stream.close_send();
 
-        let resp = stream
-            .message()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_owned_message()
-            .unwrap();
+        let resp = stream.message().await.unwrap().unwrap().to_owned_message();
         match resp.message_response.unwrap() {
             AlphaResponse::ListServicesResponse(list) => {
                 assert_eq!(list.service.len(), 3);

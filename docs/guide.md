@@ -669,23 +669,23 @@ handle with `.send(req).await?` and `.message().await?` plus
 `.close_send()`:
 
 ```rust
-// Server streaming. Each item is an `OwnedView` of the response view
-// (not the deref-ready view that unary `.view()` returns), so field
-// access goes through `.reborrow()` - zero-copy, same as Pattern 2 in
-// [Reading the response](#reading-the-response).
+// Server streaming. Each item is a `StreamMessage` - the same wrapper
+// server handlers receive for inbound streams. Read fields zero-copy
+// via `.view()` (or the generated accessor methods), and convert with
+// `.to_owned_message()` when you need the owned struct.
 let mut stream = client.range(req).await?;
 while let Some(msg) = stream.message().await? {
-    println!("{}", msg.reborrow().value.unwrap_or_default());
+    println!("{}", msg.view().value.unwrap_or_default());
 }
 
 // Client streaming - takes a Vec
 let resp = client.sum(vec![req1, req2, req3]).await?;
 
-// Bidi - received items are `OwnedView`s too, read via `.reborrow()`
+// Bidi - received items are `StreamMessage`s too
 let mut bidi = client.running_sum().await?;
 bidi.send(req).await?;
 if let Some(reply) = bidi.message().await? {
-    println!("{}", reply.reborrow().total.unwrap_or_default());
+    println!("{}", reply.view().total.unwrap_or_default());
 }
 bidi.close_send();
 ```
@@ -1475,6 +1475,10 @@ let greeting: &str = msg.reborrow().greeting;
 // Pattern 3: .into_owned() for the prost-style owned struct.
 // Allocates and copies all string/bytes fields.
 let owned: GreetResponse = client.greet(req).await?.into_owned();
+
+// Pattern 4: .into_owned_parts() when you need the owned struct AND
+// the response metadata - the metadata-preserving form of Pattern 3.
+let (headers, owned, trailers) = client.greet(req).await?.into_owned_parts();
 ```
 
 ### Custom transports

@@ -297,7 +297,7 @@ mod tests {
             .await
             .unwrap()
             .expect("expected initial Watch message");
-        assert_eq!(first.reborrow().status, ServingStatus::SERVING);
+        assert_eq!(first.view().status, ServingStatus::SERVING);
 
         // Server-side receiver count must be elevated by exactly 1.
         assert_eq!(
@@ -357,7 +357,7 @@ mod tests {
             .await
             .unwrap()
             .expect("expected initial Watch message");
-        assert_eq!(initial.reborrow().status, ServingStatus::SERVING);
+        assert_eq!(initial.view().status, ServingStatus::SERVING);
 
         // Update fires a follow-up message.
         checker.set_status("acme.A", Status::NotServing).unwrap();
@@ -366,7 +366,7 @@ mod tests {
             .expect("watch did not deliver update within timeout")
             .unwrap()
             .expect("expected follow-up Watch message");
-        assert_eq!(after.reborrow().status, ServingStatus::NOT_SERVING);
+        assert_eq!(after.view().status, ServingStatus::NOT_SERVING);
     }
 
     #[tokio::test]

@@ -4,7 +4,10 @@
 //! [`ServiceRequest`](crate::ServiceRequest) they cannot borrow from a buffer
 //! owned by the dispatch glue — each item must own its bytes. `StreamMessage`
 //! is that owner: one received message on a streaming RPC, holding its
-//! decoded zero-copy view together with the buffer it borrows from.
+//! decoded zero-copy view together with the buffer it borrows from. It is
+//! the item type on both sides of the wire: server handlers receive inbound
+//! request streams as `StreamMessage`s, and client stream handles yield
+//! response messages as `StreamMessage`s from `.message().await`.
 
 use buffa::view::{OwnedView, ViewReborrow};
 use bytes::Bytes;
@@ -45,7 +48,8 @@ pub struct StreamMessage<M: HasMessageView> {
 impl<M: HasMessageView> StreamMessage<M> {
     /// Wrap an already-decoded [`OwnedView`].
     ///
-    /// Called by the generated dispatch glue; not normally used directly.
+    /// Called by the generated dispatch glue and the client stream handles;
+    /// not normally used directly.
     #[doc(hidden)]
     pub fn from_owned_view(inner: OwnedView<M::View<'static>>) -> Self {
         Self {

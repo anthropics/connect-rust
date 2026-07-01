@@ -258,7 +258,7 @@ mod tests {
 
         while let Some(msg) = stream.message().await.unwrap() {
             let elapsed = start.elapsed();
-            received.push((msg.reborrow().sequence, elapsed));
+            received.push((msg.view().sequence, elapsed));
         }
 
         assert_eq!(received.len(), num_messages as usize);
@@ -696,7 +696,7 @@ mod tests {
 
         let mut got = Vec::new();
         while let Some(msg) = stream.message().await.unwrap() {
-            got.push((msg.reborrow().sequence, msg.reborrow().data.to_string()));
+            got.push((msg.view().sequence, msg.view().data.to_string()));
         }
         assert_eq!(
             got,
@@ -902,8 +902,8 @@ mod tests {
             let mut received = 0;
             while let Some(resp) = stream.message().await.unwrap() {
                 assert_eq!(
-                    resp.reborrow().data,
-                    format!("half-duplex-{}", resp.reborrow().sequence)
+                    resp.view().data,
+                    format!("half-duplex-{}", resp.view().sequence)
                 );
                 received += 1;
             }

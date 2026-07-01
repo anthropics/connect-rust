@@ -832,9 +832,10 @@ impl<T: BenchService> ::connectrpc::Dispatcher for BenchServiceServer<T> {
 ///
 /// [`into_view()`](::connectrpc::client::UnaryResponse::into_view) keeps the
 /// zero-copy decoded body (an `OwnedView`) without copying; field access on it
-/// goes through `.reborrow()`. Streaming responses yield one `OwnedView` per
-/// received message from `.message().await` — bind `msg.reborrow()` for field
-/// access, or convert with `.to_owned_message()?`.
+/// goes through `.reborrow()`. Streaming responses yield one
+/// [`StreamMessage`](::connectrpc::StreamMessage) per received message from
+/// `.message().await` — read fields zero-copy through the generated accessor
+/// methods (`msg.name()`) or `.view()`, or convert with `.to_owned_message()`.
 #[derive(Clone)]
 pub struct BenchServiceClient<T> {
     transport: T,
@@ -1430,9 +1431,10 @@ impl<T: EchoService> ::connectrpc::Dispatcher for EchoServiceServer<T> {
 ///
 /// [`into_view()`](::connectrpc::client::UnaryResponse::into_view) keeps the
 /// zero-copy decoded body (an `OwnedView`) without copying; field access on it
-/// goes through `.reborrow()`. Streaming responses yield one `OwnedView` per
-/// received message from `.message().await` — bind `msg.reborrow()` for field
-/// access, or convert with `.to_owned_message()?`.
+/// goes through `.reborrow()`. Streaming responses yield one
+/// [`StreamMessage`](::connectrpc::StreamMessage) per received message from
+/// `.message().await` — read fields zero-copy through the generated accessor
+/// methods (`msg.name()`) or `.view()`, or convert with `.to_owned_message()`.
 #[derive(Clone)]
 pub struct EchoServiceClient<T> {
     transport: T,
@@ -1832,9 +1834,10 @@ impl<T: LogIngestService> ::connectrpc::Dispatcher for LogIngestServiceServer<T>
 ///
 /// [`into_view()`](::connectrpc::client::UnaryResponse::into_view) keeps the
 /// zero-copy decoded body (an `OwnedView`) without copying; field access on it
-/// goes through `.reborrow()`. Streaming responses yield one `OwnedView` per
-/// received message from `.message().await` — bind `msg.reborrow()` for field
-/// access, or convert with `.to_owned_message()?`.
+/// goes through `.reborrow()`. Streaming responses yield one
+/// [`StreamMessage`](::connectrpc::StreamMessage) per received message from
+/// `.message().await` — read fields zero-copy through the generated accessor
+/// methods (`msg.name()`) or `.view()`, or convert with `.to_owned_message()`.
 #[derive(Clone)]
 pub struct LogIngestServiceClient<T> {
     transport: T,

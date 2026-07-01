@@ -123,6 +123,25 @@ increment the patch version.
   explicitly enabled, since `connectrpc` builds buffa with
   `default-features = false`. All checked-in generated code is
   regenerated against buffa 0.8.1.
+- **Client stream items are now `StreamMessage`** ([#209]).
+  `ServerStream::message()` and `BidiStream::message()` yield
+  `StreamMessage<Resp>` — the same wrapper server handlers receive for
+  inbound streams — instead of a raw `buffa::OwnedView`. Field access
+  moves from `msg.reborrow().field` to `msg.view().field` (or the
+  generated accessor methods), and owned conversion is the same
+  infallible `.to_owned_message()` as everywhere else on the API, so no
+  client-side conversion can fail. `UnaryResponse::into_owned_parts()`
+  is added for the headers-plus-owned-message-plus-trailers case that
+  previously required `into_parts()` followed by a manual conversion.
+  Further migration notes for code that used the item as an `OwnedView`:
+  items no longer implement `PartialEq` or serde `Serialize` (compare or
+  serialize through `msg.view()` / `msg.to_owned_message()`), the
+  consuming `into_bytes()` spelling becomes `msg.bytes().clone()` (same
+  cost — a `Bytes` refcount bump), and hand-written generic wrappers
+  over the stream handles need the new
+  `RespView::Owned: HasMessageView<View<'static> = RespView>` bound at
+  their `.message()` call sites (buffa-generated types always satisfy
+  it).
 - **Client transport errors keep their original classification** ([#199]).
   The client call paths previously wrapped every transport `send` failure as
   `unavailable` with a `request failed:` prefix, including errors that were

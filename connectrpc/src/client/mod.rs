@@ -114,6 +114,7 @@ use http_body_util::BodyExt;
 use http_body_util::Full;
 use http_body_util::combinators::BoxBody;
 
+use buffa::view::HasMessageView;
 use buffa::view::MessageView;
 use buffa::view::OwnedView;
 use buffa::view::ViewReborrow;
@@ -1395,16 +1396,31 @@ where
     /// let owned: FooResponse = client.foo(req).await?.into_owned();
     /// ```
     ///
+    /// Infallible — see [`into_owned_parts()`](Self::into_owned_parts) for
+    /// the argument.
+    #[must_use]
+    pub fn into_owned(self) -> V::Owned {
+        self.into_owned_parts().1
+    }
+
+    /// Consume the response, returning `(headers, owned message, trailers)`.
+    ///
+    /// The metadata-preserving sibling of [`into_owned()`](Self::into_owned),
+    /// for callers that also need the response's header and trailer
+    /// metadata.
+    ///
     /// Infallible: an [`OwnedView`] body can only be built by buffa's wire
     /// decoder, and buffa (≥ 0.8.1) charges every unknown-field record
     /// against the decode-time allowance, so a view that decoded
     /// successfully re-materializes within that same allowance, and known
     /// fields were already validated at decode.
     #[must_use]
-    pub fn into_owned(self) -> V::Owned {
-        self.body
+    pub fn into_owned_parts(self) -> (http::HeaderMap, V::Owned, http::HeaderMap) {
+        let owned = self
+            .body
             .to_owned_message()
-            .expect("wire-decoded view always converts (buffa >= 0.8.1)")
+            .expect("wire-decoded view always converts (buffa >= 0.8.1)");
+        (self.headers, owned, self.trailers)
     }
 }
 
@@ -2385,14 +2401,19 @@ where
     /// matching grpc-go's treatment of each case. A Trailers-Only response
     /// carrying `grpc-status: 0` in the headers (empty body) is a clean
     /// end.
-    pub async fn message(&mut self) -> Result<Option<OwnedView<RespView>>, ConnectError> {
+    pub async fn message(
+        &mut self,
+    ) -> Result<Option<crate::StreamMessage<RespView::Owned>>, ConnectError>
+    where
+        RespView::Owned: HasMessageView<View<'static> = RespView>,
+    {
         // The outcome is immutable once reported: replay the terminal
         // record without re-entering the body.
         if let Some(end) = &self.end {
             return end.replay();
         }
         match self.next_message_or_end().await {
-            Ok(msg) => Ok(Some(msg)),
+            Ok(msg) => Ok(Some(crate::StreamMessage::from_owned_view(msg))),
             // The single writer of the terminal record. `message_inner`
             // cannot end the stream without producing one — "ended without
             // recording why" is unrepresentable.
@@ -3118,7 +3139,12 @@ where
     /// server error carried in the termination metadata is returned as
     /// `Err`, sticky across calls — see [`ServerStream::message()`] for the
     /// full contract.
-    pub async fn message(&mut self) -> Result<Option<OwnedView<RespView>>, ConnectError> {
+    pub async fn message(
+        &mut self,
+    ) -> Result<Option<crate::StreamMessage<RespView::Owned>>, ConnectError>
+    where
+        RespView::Owned: HasMessageView<View<'static> = RespView>,
+    {
         // If we already failed during construction or first await, return that.
         if let Some(ref err) = self.construct_err {
             return Err(err.clone());
@@ -4087,6 +4113,31 @@ mod tests {
         assert_eq!(err.code, ErrorCode::Internal);
     }
 
+    #[test]
+    fn into_owned_parts_preserves_metadata() {
+        use buffa::Message;
+        use buffa::view::OwnedView;
+        use buffa_types::google::protobuf::__buffa::view::StringValueView;
+        use buffa_types::google::protobuf::StringValue;
+
+        let bytes = Bytes::from(StringValue::from("with-metadata").encode_to_vec());
+        let view: OwnedView<StringValueView<'static>> = OwnedView::decode(bytes).unwrap();
+        let mut headers = http::HeaderMap::new();
+        headers.insert("x-probe", http::HeaderValue::from_static("h"));
+        let mut trailers = http::HeaderMap::new();
+        trailers.insert("x-trailer", http::HeaderValue::from_static("t"));
+        let resp = UnaryResponse {
+            headers,
+            body: view,
+            trailers,
+        };
+
+        let (headers, owned, trailers) = resp.into_owned_parts();
+        assert_eq!(owned.value, "with-metadata");
+        assert_eq!(headers.get("x-probe").unwrap(), "h");
+        assert_eq!(trailers.get("x-trailer").unwrap(), "t");
+    }
+
     #[cfg(feature = "json")]
     #[test]
     fn test_client_config() {
@@ -4353,7 +4404,7 @@ mod tests {
             .await
             .expect("first message should decode")
             .expect("stream should yield the data envelope before EOF");
-        assert_eq!(msg.reborrow().value, "hello");
+        assert_eq!(msg.view().value, "hello");
 
         let err = match stream.message().await {
             Err(err) => err,
@@ -4456,7 +4507,7 @@ mod tests {
             .await
             .expect("data envelope should decode")
             .expect("stream should yield the data message first");
-        assert_eq!(msg.reborrow().value, "hello");
+        assert_eq!(msg.view().value, "hello");
 
         let err = stream
             .message()
@@ -4523,7 +4574,7 @@ mod tests {
             .await
             .expect("data envelope should decode")
             .expect("stream should yield the data message first");
-        assert_eq!(msg.reborrow().value, "hello");
+        assert_eq!(msg.view().value, "hello");
 
         let err = stream
             .message()
@@ -4590,7 +4641,7 @@ mod tests {
             .await
             .expect("data envelope should decode")
             .expect("stream should yield the data message first");
-        assert_eq!(msg.reborrow().value, "hello");
+        assert_eq!(msg.view().value, "hello");
 
         let err = stream
             .message()
@@ -4719,7 +4770,7 @@ mod tests {
             .await
             .expect("data envelope should decode")
             .expect("stream should yield the data message first");
-        assert_eq!(msg.reborrow().value, "hello");
+        assert_eq!(msg.view().value, "hello");
 
         let err = stream
             .message()
