@@ -57,6 +57,44 @@ impl<M: HasMessageView> StreamMessage<M> {
         }
     }
 
+    /// Build a `StreamMessage` from an owned message — the supported way to
+    /// construct handler inputs in unit tests.
+    ///
+    /// Encodes `message` to wire bytes and decodes it back into the retained
+    /// zero-copy view, as the dispatcher does for a received item — but
+    /// without the wire-facing recursion and unknown-field limits, since the
+    /// input is trusted local data:
+    ///
+    /// ```rust,ignore
+    /// let item = StreamMessage::from_message(&EchoRequest {
+    ///     data: "hello".into(),
+    ///     ..Default::default()
+    /// });
+    /// let response = service.echo_stream(ctx, stream_of([item])).await?;
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// Panics if the encoded message exceeds the protobuf 2 GiB size limit
+    /// — nothing larger is decodable protobuf on any path.
+    #[must_use]
+    pub fn from_message(message: &M) -> Self {
+        let bytes = Bytes::from(buffa::Message::encode_to_vec(message));
+        // The input is trusted local data, so decode without the wire-facing
+        // recursion and unknown-field limits: a just-encoded message can
+        // legitimately exceed either (both are enforced only at decode), and
+        // failing on it here would betray the constructor's purpose. The
+        // protobuf 2 GiB size limit stays — nothing larger is decodable
+        // protobuf on any path.
+        let opts = buffa::DecodeOptions::new()
+            .with_recursion_limit(u32::MAX)
+            .with_unknown_field_limit(usize::MAX);
+        Self::from_owned_view(
+            OwnedView::decode_with_options(bytes, &opts)
+                .expect("a just-encoded message always decodes"),
+        )
+    }
+
     /// The zero-copy view of this message, borrowed from the retained buffer.
     #[must_use]
     pub fn view<'b>(&'b self) -> &'b M::View<'b>

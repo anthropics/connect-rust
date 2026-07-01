@@ -198,6 +198,45 @@ pub struct ErrorDetail {
     pub debug: Option<serde_json::Value>,
 }
 
+impl ErrorDetail {
+    /// Build a detail from a protobuf message, handling the base64 encoding
+    /// the Connect protocol requires.
+    ///
+    /// `type_name` is the message's bare fully-qualified name — e.g.
+    /// `google.rpc.RetryInfo` — which is what the Connect protocol's JSON
+    /// `type` field carries; the gRPC path prepends the standard
+    /// `type.googleapis.com/` `Any` prefix automatically (a value already
+    /// carrying a prefix is passed through unchanged on that path). The
+    /// message is encoded to protobuf wire bytes and base64'd with the
+    /// protocol's canonical unpadded-standard alphabet — prefer this over
+    /// populating [`value`](Self::value) by hand, where a wrong alphabet is
+    /// dropped from the gRPC status (with a logged warning).
+    pub fn from_message(type_name: impl Into<String>, message: &impl buffa::Message) -> Self {
+        Self {
+            type_url: type_name.into(),
+            value: Some(detail_b64::encode(&buffa::Message::encode_to_vec(message))),
+            debug: None,
+        }
+    }
+}
+
+/// The base64 form the Connect protocol uses for error-detail values:
+/// unpadded standard alphabet on encode, padding accepted on decode.
+/// Single-sourced so [`ErrorDetail::from_message`] and the gRPC status
+/// encoder can never drift apart.
+pub(crate) mod detail_b64 {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
+
+    pub(crate) fn encode(bytes: &[u8]) -> String {
+        STANDARD_NO_PAD.encode(bytes)
+    }
+
+    pub(crate) fn decode_lenient(s: &str) -> Result<Vec<u8>, base64::DecodeError> {
+        STANDARD_NO_PAD.decode(s).or_else(|_| STANDARD.decode(s))
+    }
+}
+
 /// A ConnectRPC error.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectError {

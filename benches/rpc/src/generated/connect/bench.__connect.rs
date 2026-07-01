@@ -180,7 +180,8 @@ pub const BENCH_SERVICE_LOG_UNARY_OWNED_SPEC: ::connectrpc::Spec = ::connectrpc:
 /// first.
 ///
 /// **Client-streaming and bidi requests** arrive as
-/// `ServiceStream<`[`StreamMessage<Req>`](::connectrpc::StreamMessage)`>`.
+/// [`InboundStream<Req>`](::connectrpc::InboundStream) — a
+/// `ServiceStream` of [`StreamMessage`](::connectrpc::StreamMessage)s.
 /// Each item owns its decoded buffer and is `Send + 'static`, so items
 /// can be buffered or moved into spawned tasks; read fields zero-copy
 /// through the generated accessor methods (`item.name()`) or `.view()`,
@@ -263,9 +264,7 @@ pub trait BenchService: Send + Sync + 'static {
     fn client_stream<'a>(
         &'a self,
         ctx: ::connectrpc::RequestContext,
-        requests: ::connectrpc::ServiceStream<
-            ::connectrpc::StreamMessage<crate::proto::bench::v1::BenchRequest>,
-        >,
+        requests: ::connectrpc::InboundStream<crate::proto::bench::v1::BenchRequest>,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             impl ::connectrpc::Encodable<
@@ -282,9 +281,7 @@ pub trait BenchService: Send + Sync + 'static {
     fn bidi_stream(
         &self,
         ctx: ::connectrpc::RequestContext,
-        requests: ::connectrpc::ServiceStream<
-            ::connectrpc::StreamMessage<crate::proto::bench::v1::BenchRequest>,
-        >,
+        requests: ::connectrpc::InboundStream<crate::proto::bench::v1::BenchRequest>,
     ) -> impl ::std::future::Future<
         Output = ::connectrpc::ServiceResult<
             ::connectrpc::ServiceStream<
@@ -844,7 +841,7 @@ pub struct BenchServiceClient<T> {
 impl<T> BenchServiceClient<T>
 where
     T: ::connectrpc::client::ClientTransport,
-    <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
+    <T::ResponseBody as ::connectrpc::http_body::Body>::Error: ::std::fmt::Display,
 {
     /// Create a new client with the given transport and configuration.
     pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
@@ -1124,7 +1121,8 @@ pub const ECHO_SERVICE_ECHO_SPEC: ::connectrpc::Spec = ::connectrpc::Spec::serve
 /// first.
 ///
 /// **Client-streaming and bidi requests** arrive as
-/// `ServiceStream<`[`StreamMessage<Req>`](::connectrpc::StreamMessage)`>`.
+/// [`InboundStream<Req>`](::connectrpc::InboundStream) — a
+/// `ServiceStream` of [`StreamMessage`](::connectrpc::StreamMessage)s.
 /// Each item owns its decoded buffer and is `Send + 'static`, so items
 /// can be buffered or moved into spawned tasks; read fields zero-copy
 /// through the generated accessor methods (`item.name()`) or `.view()`,
@@ -1443,7 +1441,7 @@ pub struct EchoServiceClient<T> {
 impl<T> EchoServiceClient<T>
 where
     T: ::connectrpc::client::ClientTransport,
-    <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
+    <T::ResponseBody as ::connectrpc::http_body::Body>::Error: ::std::fmt::Display,
 {
     /// Create a new client with the given transport and configuration.
     pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
@@ -1525,7 +1523,8 @@ pub const LOG_INGEST_SERVICE_INGEST_SPEC: ::connectrpc::Spec = ::connectrpc::Spe
 /// first.
 ///
 /// **Client-streaming and bidi requests** arrive as
-/// `ServiceStream<`[`StreamMessage<Req>`](::connectrpc::StreamMessage)`>`.
+/// [`InboundStream<Req>`](::connectrpc::InboundStream) — a
+/// `ServiceStream` of [`StreamMessage`](::connectrpc::StreamMessage)s.
 /// Each item owns its decoded buffer and is `Send + 'static`, so items
 /// can be buffered or moved into spawned tasks; read fields zero-copy
 /// through the generated accessor methods (`item.name()`) or `.view()`,
@@ -1846,7 +1845,7 @@ pub struct LogIngestServiceClient<T> {
 impl<T> LogIngestServiceClient<T>
 where
     T: ::connectrpc::client::ClientTransport,
-    <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
+    <T::ResponseBody as ::connectrpc::http_body::Body>::Error: ::std::fmt::Display,
 {
     /// Create a new client with the given transport and configuration.
     pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {

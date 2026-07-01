@@ -142,6 +142,31 @@ increment the patch version.
   `RespView::Owned: HasMessageView<View<'static> = RespView>` bound at
   their `.message()` call sites (buffa-generated types always satisfy
   it).
+- **Crate-root name cleanup and ergonomics fixes** from a pre-release
+  API review ([#209]):
+  - `connectrpc::UnaryResponse` at the crate root is now the client
+    response type (what generated client methods return), alongside new
+    root exports `ServerStream` and `BidiStream`. The wire-level
+    interceptor aliases previously holding those root names —
+    `UnaryRequest`, `UnaryResponse`, `StreamRequest`, `StreamResponse` —
+    are module-scoped only: import them from
+    `connectrpc::interceptor::*`.
+  - `ErrorDetail` is exported at the crate root, and
+    `ErrorDetail::from_message` builds a detail from a protobuf message,
+    handling the protocol's base64 encoding. A hand-populated
+    `ErrorDetail::value` that is not valid base64 now logs a `tracing`
+    warning when it is omitted from a gRPC status instead of vanishing
+    silently.
+  - `connectrpc` re-exports `http_body`, and generated client bounds
+    reference it through the re-export — consumers of generated code no
+    longer need a direct `http-body` dependency.
+  - `StreamMessage::from_message` and the un-hidden
+    `ServiceRequest::from_parts` are the supported way to construct
+    handler inputs in unit tests; the guide gains a "Testing handlers"
+    section.
+  - `InboundStream<M>` (= `ServiceStream<StreamMessage<M>>`) names the
+    inbound stream type in generated client-streaming/bidi handler
+    signatures.
 - **Client transport errors keep their original classification** ([#199]).
   The client call paths previously wrapped every transport `send` failure as
   `unavailable` with a `request failed:` prefix, including errors that were

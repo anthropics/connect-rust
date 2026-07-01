@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use connectrpc::{
-    RequestContext, Response, Router, ServiceRequest, ServiceResult, ServiceStream, StreamMessage,
+    InboundStream, RequestContext, Response, Router, ServiceRequest, ServiceResult, ServiceStream,
 };
 use futures::StreamExt;
 
@@ -27,12 +27,6 @@ pub mod proto {
 use proto::anthropic::connectrpc::tour::v1::*;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
-
-// Local type alias that flattens the streaming-handler signatures.
-// The verbose `Pin<Box<dyn Stream<...> + Send>>` form is what the
-// generated traits expect today; the alias is pure sugar at the
-// call site.
-type RequestStream<M> = ServiceStream<StreamMessage<M>>;
 
 /// Trivial NumberService implementation. Each method demonstrates one
 /// of the four RPC patterns.
@@ -76,7 +70,7 @@ impl NumberService for NumberServiceImpl {
     async fn sum(
         &self,
         _ctx: RequestContext,
-        mut requests: RequestStream<SumRequest>,
+        mut requests: InboundStream<SumRequest>,
     ) -> ServiceResult<SumResponse> {
         let mut total: i64 = 0;
         while let Some(req) = requests.next().await {
@@ -92,7 +86,7 @@ impl NumberService for NumberServiceImpl {
     async fn running_sum(
         &self,
         _ctx: RequestContext,
-        requests: RequestStream<RunningSumRequest>,
+        requests: InboundStream<RunningSumRequest>,
     ) -> ServiceResult<ServiceStream<RunningSumResponse>> {
         let response_stream =
             futures::stream::unfold((requests, 0i64), |(mut requests, mut total)| async move {

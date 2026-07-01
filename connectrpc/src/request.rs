@@ -52,7 +52,19 @@ pub struct ServiceRequest<'a, Req: HasMessageView> {
 impl<'a, Req: HasMessageView> ServiceRequest<'a, Req> {
     /// Assemble a request from a decoded view and the buffer it borrows from.
     ///
-    /// Called by the generated dispatch glue; not normally used directly.
+    /// Called by the generated dispatch glue; also the supported way to
+    /// construct a request for unit-testing a handler:
+    ///
+    /// ```rust,ignore
+    /// use buffa::Message;               // encode_to_vec
+    /// use buffa::view::HasMessageView;  // GreetRequest::decode_view
+    ///
+    /// let body = Bytes::from(GreetRequest { name: "ada".into(), ..Default::default() }.encode_to_vec());
+    /// let view = GreetRequest::decode_view(&body)?;
+    /// let req = ServiceRequest::<GreetRequest>::from_parts(&view, &body);
+    /// let resp = service.greet(RequestContext::new(HeaderMap::new()), req).await?;
+    /// ```
+    ///
     /// `view` must have been produced by buffa's wire decoder — that is the
     /// precondition behind [`to_owned_message`](Self::to_owned_message)'s
     /// infallibility (a hand-assembled view, e.g. one whose unknown fields
@@ -60,7 +72,6 @@ impl<'a, Req: HasMessageView> ServiceRequest<'a, Req> {
     /// `body` specifically is what makes the zero-copy `bytes`-field path
     /// apply; if the buffers don't match, conversion still succeeds —
     /// `bytes` fields are copied instead of sliced.
-    #[doc(hidden)]
     pub fn from_parts(view: &'a Req::View<'a>, body: &'a Bytes) -> Self {
         Self { view, body }
     }

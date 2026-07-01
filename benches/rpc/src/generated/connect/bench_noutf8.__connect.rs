@@ -55,7 +55,8 @@ pub const LOG_INGEST_SERVICE_INGEST_SPEC: ::connectrpc::Spec = ::connectrpc::Spe
 /// first.
 ///
 /// **Client-streaming and bidi requests** arrive as
-/// `ServiceStream<`[`StreamMessage<Req>`](::connectrpc::StreamMessage)`>`.
+/// [`InboundStream<Req>`](::connectrpc::InboundStream) — a
+/// `ServiceStream` of [`StreamMessage`](::connectrpc::StreamMessage)s.
 /// Each item owns its decoded buffer and is `Send + 'static`, so items
 /// can be buffered or moved into spawned tasks; read fields zero-copy
 /// through the generated accessor methods (`item.name()`) or `.view()`,
@@ -381,7 +382,7 @@ pub struct LogIngestServiceClient<T> {
 impl<T> LogIngestServiceClient<T>
 where
     T: ::connectrpc::client::ClientTransport,
-    <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
+    <T::ResponseBody as ::connectrpc::http_body::Body>::Error: ::std::fmt::Display,
 {
     /// Create a new client with the given transport and configuration.
     pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {

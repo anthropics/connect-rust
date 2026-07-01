@@ -497,6 +497,13 @@ pub type ServiceResult<B> = Result<Response<B>, ConnectError>;
 /// handlers that aggregate inbound messages.
 pub type ServiceStream<T> = Pin<Box<dyn Stream<Item = Result<T, ConnectError>> + Send>>;
 
+/// The inbound request stream a client/bidi-streaming handler receives:
+/// [`ServiceStream`] of [`StreamMessage`](crate::StreamMessage) items.
+///
+/// Pure sugar for the composed type — generated handler traits spell their
+/// parameters with this alias so signatures stay readable.
+pub type InboundStream<M> = ServiceStream<crate::StreamMessage<M>>;
+
 // ---------------------------------------------------------------------------
 // Encodable<M>
 // ---------------------------------------------------------------------------

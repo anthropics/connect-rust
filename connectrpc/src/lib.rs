@@ -272,6 +272,7 @@ pub use request::HasMessageView;
 pub use request::ServiceRequest;
 pub use response::Encodable;
 pub use response::EncodedResponse;
+pub use response::InboundStream;
 pub use response::MaybeBorrowed;
 pub use response::PreEncoded;
 pub use response::RequestContext;
@@ -290,6 +291,12 @@ pub mod __codegen {
 // Error types
 pub use error::ConnectError;
 pub use error::ErrorCode;
+pub use error::ErrorDetail;
+
+/// Re-export of the `http-body` crate whose [`Body`](http_body::Body) trait
+/// appears in generated client bounds — so consumers don't need their own
+/// `http-body` dependency to use generated code.
+pub use http_body;
 
 // Protocol detection
 pub use protocol::Protocol;
@@ -306,17 +313,21 @@ pub use interceptor::async_trait;
 pub use payload::AnyMessage;
 pub use payload::Payload;
 
-// RPC interceptors (unary and streaming)
+// RPC interceptors (unary and streaming). The wire-level request/response
+// aliases (interceptor::UnaryRequest and friends) stay module-scoped: at the
+// crate root those names belong to the far more common client-facing types
+// below.
 pub use interceptor::Interceptor;
 pub use interceptor::Next;
 pub use interceptor::NextStream;
 pub use interceptor::PayloadStream;
-pub use interceptor::StreamRequest;
-pub use interceptor::StreamResponse;
-pub use interceptor::UnaryRequest;
-pub use interceptor::UnaryResponse;
 pub use interceptor::streaming_interceptor;
 pub use interceptor::unary_interceptor;
+
+// Client response and stream handles (what generated client methods return)
+pub use client::BidiStream;
+pub use client::ServerStream;
+pub use client::UnaryResponse;
 
 // ============================================================================
 // Codec exports

@@ -1020,16 +1020,16 @@ fn stream_items_doc(method: &MethodDescriptorProto) -> TokenStream {
     doc
 }
 
-/// Inbound stream item type for a client-streaming / bidi RPC:
-/// `StreamMessage<Req>` keyed by the owned message.
-fn stream_item_arg(
+/// Owned message type of a client-streaming / bidi RPC's inbound items;
+/// the trait signature wraps it as `InboundStream<Req>`.
+fn stream_owned_message_type(
     resolver: &TypeResolver<'_>,
     method: &MethodDescriptorProto,
     package: &str,
 ) -> Result<TokenStream> {
     let input_fqn = method.input_type.as_deref().unwrap_or("");
     let input_owned = resolver.rust_type(input_fqn, package)?;
-    Ok(quote! { ::connectrpc::StreamMessage<#input_owned> })
+    Ok(quote! { #input_owned })
 }
 
 /// Walk every service's method input/output FQNs across `file_to_generate`
@@ -1350,7 +1350,8 @@ fn generate_service(
          call `request.to_owned_message()` (or copy the specific fields)\n\
          first.\n\n\
          **Client-streaming and bidi requests** arrive as\n\
-         `ServiceStream<`[`StreamMessage<Req>`](::connectrpc::StreamMessage)`>`.\n\
+         [`InboundStream<Req>`](::connectrpc::InboundStream) — a\n\
+         `ServiceStream` of [`StreamMessage`](::connectrpc::StreamMessage)s.\n\
          Each item owns its decoded buffer and is `Send + 'static`, so items\n\
          can be buffered or moved into spawned tasks; read fields zero-copy\n\
          through the generated accessor methods (`item.name()`) or `.view()`,\n\
@@ -1718,7 +1719,7 @@ methods (`msg.name()`) or `.view()`, or convert with `.to_owned_message()`."#
         impl<T> #client_name<T>
         where
             T: ::connectrpc::client::ClientTransport,
-            <T::ResponseBody as ::http_body::Body>::Error: ::std::fmt::Display,
+            <T::ResponseBody as ::connectrpc::http_body::Body>::Error: ::std::fmt::Display,
         {
             /// Create a new client with the given transport and configuration.
             pub fn new(transport: T, config: ::connectrpc::client::ClientConfig) -> Self {
@@ -2138,7 +2139,7 @@ fn generate_trait_method(
         // `.view()`, conversion via `.to_owned_message()`, and — for
         // echo-shaped methods — items can be forwarded as-is since
         // `StreamMessage<M>: Encodable<M>`).
-        let stream_item_arg = stream_item_arg(resolver, method, package)?;
+        let stream_owned = stream_owned_message_type(resolver, method, package)?;
         let items_doc = stream_items_doc(method);
         Ok(quote! {
             #method_doc_tokens
@@ -2147,14 +2148,14 @@ fn generate_trait_method(
             fn #method_snake<'a>(
                 &'a self,
                 ctx: ::connectrpc::RequestContext,
-                requests: ::connectrpc::ServiceStream<#stream_item_arg>,
+                requests: ::connectrpc::InboundStream<#stream_owned>,
             ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<impl ::connectrpc::Encodable<#output_type> + Send + use<'a, Self>>> + Send;
         })
     } else if client_streaming && server_streaming {
         // Bidi streaming method. Same `impl Encodable<...>` item type and
         // `use<Self>` capture clause as server streaming above; inbound items
         // are `StreamMessage<Req>` as for client streaming.
-        let stream_item_arg = stream_item_arg(resolver, method, package)?;
+        let stream_owned = stream_owned_message_type(resolver, method, package)?;
         let items_doc = stream_items_doc(method);
         Ok(quote! {
             #method_doc_tokens
@@ -2162,7 +2163,7 @@ fn generate_trait_method(
             fn #method_snake(
                 &self,
                 ctx: ::connectrpc::RequestContext,
-                requests: ::connectrpc::ServiceStream<#stream_item_arg>,
+                requests: ::connectrpc::InboundStream<#stream_owned>,
             ) -> impl ::std::future::Future<Output = ::connectrpc::ServiceResult<::connectrpc::ServiceStream<impl ::connectrpc::Encodable<#output_type> + Send + use<Self>>>> + Send;
         })
     } else {
@@ -2800,15 +2801,13 @@ mod tests {
                 >= 2,
             "unary and server-streaming should take the borrowed ServiceRequest form: {code}"
         );
-        // Client-streaming and bidi inbound items are StreamMessage<Req> keyed
+        // Client-streaming and bidi inbound items are InboundStream<Req> keyed
         // by the owned message — the alias collision is irrelevant to them.
         assert!(
-            code.matches(
-                "requests : :: connectrpc :: ServiceStream < :: connectrpc :: StreamMessage <"
-            )
-            .count()
+            code.matches("requests : :: connectrpc :: InboundStream <")
+                .count()
                 >= 2,
-            "client-streaming and bidi should both take StreamMessage items: {code}"
+            "client-streaming and bidi should both take InboundStream items: {code}"
         );
     }
 
