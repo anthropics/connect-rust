@@ -1392,20 +1392,19 @@ where
     /// struct to code that expects it, or store it in a collection.
     ///
     /// ```rust,ignore
-    /// let owned: FooResponse = client.foo(req).await?.into_owned()?;
+    /// let owned: FooResponse = client.foo(req).await?.into_owned();
     /// ```
     ///
-    /// # Errors
-    ///
-    /// Returns [`internal`](ConnectError::internal) if re-materializing the
-    /// response's preserved unknown fields fails — the owned message counts
-    /// each unknown field individually, so a response can exceed the
-    /// unknown-field allowance it was decoded under. Known fields cannot
-    /// fail: the view already validated them.
-    pub fn into_owned(self) -> Result<V::Owned, ConnectError> {
-        self.body.to_owned_message().map_err(|e| {
-            ConnectError::internal(format!("failed to convert response to owned message: {e}"))
-        })
+    /// Infallible: an [`OwnedView`] body can only be built by buffa's wire
+    /// decoder, and buffa (≥ 0.8.1) charges every unknown-field record
+    /// against the decode-time allowance, so a view that decoded
+    /// successfully re-materializes within that same allowance, and known
+    /// fields were already validated at decode.
+    #[must_use]
+    pub fn into_owned(self) -> V::Owned {
+        self.body
+            .to_owned_message()
+            .expect("wire-decoded view always converts (buffa >= 0.8.1)")
     }
 }
 
@@ -4075,21 +4074,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn into_owned_unknown_field_overflow_is_internal() {
-        use buffa::view::OwnedView;
+    fn overflow_payload_is_internal_at_response_decode() {
         use buffa_types::google::protobuf::__buffa::view::StringValueView;
 
+        // The pathological payload never reaches `into_owned` — the client's
+        // response decode boundary rejects it with the same classification
+        // the deleted fallible `into_owned` used, so the wire-visible
+        // behavior for an over-limit response is pinned here.
         let body = crate::request::tests::unknown_field_overflow_body();
-        let view: OwnedView<StringValueView<'static>> =
-            OwnedView::decode(body).expect("view decode coalesces spans");
-        let resp = UnaryResponse {
-            headers: http::HeaderMap::new(),
-            body: view,
-            trailers: http::HeaderMap::new(),
-        };
-
-        // Response-side conversion failures classify as the server's fault.
-        let err = resp.into_owned().unwrap_err();
+        let err =
+            decode_response_view::<StringValueView<'static>>(body, CodecFormat::Proto).unwrap_err();
         assert_eq!(err.code, ErrorCode::Internal);
     }
 

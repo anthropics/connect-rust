@@ -85,7 +85,7 @@ macro_rules! impl_server_reflection {
                 use futures::StreamExt;
                 let reflector = ::std::sync::Arc::clone(&self.reflector);
                 let responses = requests.map(move |request| {
-                    let request = request?.to_owned_message()?;
+                    let request = request?.to_owned_message();
                     respond(&reflector, request)
                 });
                 ::connectrpc::Response::stream_ok(responses)

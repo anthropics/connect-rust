@@ -43,8 +43,5 @@ pub async fn say(base_url: &str, sentence: String) -> Result<String, JsError> {
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    Ok(response
-        .into_owned()
-        .map_err(|e| JsError::new(&e.to_string()))?
-        .sentence)
+    Ok(response.into_owned().sentence)
 }

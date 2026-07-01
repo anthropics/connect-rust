@@ -358,11 +358,10 @@ allocating - `req.name` is a `&str` directly into the request bytes,
 and the borrow may be held across `.await` points. The request is
 borrowed from the dispatcher-owned body, so the response (and anything
 moved into `tokio::spawn`) cannot borrow from it - call
-`.to_owned_message()?` to get the owned struct when you need one. The
-conversion is fallible: re-materializing the request's preserved
-unknown fields can exceed the unknown-field allowance, and the error
-is already a `ConnectError` (`invalid_argument`), so `?` works
-directly in handlers.
+`.to_owned_message()` to get the owned struct when you need one. The
+conversion is infallible: buffa charges every unknown-field record
+against the decode-time allowance (since 0.8.1), so a request that
+decoded successfully always re-materializes.
 
 ### `RequestContext` and `Response`
 
@@ -493,7 +492,7 @@ async fn redact(
         // refcount + decode walk), then re-encode via ViewEncode.
         return Response::ok(MaybeBorrowed::Borrowed(req.to_owned_view()));
     }
-    let mut owned = req.to_owned_message()?;
+    let mut owned = req.to_owned_message();
     owned.email.clear();
     owned.ssn.clear();
     Response::ok(MaybeBorrowed::Owned(owned))
@@ -1474,10 +1473,8 @@ let msg = client.greet(req).await?.into_view();
 let greeting: &str = msg.reborrow().greeting;
 
 // Pattern 3: .into_owned() for the prost-style owned struct.
-// Allocates and copies all string/bytes fields. Fallible: rebuilding
-// the response's preserved unknown fields can exceed the
-// unknown-field allowance, surfaced as an `internal` ConnectError.
-let owned: GreetResponse = client.greet(req).await?.into_owned()?;
+// Allocates and copies all string/bytes fields.
+let owned: GreetResponse = client.greet(req).await?.into_owned();
 ```
 
 ### Custom transports

@@ -39,7 +39,7 @@ async-trait = "0.1"
 # NOTE: the `connectrpc` crate pins `buffa` directly (not `workspace = true`)
 # so its `json` cargo feature can gate `buffa/json` for proto-only builds —
 # keep that floor aligned with this one when bumping.
-buffa = { version = "0.8", features = ["json"] }
+buffa = { version = "0.8.1", features = ["json"] }
 buffa-types = { version = "0.8", features = ["json"] }
 buffa-codegen = { version = "0.8" }
 # `reflect` is needed for `DescriptorPool`, which backs connectrpc-reflection.

@@ -1215,6 +1215,18 @@ mod tests {
     }
 
     #[test]
+    fn overflow_payload_is_invalid_argument_at_decode_boundary() {
+        // The wire-visible contract behind the infallible to_owned_message:
+        // a request whose unknown fields exceed the allowance fails here,
+        // classified like any other malformed request, before any handler
+        // (and its owned conversion) runs.
+        let body = crate::request::tests::unknown_field_overflow_body();
+        let err =
+            decode_request_view::<StringValueView<'static>>(body, CodecFormat::Proto).unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
+    }
+
+    #[test]
     fn test_decode_request_view_proto() {
         let msg = StringValue::from("view-test");
         let encoded = Bytes::from(msg.encode_to_vec());

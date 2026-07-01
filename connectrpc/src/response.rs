@@ -581,14 +581,14 @@ pub fn encode_view_body<'a, V: ViewEncode<'a>>(
 /// arms — each encodes independently.
 ///
 /// ```rust,ignore
-/// async fn redact(&self, _ctx: RequestContext, req: OwnedRecordView)
+/// async fn redact(&self, _ctx: RequestContext, req: ServiceRequest<'_, Record>)
 ///     -> ServiceResult<MaybeBorrowed<Record, OwnedRecordView>>
 /// {
 ///     if req.email.is_empty() && req.ssn.is_empty() {
-///         // pass-through: re-encode straight from the request bytes
-///         return Response::ok(MaybeBorrowed::Borrowed(req));
+///         // pass-through: rebuild a 'static view from the request bytes
+///         return Response::ok(MaybeBorrowed::Borrowed(req.to_owned_view()));
 ///     }
-///     let mut owned = req.to_owned_message()?;
+///     let mut owned = req.to_owned_message();
 ///     owned.email.clear();
 ///     owned.ssn.clear();
 ///     Response::ok(MaybeBorrowed::Owned(owned))

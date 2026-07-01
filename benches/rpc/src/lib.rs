@@ -35,7 +35,7 @@ impl BenchService for BenchServiceImpl {
         _ctx: RequestContext,
         req: ServiceRequest<'_, BenchRequest>,
     ) -> ServiceResult<BenchResponse> {
-        let req = req.to_owned_message()?;
+        let req = req.to_owned_message();
         Response::ok(BenchResponse {
             payload: req.payload,
             ..Default::default()
@@ -47,7 +47,7 @@ impl BenchService for BenchServiceImpl {
         _ctx: RequestContext,
         req: ServiceRequest<'_, BenchRequest>,
     ) -> ServiceResult<ServiceStream<BenchResponse>> {
-        let req = req.to_owned_message()?;
+        let req = req.to_owned_message();
         let count = req.response_count;
         let payload = req.payload;
         let stream = futures::stream::unfold(0, move |i| {
@@ -75,7 +75,7 @@ impl BenchService for BenchServiceImpl {
     ) -> ServiceResult<BenchResponse> {
         let mut last_payload = Default::default();
         while let Some(req) = requests.next().await {
-            let req = req?.to_owned_message()?;
+            let req = req?.to_owned_message();
             last_payload = req.payload;
         }
         Response::ok(BenchResponse {
@@ -104,7 +104,7 @@ impl BenchService for BenchServiceImpl {
         req: ServiceRequest<'_, LogRequest>,
     ) -> ServiceResult<LogResponse> {
         // Same handler logic but using owned types (pre-borrowed-view path).
-        let req = req.to_owned_message()?;
+        let req = req.to_owned_message();
         let count = process_log_records_owned(&req.records);
         Response::ok(LogResponse {
             count,
@@ -119,7 +119,7 @@ impl BenchService for BenchServiceImpl {
     ) -> ServiceResult<ServiceStream<BenchResponse>> {
         // `StreamMessage` items are Send + 'static; convert to owned where the
         // response construction needs the owned payload by value.
-        let mut requests = Box::pin(requests.map(|r| r.and_then(|v| v.to_owned_message())));
+        let mut requests = Box::pin(requests.map(|r| r.map(|v| v.to_owned_message())));
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<BenchResponse, ConnectError>>(1);
         tokio::spawn(async move {
             while let Some(req) = requests.next().await {

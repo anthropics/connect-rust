@@ -207,7 +207,7 @@ impl GreetService for MyGreetService {
     ) -> ServiceResult<GreetResponse> {
         // `request` derefs to the view — string fields are borrowed `&str`
         // directly from the request buffer (zero-copy). The borrow lives for
-        // the duration of the call; use `request.to_owned_message()?` for
+        // the duration of the call; use `request.to_owned_message()` for
         // anything that must outlive it (e.g. `tokio::spawn`).
         Response::ok(GreetResponse {
             greeting: format!("Hello, {}!", request.name),

@@ -1009,7 +1009,7 @@ fn stream_items_doc(method: &MethodDescriptorProto) -> TokenStream {
         #[doc = " Each `requests` item is a [`StreamMessage`](::connectrpc::StreamMessage):"]
         #[doc = " it owns its buffer, is `Send + 'static`, and exposes zero-copy"]
         #[doc = " accessor methods (`item.name()`), `.view()`, and"]
-        #[doc = " `.to_owned_message()?`."]
+        #[doc = " `.to_owned_message()`."]
     };
     if method.input_type == method.output_type {
         doc.extend(quote! {
@@ -1347,14 +1347,14 @@ fn generate_service(
          buffer) and the borrow may be held across `.await` points. Anything\n\
          that must outlive the call — `tokio::spawn`, channels, server state,\n\
          or data captured by a returned response stream — takes owned data:\n\
-         call `request.to_owned_message()?` (or copy the specific fields)\n\
+         call `request.to_owned_message()` (or copy the specific fields)\n\
          first.\n\n\
          **Client-streaming and bidi requests** arrive as\n\
          `ServiceStream<`[`StreamMessage<Req>`](::connectrpc::StreamMessage)`>`.\n\
          Each item owns its decoded buffer and is `Send + 'static`, so items\n\
          can be buffered or moved into spawned tasks; read fields zero-copy\n\
          through the generated accessor methods (`item.name()`) or `.view()`,\n\
-         convert with `.to_owned_message()?`, or yield an item back unchanged —\n\
+         convert with `.to_owned_message()`, or yield an item back unchanged —\n\
          `StreamMessage<M>` implements `Encodable<M>`.\n\n\
          Request types resolved through `extern_path` (e.g. well-known types\n\
          from another crate) use the same wrappers; the crate that owns the\n\
@@ -1613,12 +1613,10 @@ let name: &str = resp.view().name;  // borrow into the response buffer
 ```
 
 If you need the owned struct (e.g. to store or pass by value), use
-[`into_owned()`](::connectrpc::client::UnaryResponse::into_owned) — fallible,
-since rebuilding preserved unknown fields can exceed the unknown-field
-allowance:
+[`into_owned()`](::connectrpc::client::UnaryResponse::into_owned):
 
 ```rust,ignore
-let owned = client.{example_method}(request).await?.into_owned()?;
+let owned = client.{example_method}(request).await?.into_owned();
 ```
 
 [`into_view()`](::connectrpc::client::UnaryResponse::into_view) keeps the
@@ -2122,7 +2120,7 @@ fn generate_trait_method(
             #[doc = " duration of the call (until the response stream is returned);"]
             #[doc = " message fields are read directly on it (zero-copy). Data the"]
             #[doc = " returned stream needs must be copied out or converted via"]
-            #[doc = " `.to_owned_message()?`."]
+            #[doc = " `.to_owned_message()`."]
         };
         Ok(quote! {
             #method_doc_tokens
@@ -2185,7 +2183,7 @@ fn generate_trait_method(
             #[doc = " `request` is borrowed from the request body and is valid for the"]
             #[doc = " duration of the call; message fields are read directly on it"]
             #[doc = " (zero-copy). The response cannot borrow from `request` — use"]
-            #[doc = " `.to_owned_message()?` (or copy the specific fields) for anything"]
+            #[doc = " `.to_owned_message()` (or copy the specific fields) for anything"]
             #[doc = " returned, stored, or moved into `tokio::spawn`."]
         };
         Ok(quote! {

@@ -15,8 +15,6 @@ use buffa::view::MessageView;
 use buffa::view::OwnedView;
 use bytes::Bytes;
 
-use crate::error::ConnectError;
-
 /// Re-export of buffa's view-family trait.
 ///
 /// Generated buffa code implements this for every message (when views are
@@ -55,9 +53,12 @@ impl<'a, Req: HasMessageView> ServiceRequest<'a, Req> {
     /// Assemble a request from a decoded view and the buffer it borrows from.
     ///
     /// Called by the generated dispatch glue; not normally used directly.
-    /// `view` should have been decoded from `body`: that is what makes
-    /// [`to_owned_message`](Self::to_owned_message)'s zero-copy `bytes`-field
-    /// path apply. If the buffers don't match, conversion still succeeds —
+    /// `view` must have been produced by buffa's wire decoder — that is the
+    /// precondition behind [`to_owned_message`](Self::to_owned_message)'s
+    /// infallibility (a hand-assembled view, e.g. one whose unknown fields
+    /// were pushed via buffa's `push_raw`, can make it panic). Decoding from
+    /// `body` specifically is what makes the zero-copy `bytes`-field path
+    /// apply; if the buffers don't match, conversion still succeeds —
     /// `bytes` fields are copied instead of sliced.
     #[doc(hidden)]
     pub fn from_parts(view: &'a Req::View<'a>, body: &'a Bytes) -> Self {
@@ -79,21 +80,21 @@ impl<'a, Req: HasMessageView> ServiceRequest<'a, Req> {
     /// possible; string and repeated fields are allocated. Use this for data
     /// that must outlive the handler call.
     ///
-    /// # Errors
+    /// Infallible for dispatcher-built requests: buffa (≥ 0.8.1) charges
+    /// every unknown-field record against the decode-time allowance, so any
+    /// view the dispatcher decoded successfully re-materializes within that
+    /// same allowance, and known fields were already validated at decode.
     ///
-    /// Returns [`invalid_argument`](ConnectError::invalid_argument) if
-    /// re-materializing the request's preserved unknown fields fails — the
-    /// owned message counts each unknown field individually, so a request
-    /// can exceed the unknown-field allowance it was decoded under. Known
-    /// fields cannot fail: the view already validated them.
-    pub fn to_owned_message(&self) -> Result<Req, ConnectError> {
+    /// # Panics
+    ///
+    /// Panics if the view was not produced by buffa's wire decoder (see
+    /// [`from_parts`](Self::from_parts)); unreachable through the generated
+    /// dispatch glue.
+    #[must_use]
+    pub fn to_owned_message(&self) -> Req {
         self.view
             .to_owned_from_source(Some(self.body))
-            .map_err(|e| {
-                ConnectError::invalid_argument(format!(
-                    "failed to convert request to owned message: {e}"
-                ))
-            })
+            .expect("wire-decoded view always converts (buffa >= 0.8.1)")
     }
 
     /// The request body as protobuf wire bytes.
@@ -198,7 +199,7 @@ pub(crate) mod tests {
         let view = StringValueView::decode_view(&body).unwrap();
         let req = ServiceRequest::<StringValue>::from_parts(&view, &body);
 
-        let owned: StringValue = req.to_owned_message().unwrap();
+        let owned: StringValue = req.to_owned_message();
         assert_eq!(owned.value, "keep me");
         assert_eq!(req.bytes().as_ref(), body.as_ref());
 
@@ -214,30 +215,54 @@ pub(crate) mod tests {
         assert_eq!(format!("{req:?}"), format!("{copy:?}"));
     }
 
-    /// A payload whose unknown fields decode fine as a view (coalesced into
-    /// one span) but exceed the per-field allowance when re-materialized by
-    /// `to_owned_message` — the buffa 0.8 failure mode this API surfaces.
-    pub(crate) fn unknown_field_overflow_body() -> Bytes {
+    /// A `StringValue` payload followed by `records` contiguous unknown
+    /// wire records (field 15, varint 0 — two bytes each), which the view
+    /// decoder coalesces into a single span. The infallible conversion
+    /// contract rests on decode-time and replay-time accounting agreeing
+    /// for exactly this shape.
+    pub(crate) fn body_with_unknown_records(records: usize) -> Bytes {
         let mut bytes = StringValue {
             value: "known".into(),
             ..Default::default()
         }
         .encode_to_vec();
-        // Field 15, varint 0 — two bytes per unknown field, one past the
-        // default allowance.
-        for _ in 0..=buffa::DEFAULT_UNKNOWN_FIELD_LIMIT {
-            bytes.extend_from_slice(&[0x78, 0x00]);
-        }
+        bytes.extend([0x78, 0x00].repeat(records));
         Bytes::from(bytes)
     }
 
-    #[test]
-    fn to_owned_message_unknown_field_overflow_is_invalid_argument() {
-        let body = unknown_field_overflow_body();
-        let view = StringValueView::decode_view(&body).expect("view decode coalesces spans");
-        let req = ServiceRequest::<StringValue>::from_parts(&view, &body);
+    /// One more unknown record than the default allowance — must be
+    /// rejected at the decode boundary, never at owned conversion.
+    pub(crate) fn unknown_field_overflow_body() -> Bytes {
+        body_with_unknown_records(buffa::DEFAULT_UNKNOWN_FIELD_LIMIT + 1)
+    }
 
-        let err = req.to_owned_message().unwrap_err();
-        assert_eq!(err.code, crate::ErrorCode::InvalidArgument);
+    #[test]
+    fn unknown_field_overflow_is_rejected_at_decode() {
+        let body = unknown_field_overflow_body();
+        assert!(matches!(
+            StringValueView::decode_view(&body),
+            Err(buffa::DecodeError::UnknownFieldLimitExceeded)
+        ));
+    }
+
+    #[test]
+    fn unknown_fields_at_exact_allowance_convert_infallibly() {
+        // Boundary pin for the infallible signature: a payload accepted at
+        // the decode limit must also convert. Uses a small explicit limit so
+        // the boundary is exercised exactly without a multi-megabyte body.
+        use buffa::view::HasMessageView;
+        let opts = buffa::DecodeOptions::new().with_unknown_field_limit(4);
+        let body = body_with_unknown_records(4);
+        let view =
+            StringValue::decode_view_with_options(&body, &opts).expect("exactly at the allowance");
+        let req = ServiceRequest::<StringValue>::from_parts(&view, &body);
+        assert_eq!(req.to_owned_message().value, "known");
+
+        // One more record and the decode boundary rejects it instead.
+        let over = body_with_unknown_records(5);
+        assert!(matches!(
+            StringValue::decode_view_with_options(&over, &opts),
+            Err(buffa::DecodeError::UnknownFieldLimitExceeded)
+        ));
     }
 }
