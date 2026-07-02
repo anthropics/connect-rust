@@ -97,6 +97,17 @@ tasks:
         sh: uname -s | sed 's/Linux/linux/;s/Darwin/darwin/'
       CHANGIE_ARCH:
         sh: uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/'
+      # Per-platform SHA-256 from the release's checksums.txt, pinned so a
+      # tampered or substituted asset fails closed before extraction.
+      CHANGIE_SHA256:
+        sh: |
+          case "{{.CHANGIE_OS}}_{{.CHANGIE_ARCH}}" in
+            linux_amd64)  echo 31535a9d8dc548d6d8f315762bfd5b1fba34e707b7600748c8bb8a609649007d ;;
+            linux_arm64)  echo c21bf5509c3cd6e86e0f290b497a12bed52849c40566d171c5d1cbdef19b156c ;;
+            darwin_amd64) echo c0e08369c501181fab579c9f40a3d53144f7cc6754c56bff4c7f72949afe57b3 ;;
+            darwin_arm64) echo 88bd40117ec48da017e030754f3ba9bcaa91a0e67cfcaaa9d0d02bf54db3a156 ;;
+            *) echo "unsupported platform" >&2; exit 1 ;;
+          esac
     status:
       - .local/bin/changie --version 2>/dev/null | grep -qF "v{{.CHANGIE_VERSION}}"
     preconditions:
@@ -106,8 +117,11 @@ tasks:
       - mkdir -p .local/bin
       - gh release download 'v{{.CHANGIE_VERSION}}'
           --repo miniscruff/changie
-          --pattern 'changie_*_{{.CHANGIE_OS}}_{{.CHANGIE_ARCH}}.tar.gz'
-          --output - | tar -xz -C .local/bin changie
+          --pattern 'changie_{{.CHANGIE_VERSION}}_{{.CHANGIE_OS}}_{{.CHANGIE_ARCH}}.tar.gz'
+          --output .local/changie.tar.gz --clobber
+      - echo '{{.CHANGIE_SHA256}}  .local/changie.tar.gz' | { sha256sum -c - 2>/dev/null || shasum -a 256 -c -; }
+      - tar -xzf .local/changie.tar.gz -C .local/bin changie
+      - rm .local/changie.tar.gz
       - .local/bin/changie --version
 
   changelog-new:
