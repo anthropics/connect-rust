@@ -21,6 +21,33 @@ mod tests {
 
     const MSG_DELAY: Duration = Duration::from_millis(100);
 
+    /// Regression pin for issue #214: the `message()` futures must be `Send`
+    /// with CONCRETE generated view types, not just generic parameters — the
+    /// pre-fix bound shape (projecting `RespView::Owned` in the where-clause)
+    /// compiled generically but lost `Send` on monomorphization via rustc's
+    /// coroutine-witness auto-trait check. Compile-time-only assertion; never
+    /// called.
+    #[allow(dead_code)]
+    fn stream_message_futures_are_send<B>(
+        mut server_stream: connectrpc::client::ServerStream<B, EchoResponseView<'static>>,
+        mut bidi: connectrpc::client::BidiStream<B, EchoRequest, EchoResponseView<'static>>,
+    ) where
+        B: connectrpc::http_body::Body<Data = bytes::Bytes> + Send + Unpin + 'static,
+        B::Error: std::fmt::Display,
+    {
+        fn assert_send<T: Send>(_: T) {}
+        // The async-block wrappers are load-bearing: asserting the bare
+        // `message()` future is Send passes even with the buggy bound —
+        // the failure only manifests in the ENCLOSING coroutine's witness,
+        // i.e. exactly the `tokio::spawn(async move { .. })` shape users hit.
+        assert_send(async move {
+            let _ = server_stream.message().await;
+        });
+        assert_send(async move {
+            let _ = bidi.message().await;
+        });
+    }
+
     /// Test echo service that echoes messages back with configurable delays.
     struct TestEchoService;
 

@@ -2401,11 +2401,15 @@ where
     /// matching grpc-go's treatment of each case. A Trailers-Only response
     /// carrying `grpc-status: 0` in the headers (empty body) is a clean
     /// end.
-    pub async fn message(
-        &mut self,
-    ) -> Result<Option<crate::StreamMessage<RespView::Owned>>, ConnectError>
+    pub async fn message<M>(&mut self) -> Result<Option<crate::StreamMessage<M>>, ConnectError>
     where
-        RespView::Owned: HasMessageView<View<'static> = RespView>,
+        // `M` is an output parameter pinned to `RespView`'s owned message —
+        // spelled this way round (rather than bounding `RespView::Owned`
+        // directly) so the future stays `Send` for concrete generated view
+        // types: projecting through the GAT in the bound trips rustc's
+        // coroutine-witness auto-trait check (#214).
+        RespView: MessageView<'static, Owned = M>,
+        M: HasMessageView<View<'static> = RespView>,
     {
         // The outcome is immutable once reported: replay the terminal
         // record without re-entering the body.
@@ -3139,11 +3143,12 @@ where
     /// server error carried in the termination metadata is returned as
     /// `Err`, sticky across calls — see [`ServerStream::message()`] for the
     /// full contract.
-    pub async fn message(
-        &mut self,
-    ) -> Result<Option<crate::StreamMessage<RespView::Owned>>, ConnectError>
+    pub async fn message<M>(&mut self) -> Result<Option<crate::StreamMessage<M>>, ConnectError>
     where
-        RespView::Owned: HasMessageView<View<'static> = RespView>,
+        // Same output-parameter shape as `ServerStream::message` — see the
+        // bound comment there (#214).
+        RespView: MessageView<'static, Owned = M>,
+        M: HasMessageView<View<'static> = RespView>,
     {
         // If we already failed during construction or first await, return that.
         if let Some(ref err) = self.construct_err {
